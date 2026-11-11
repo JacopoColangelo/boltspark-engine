@@ -1,0 +1,29 @@
+# Normalize line endings and file types for the Boltspark repository.
+
+# Text sources: normalize to LF in the repo, check out native on Windows.
+*.hx     text
+*.hxml   text
+*.md     text
+*.txt    text
+*.json   text
+*.ps1    text
+*.xml    text
+
+# Windows batch files must keep CRLF.
+*.bat    text eol=crlf
+
+# Binary assets — never normalize.
+*.hl     binary
+*.hdll   binary
+*.dll    binary
+*.exe    binary
+*.lib    binary
+*.pdb    binary
+*.png    binary
+*.jpg    binary
+*.dds    binary
+*.fbx    binary
+*.envd   binary
+*.fnt    binary
+*.zip    binary
+*.gz     binary

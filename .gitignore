@@ -1,0 +1,10 @@
+/bin/*
+!/bin/.gitkeep
+/.haxelib/
+*.hl
+*.hdll
+*.dll
+*.so
+*.dylib
+*.pdb
+*.log
