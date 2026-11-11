@@ -2,7 +2,6 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
-import boltspark.ui.UiSurface;
 
 /**
  * Numeric stepper widget: [-] value [+].
@@ -22,7 +21,7 @@ class Stepper extends h2d.Object {
     final minus:UiButton;
     final plus:UiButton;
     final valueInput:h2d.TextInput;
-    final fieldBackground:UiSurface;
+    final fieldBackground:FieldSurface;
     final format:Float->String;
     var width:Float;
     final height:Float;
@@ -41,7 +40,7 @@ class Stepper extends h2d.Object {
         this.format = format;
 
         var buttonSize = h;
-        fieldBackground = new UiSurface(ctx, this);
+        fieldBackground = new FieldSurface(this);
         minus = new UiButton(ctx, "-", buttonSize, h, this);
         minus.setQuiet();
         minus.onClick = function() {
@@ -166,7 +165,6 @@ class Stepper extends h2d.Object {
     function updateFieldStyle():Void {
         fieldBackground.setStyle(
             fieldFocused ? Theme.FIELD_FOCUS : Theme.FIELD_BG,
-            fieldFocused ? Theme.ACCENT : Theme.BORDER,
-            0);
+            fieldFocused ? Theme.ACCENT : Theme.BORDER);
     }
 }

@@ -23,6 +23,8 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] 3D cube appears in the 3D scene using the Heaps DX12 driver (`bin/m0_window.png`, `bin/m0_input_test.png`).
 - [x] Cube visibly rotates without application logic errors (rotation rate editable live from the inspector stepper).
 - [x] H2D editor chrome appears over the bounded 3D viewport (top bar, hierarchy, inspector, console, status bar).
+- [x] Compact flat editor styling renders in the native DX12 window with square-edged controls, continuous inspector sections, and no legacy rounded-surface texture (`bin/ui-compact-editor.png`).
+- [x] The native release keeps the compact hierarchy, viewport, inspector, and console aligned after a live resize to 1280x800 (`bin/ui-compact-release-1280.png`).
 - [x] 3D content is clipped to the viewport rectangle by the render zone, aligned with the editor panels.
 - [x] Clicking the sample cube selects it from the viewport; clicking empty viewport space clears hierarchy selection.
 - [x] Create multiple cubes, select and rename them from the hierarchy, and verify inspector edits stay with the selected object.
@@ -39,6 +41,7 @@ Evidence files are under `bin/` unless noted otherwise.
 ## Input
 
 - [x] Toolbar object creation and hierarchy context-menu entry both open the game-object palette.
+- [x] The restyled Add control opens the square-edged game-object palette and preserves its click target (`bin/ui-compact-palette.png`).
 - [x] Clicking the palette Cube creates a hierarchy object; dragging Cube into the viewport creates and selects it.
 - [x] Ctrl-click selects multiple hierarchy objects; Delete removes all selected objects and clears the inspector selection.
 - [x] A long hierarchy shows a scrollbar without listing editor/debug controls among scene objects.

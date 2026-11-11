@@ -22,8 +22,8 @@ import boltspark.ui.widgets.UiButton;
  * the same DX12 window as the scene; there is no browser or foreign UI layer.
  */
 class EditorShell {
-    static inline var HIERARCHY_ROW_HEIGHT:Int = 26;
-    static inline var INSPECTOR_ROW_HEIGHT:Int = 30;
+    static inline var HIERARCHY_ROW_HEIGHT:Int = 22;
+    static inline var INSPECTOR_ROW_HEIGHT:Int = 28;
 
     final ctx:UiContext;
     final input:InputAdapter;
@@ -68,6 +68,7 @@ class EditorShell {
     final objectNameField:TextInputField;
 
     final transformSection:InspectorSection;
+    final transformLabel:h2d.Text;
     final transformFields:Array<AxisValue> = [];
 
     final behaviorSection:InspectorSection;
@@ -156,25 +157,25 @@ class EditorShell {
 
         for (menuName in ["File", "Edit", "Scene", "Window", "Help"]) {
             var menuWidth = switch (menuName) {
-                case "Scene": 60;
-                case "Window": 70;
-                default: 52;
+                case "Scene": 52;
+                case "Window": 68;
+                default: menuName == "Help" ? 46 : 44;
             };
-            var button = new UiButton(ctx, menuName, menuWidth, 26, root);
+            var button = new UiButton(ctx, menuName, menuWidth, 24, root);
             button.setQuiet();
             button.onClick = function() log(menuName + " menu: command surface reserved");
             menuButtons.push(button);
         }
 
         // Main toolbar.
-        addObjectButton = new UiButton(ctx, "Add", 100, 32, root);
+        addObjectButton = new UiButton(ctx, "Add", 78, 28, root);
         addObjectButton.setIcon(Add).setPrimary();
         addObjectButton.onClick = function() {
             if (viewportRect != null) {
-                palette.toggleAt(addObjectButton.x, addObjectButton.y + 36, viewportRect);
+                palette.toggleAt(addObjectButton.x, addObjectButton.y + 31, viewportRect);
             }
         };
-        deleteObjectsButton = new UiButton(ctx, "Delete", 104, 32, root);
+        deleteObjectsButton = new UiButton(ctx, "Delete", 88, 28, root);
         deleteObjectsButton.setIcon(Trash).setDanger();
         deleteObjectsButton.visible = false;
         deleteObjectsButton.onClick = deleteSelection;
@@ -182,7 +183,7 @@ class EditorShell {
         var transformKinds:Array<UiIconKind> = [Move, Rotate, Scale];
         var transformNames = ["Move", "Rotate", "Scale"];
         for (index in 0...transformKinds.length) {
-            var modeButton = new UiButton(ctx, "", 34, 32, root);
+            var modeButton = new UiButton(ctx, "", 28, 28, root);
             modeButton.setIcon(transformKinds[index]).setQuiet().setSelected(index == 0);
             var capturedIndex = index;
             modeButton.onClick = function() {
@@ -197,7 +198,7 @@ class EditorShell {
             {kind: Pause, name: "Pause"},
             {kind: Stop, name: "Stop"}
         ]) {
-            var transportButton = new UiButton(ctx, "", 36, 32, root);
+            var transportButton = new UiButton(ctx, "", 30, 28, root);
             transportButton.setIcon(transport.kind).setQuiet();
             var command = transport.name;
             transportButton.onClick = function() log(command + " mode is reserved for the runtime milestone");
@@ -206,7 +207,7 @@ class EditorShell {
 
         // Hierarchy header, search, and rows.
         hierarchyTitleIcon = new h2d.Graphics(leftContentMask);
-        UiIcons.draw(hierarchyTitleIcon, Hierarchy, 0, 0, 17, Theme.TEXT_SECONDARY);
+        UiIcons.draw(hierarchyTitleIcon, Hierarchy, 0, 0, 14, Theme.TEXT_SECONDARY);
         hierarchyTitle = new h2d.Text(ctx.semiboldFont, leftContentMask);
         hierarchyTitle.text = "Scene Hierarchy";
         hierarchyTitle.textColor = Theme.TEXT;
@@ -214,12 +215,12 @@ class EditorShell {
         hierarchyCount = new h2d.Text(ctx.captionFont, leftContentMask);
         hierarchyCount.textColor = Theme.MUTED;
         hierarchyCount.lineBreak = false;
-        hierarchyAddButton = new UiButton(ctx, "", 26, 26, leftContentMask);
+        hierarchyAddButton = new UiButton(ctx, "", 24, 24, leftContentMask);
         hierarchyAddButton.setIcon(Add).setQuiet();
         hierarchyAddButton.onClick = function() {
             if (onCreateObject != null) onCreateObject();
         };
-        hierarchySearch = new SearchField(ctx, "Search Entities", 100, 26, leftContentMask);
+        hierarchySearch = new SearchField(ctx, "Search Entities", 100, 24, leftContentMask);
         hierarchySearch.onChange = function(value) applyHierarchyFilter(value);
 
         hierarchyHit = new h2d.Interactive(1, 1, leftContentMask);
@@ -243,7 +244,7 @@ class EditorShell {
 
         // Inspector panel header.
         inspectorTitleIcon = new h2d.Graphics(rightContentMask);
-        UiIcons.draw(inspectorTitleIcon, Sliders, 0, 0, 17, Theme.TEXT_SECONDARY);
+        UiIcons.draw(inspectorTitleIcon, Sliders, 0, 0, 14, Theme.TEXT_SECONDARY);
         inspectorTitle = new h2d.Text(ctx.semiboldFont, rightContentMask);
         inspectorTitle.text = "Inspector";
         inspectorTitle.textColor = Theme.TEXT;
@@ -270,6 +271,10 @@ class EditorShell {
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
 
         transformSection = new InspectorSection(ctx, "Transform", inspectorContentMask);
+        transformLabel = new h2d.Text(ctx.font, transformSection.content);
+        transformLabel.text = "Position";
+        transformLabel.textColor = Theme.TEXT_SECONDARY;
+        transformLabel.lineBreak = false;
         var axisNames = ["X", "Y", "Z"];
         var axisColors = [Theme.AXIS_X, Theme.AXIS_Y, Theme.AXIS_Z];
         for (index in 0...axisNames.length) {
@@ -308,7 +313,7 @@ class EditorShell {
         colorLabel.lineBreak = false;
         colorRow = new SwatchPicker(ctx,
             [Theme.CUBE_ORANGE, Theme.CUBE_STEEL, Theme.CUBE_MOSS, Theme.CUBE_VIOLET],
-            22, 8, materialSection.content);
+            18, 6, materialSection.content);
         colorRow.onColorChanged = function(color:Int) {
             if (onColorChanged != null) onColorChanged(color);
         };
@@ -327,24 +332,24 @@ class EditorShell {
         // Subtle viewport HUD drawn above the scene but below popups.
         viewportHud = new h2d.Object(root);
         viewportModeSurface = new UiSurface(ctx, viewportHud);
-        viewportModeSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0.25);
-        viewportModeSurface.setSize(148, 28);
+        viewportModeSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
+        viewportModeSurface.setSize(134, 24);
         viewportModeIcon = new h2d.Graphics(viewportHud);
-        UiIcons.draw(viewportModeIcon, Grid, 0, 0, 14, Theme.TEXT_SECONDARY);
-        viewportModeIcon.x = 9;
-        viewportModeIcon.y = 7;
+        UiIcons.draw(viewportModeIcon, Grid, 0, 0, 12, Theme.TEXT_SECONDARY);
+        viewportModeIcon.x = 7;
+        viewportModeIcon.y = 6;
         viewportModeText = new h2d.Text(ctx.captionFont, viewportHud);
         viewportModeText.text = "PERSPECTIVE  ·  LIT";
         viewportModeText.textColor = Theme.TEXT_SECONDARY;
         viewportModeText.lineBreak = false;
-        viewportModeText.x = 31;
-        viewportModeText.y = 6;
+        viewportModeText.x = 25;
+        viewportModeText.y = 4;
 
         viewportHintSurface = new UiSurface(ctx, viewportHud);
-        viewportHintSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0.25);
-        viewportHintSurface.setSize(98, 28);
+        viewportHintSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
+        viewportHintSurface.setSize(80, 24);
         viewportHintIcon = new h2d.Graphics(viewportHud);
-        UiIcons.draw(viewportHintIcon, Move, 0, 0, 14, Theme.TEXT_SECONDARY);
+        UiIcons.draw(viewportHintIcon, Move, 0, 0, 12, Theme.TEXT_SECONDARY);
         viewportHintText = new h2d.Text(ctx.captionFont, viewportHud);
         viewportHintText.text = "LOCAL";
         viewportHintText.textColor = Theme.TEXT_SECONDARY;
@@ -354,7 +359,7 @@ class EditorShell {
 
         statusDot = new h2d.Graphics(root);
         statusDot.beginFill(Theme.SUCCESS);
-        statusDot.drawCircle(4, 4, 4, 12);
+        statusDot.drawCircle(3, 3, 3, 10);
         statusDot.endFill();
         statusText = new h2d.Text(ctx.captionFont, root);
         statusText.text = "Ready";
@@ -415,16 +420,24 @@ class EditorShell {
     function drawBrandMark():Void {
         brandMark.clear();
         brandMark.beginFill(Theme.BRAND);
-        brandMark.drawRoundedRect(0, 0, 22, 22, 6, 5);
+        brandMark.moveTo(0, 4);
+        brandMark.lineTo(4, 0);
+        brandMark.lineTo(17, 0);
+        brandMark.lineTo(21, 4);
+        brandMark.lineTo(21, 17);
+        brandMark.lineTo(17, 21);
+        brandMark.lineTo(4, 21);
+        brandMark.lineTo(0, 17);
+        brandMark.lineTo(0, 4);
         brandMark.endFill();
         brandMark.beginFill(0x161A20);
-        brandMark.moveTo(12, 3);
-        brandMark.lineTo(6, 12);
-        brandMark.lineTo(11, 12);
-        brandMark.lineTo(9, 20);
-        brandMark.lineTo(17, 9);
-        brandMark.lineTo(12, 9);
-        brandMark.lineTo(12, 3);
+        brandMark.moveTo(11, 2);
+        brandMark.lineTo(5, 11);
+        brandMark.lineTo(10, 11);
+        brandMark.lineTo(8, 19);
+        brandMark.lineTo(16, 8);
+        brandMark.lineTo(11, 8);
+        brandMark.lineTo(11, 2);
         brandMark.endFill();
     }
 
@@ -452,7 +465,7 @@ class EditorShell {
 
     public function update(dt:Float):Void {
         if (ctx.width != lastWidth || ctx.height != lastHeight) resize();
-        if (inputStatus.visible) inputStatus.x = Math.max(0, ctx.width - inputStatus.textWidth - 16);
+        if (inputStatus.visible) inputStatus.x = Math.max(0, ctx.width - inputStatus.textWidth - 10);
     }
 
     public function resize():Void {
@@ -493,31 +506,31 @@ class EditorShell {
         layoutHierarchy(leftWidth, bodyTop);
         layoutInspector(rightWidth, bodyTop);
 
-        console.x = geometry.console.x + 8;
-        console.y = geometry.console.y + 5;
-        console.layout(Math.max(0, geometry.console.width - 16),
-            Math.max(0, geometry.console.height - 10));
+        console.x = geometry.console.x;
+        console.y = geometry.console.y;
+        console.layout(Math.max(0, geometry.console.width),
+            Math.max(0, geometry.console.height));
 
         viewportHud.visible = geometry.viewport.width >= 290 && geometry.viewport.height >= 80;
-        viewportHud.x = geometry.viewport.x + 12;
-        viewportHud.y = geometry.viewport.y + 12;
-        viewportHintSurface.x = Math.max(156, geometry.viewport.width - 122);
-        viewportHintIcon.x = viewportHintSurface.x + 10;
-        viewportHintIcon.y = 7;
-        viewportHintText.x = viewportHintSurface.x + 33;
-        viewportHintText.y = 6;
+        viewportHud.x = geometry.viewport.x + 8;
+        viewportHud.y = geometry.viewport.y + 8;
+        viewportHintSurface.x = Math.max(142, geometry.viewport.width - 88);
+        viewportHintIcon.x = viewportHintSurface.x + 7;
+        viewportHintIcon.y = 6;
+        viewportHintText.x = viewportHintSurface.x + 25;
+        viewportHintText.y = 4;
 
         var statusY = height - Theme.STATUS_BAR_HEIGHT;
-        statusDot.x = 12;
-        statusDot.y = statusY + 9;
-        statusText.x = 26;
-        statusText.y = statusY + 4;
-        rendererStatus.x = 92;
-        rendererStatus.y = statusY + 4;
+        statusDot.x = 8;
+        statusDot.y = statusY + 7;
+        statusText.x = 18;
+        statusText.y = statusY + 2;
+        rendererStatus.x = 70;
+        rendererStatus.y = statusY + 2;
         inputStatus.visible = width >= 930;
         if (inputStatus.visible) {
-            inputStatus.x = Math.max(0, width - inputStatus.textWidth - 16);
-            inputStatus.y = statusY + 4;
+            inputStatus.x = Math.max(0, width - inputStatus.textWidth - 10);
+            inputStatus.y = statusY + 2;
         }
     }
 
@@ -539,9 +552,17 @@ class EditorShell {
         chrome.endFill();
         chrome.beginFill(Theme.PANEL_HEADER);
         chrome.drawRect(geometry.leftPanel.x, geometry.leftPanel.y,
-            geometry.leftPanel.width, 43);
+            geometry.leftPanel.width, Theme.PANEL_HEADER_HEIGHT);
         chrome.drawRect(geometry.rightPanel.x, geometry.rightPanel.y,
-            geometry.rightPanel.width, 63);
+            geometry.rightPanel.width, Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT);
+        chrome.endFill();
+        // Active dock tabs use the same restrained top marker as desktop DCC
+        // editors, rather than rounded floating panel cards.
+        chrome.beginFill(Theme.ACCENT);
+        chrome.drawRect(geometry.leftPanel.x, geometry.leftPanel.y,
+            Math.min(112, geometry.leftPanel.width), 2);
+        chrome.drawRect(geometry.rightPanel.x, geometry.rightPanel.y,
+            Math.min(88, geometry.rightPanel.width), 2);
         chrome.endFill();
         chrome.beginFill(Theme.TITLE_BAR);
         chrome.drawRect(0, height - Theme.STATUS_BAR_HEIGHT, width, Theme.STATUS_BAR_HEIGHT);
@@ -552,6 +573,14 @@ class EditorShell {
         chrome.lineTo(width, Theme.TITLE_BAR_HEIGHT);
         chrome.moveTo(0, Theme.TOP_BAR_HEIGHT);
         chrome.lineTo(width, Theme.TOP_BAR_HEIGHT);
+        chrome.moveTo(geometry.leftPanel.x,
+            geometry.leftPanel.y + Theme.PANEL_HEADER_HEIGHT - 0.5);
+        chrome.lineTo(geometry.leftPanel.x + geometry.leftPanel.width,
+            geometry.leftPanel.y + Theme.PANEL_HEADER_HEIGHT - 0.5);
+        chrome.moveTo(geometry.rightPanel.x,
+            geometry.rightPanel.y + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT - 0.5);
+        chrome.lineTo(geometry.rightPanel.x + geometry.rightPanel.width,
+            geometry.rightPanel.y + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT - 0.5);
         chrome.moveTo(0, height - Theme.STATUS_BAR_HEIGHT);
         chrome.lineTo(width, height - Theme.STATUS_BAR_HEIGHT);
         chrome.drawRect(geometry.viewport.x, geometry.viewport.y,
@@ -560,86 +589,87 @@ class EditorShell {
     }
 
     function layoutTopBars(width:Float):Void {
-        brandMark.x = 13;
-        brandMark.y = 7;
-        appTitle.x = 44;
-        appTitle.y = 6;
+        brandMark.x = 9;
+        brandMark.y = 5;
+        appTitle.x = 37;
+        appTitle.y = 3;
 
-        var menuX = 152.0;
+        var menuX = 142.0;
         for (index in 0...menuButtons.length) {
             var button = menuButtons[index];
             button.x = menuX;
-            button.y = 5;
-            button.visible = width > menuX + 90;
+            button.y = 3;
+            button.visible = width > menuX + 78;
             menuX += switch (index) {
-                case 2: 62;
-                case 3: 72;
-                default: 54;
+                case 2: 54;
+                case 3: 70;
+                case 4: 48;
+                default: 46;
             };
         }
         projectTitle.visible = width >= 860;
         projectTitle.x = Math.max(menuX + 10, width - projectTitle.textWidth - 16);
-        projectTitle.y = 8;
+        projectTitle.y = 5;
 
-        var toolbarY = Theme.TITLE_BAR_HEIGHT + 7;
-        addObjectButton.x = 12;
+        var toolbarY = Theme.TITLE_BAR_HEIGHT + 4;
+        addObjectButton.x = 8;
         addObjectButton.y = toolbarY;
-        deleteObjectsButton.x = 120;
+        deleteObjectsButton.x = 92;
         deleteObjectsButton.y = toolbarY;
         deleteObjectsButton.visible = selectedObjectIds.length > 0;
         deleteObjectsButton.setText(selectedObjectIds.length > 1
             ? 'Delete (${selectedObjectIds.length})' : "Delete");
 
-        var toolX = deleteObjectsButton.visible ? 236.0 : 128.0;
+        var toolX = deleteObjectsButton.visible ? 186.0 : 94.0;
         for (button in transformButtons) {
             button.x = toolX;
             button.y = toolbarY;
-            toolX += 38;
+            toolX += 31;
         }
-        var transportX = Math.max(toolX + 20, width * 0.5 - 58);
+        var transportX = Math.max(toolX + 16, width * 0.5 - 48);
         for (button in transportButtons) {
             button.x = transportX;
             button.y = toolbarY;
             button.visible = width > 620;
-            transportX += 40;
+            transportX += 33;
         }
     }
 
     function layoutHierarchy(leftWidth:Float, bodyTop:Float):Void {
-        hierarchyTitleIcon.x = 14;
-        hierarchyTitleIcon.y = bodyTop + 13;
-        hierarchyTitle.x = 40;
-        hierarchyTitle.y = bodyTop + 9;
+        hierarchyTitleIcon.x = 8;
+        hierarchyTitleIcon.y = bodyTop + 9;
+        hierarchyTitle.x = 29;
+        hierarchyTitle.y = bodyTop + 6;
         hierarchyCount.text = hierarchyFilter.length == 0
             ? Std.string(allHierarchyEntries.length)
             : visibleHierarchyEntries.length + "/" + allHierarchyEntries.length;
-        hierarchyCount.x = Math.max(42, leftWidth - hierarchyCount.textWidth - 15);
-        hierarchyCount.y = bodyTop + 12;
+        hierarchyCount.x = Math.max(42, leftWidth - hierarchyCount.textWidth - 9);
+        hierarchyCount.y = bodyTop + 8;
 
-        hierarchySearch.x = 46;
-        hierarchySearch.y = bodyTop + 51;
-        hierarchySearch.setWidth(Math.max(0, leftWidth - 58));
-        hierarchyAddButton.x = 12;
-        hierarchyAddButton.y = bodyTop + 51;
+        hierarchySearch.x = 34;
+        hierarchySearch.y = bodyTop + 37;
+        hierarchySearch.setWidth(Math.max(0, leftWidth - 40));
+        hierarchyAddButton.x = 6;
+        hierarchyAddButton.y = bodyTop + 37;
         hierarchyAddButton.visible = leftWidth >= 180;
-        hierarchyHit.x = 8;
-        hierarchyHit.y = bodyTop + 91;
-        hierarchyHit.width = Math.max(0, leftWidth - 22);
+        hierarchyHit.x = 0;
+        hierarchyHit.y = bodyTop + 66;
+        hierarchyHit.width = Math.max(0, leftWidth - 7);
         hierarchyHit.height = Math.max(0,
-            leftContentMask.height - hierarchyHit.y - 10);
-        hierarchyScrollBar.setBounds(Math.max(0, leftWidth - 10), hierarchyHit.y,
-            5, hierarchyHit.height);
+            leftContentMask.height - hierarchyHit.y - 4);
+        hierarchyScrollBar.setBounds(Math.max(0, leftWidth - 6), hierarchyHit.y,
+            3, hierarchyHit.height);
         layoutHierarchyRows();
     }
 
     function layoutInspector(rightWidth:Float, bodyTop:Float):Void {
-        inspectorTitleIcon.x = 14;
-        inspectorTitleIcon.y = bodyTop + 13;
-        inspectorTitle.x = 40;
-        inspectorTitle.y = bodyTop + 9;
-        selectionStatus.x = 14;
-        selectionStatus.y = bodyTop + 36;
-        fitText(selectionStatus, selectionStatusValue, Math.max(0, rightWidth - 28));
+        inspectorTitleIcon.x = 8;
+        inspectorTitleIcon.y = bodyTop + 9;
+        inspectorTitle.x = 29;
+        inspectorTitle.y = bodyTop + 6;
+        selectionStatus.x = 8;
+        selectionStatus.y = bodyTop + 35;
+        fitText(selectionStatus, selectionStatusValue, Math.max(0, rightWidth - 16));
         if (!inspectorContentMask.visible && rightWidth > 220) {
             // Unreal-style empty state: centered hint inside the panel body.
             selectionStatus.x = Math.round((rightWidth - selectionStatus.textWidth) * 0.5);
@@ -647,27 +677,27 @@ class EditorShell {
         }
 
         inspectorContentMask.x = 0;
-        inspectorContentMask.y = bodyTop + 68;
-        inspectorContentMask.width = Std.int(Math.max(0, rightWidth - 16));
+        inspectorContentMask.y = bodyTop + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT;
+        inspectorContentMask.width = Std.int(Math.max(0, rightWidth - 7));
         inspectorContentMask.height = Std.int(Math.max(0,
-            rightContentMask.height - inspectorContentMask.y - 10));
+            rightContentMask.height - inspectorContentMask.y - 4));
         inspectorScrollHit.width = inspectorContentMask.width;
         inspectorScrollHit.height = inspectorContentMask.height;
-        inspectorScrollBar.setBounds(Math.max(0, rightWidth - 10),
-            inspectorContentMask.y, 5, inspectorContentMask.height);
+        inspectorScrollBar.setBounds(Math.max(0, rightWidth - 6),
+            inspectorContentMask.y, 3, inspectorContentMask.height);
         layoutInspectorProperties();
     }
 
     function layoutInspectorProperties():Void {
-        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT + 4;
-        transformSection.contentHeight = INSPECTOR_ROW_HEIGHT + 4;
-        behaviorSection.contentHeight = INSPECTOR_ROW_HEIGHT + 4;
-        materialSection.contentHeight = INSPECTOR_ROW_HEIGHT + 2;
+        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT;
+        transformSection.contentHeight = INSPECTOR_ROW_HEIGHT;
+        behaviorSection.contentHeight = INSPECTOR_ROW_HEIGHT;
+        materialSection.contentHeight = INSPECTOR_ROW_HEIGHT;
 
-        var width = Math.max(0, inspectorContentMask.width - 8);
+        var width = Math.max(0, inspectorContentMask.width);
         var y:Float = 0;
         for (section in inspectorSections) {
-            section.x = 4;
+            section.x = 0;
             section.y = Math.round(y);
             section.setWidth(width);
             y += section.totalHeight();
@@ -675,33 +705,37 @@ class EditorShell {
 
         // Object: label-left, field-right row inside the section content.
         objectNameField.x = 8;
-        objectNameField.y = 30;
+        objectNameField.y = 2;
         objectNameField.setWidth(Math.max(0, width - 16));
 
-        // Transform: three editable axis fields in one row.
-        var axisGap = 6.0;
-        var axisWidth = Math.max(0, (width - 16 - axisGap * 2) / 3);
+        // Transform: one DCC-style property label with three axis fields.
+        transformLabel.x = 8;
+        transformLabel.y = 2 + Math.round((Theme.CONTROL_HEIGHT - transformLabel.textHeight) * 0.5 - 1);
+        var fieldStart = 72.0;
+        var axisGap = 4.0;
+        var axisWidth = Math.max(0, (width - fieldStart - 8 - axisGap * 2) / 3);
         for (index in 0...transformFields.length) {
-            transformFields[index].x = 8 + index * (axisWidth + axisGap);
-            transformFields[index].y = 30;
+            transformFields[index].x = fieldStart + index * (axisWidth + axisGap);
+            transformFields[index].y = 2;
             transformFields[index].setWidth(axisWidth);
         }
 
         // Behavior: label left, stepper right.
         spinLabel.x = 8;
-        spinLabel.y = 30 + Math.round((Theme.CONTROL_HEIGHT - spinLabel.textHeight) * 0.5);
-        var spinWidth = Math.max(84, width - 112);
-        spinRow.x = width - spinWidth - 8;
-        spinRow.y = 30;
+        spinLabel.y = 2 + Math.round((Theme.CONTROL_HEIGHT - spinLabel.textHeight) * 0.5 - 1);
+        var spinX = 92.0;
+        var spinWidth = Math.max(84, width - spinX - 8);
+        spinRow.x = spinX;
+        spinRow.y = 2;
         spinRow.setWidth(spinWidth);
 
         // Material: label left, swatches right.
         colorLabel.x = 8;
-        colorLabel.y = 30 + Math.round((Theme.CONTROL_HEIGHT - colorLabel.textHeight) * 0.5);
-        colorRow.x = Math.max(96, width - colorRow.totalWidth() - 8);
-        colorRow.y = 30 + Math.round((Theme.CONTROL_HEIGHT - 22) * 0.5);
+        colorLabel.y = 2 + Math.round((Theme.CONTROL_HEIGHT - colorLabel.textHeight) * 0.5 - 1);
+        colorRow.x = Math.max(92, width - colorRow.totalWidth() - 8);
+        colorRow.y = 2 + Math.round((Theme.CONTROL_HEIGHT - 18) * 0.5);
 
-        inspectorContentHeight = Math.round(y) + 4;
+        inspectorContentHeight = Math.round(y);
         var ratio = Math.min(1, inspectorContentMask.height / Math.max(1, inspectorContentHeight));
         inspectorScrollBar.setMetrics(ratio, inspectorScrollValue);
         inspectorScrollBar.visible = inspectorContentMask.visible && ratio < 1;
@@ -844,7 +878,7 @@ class EditorShell {
             var isVisible = visibleIndex >= 0 && visibleIndex < visibleRows;
             row.visible = isVisible;
             if (isVisible) {
-                row.setBounds(10, hierarchyHit.y + visibleIndex * HIERARCHY_ROW_HEIGHT,
+                row.setBounds(3, hierarchyHit.y + visibleIndex * HIERARCHY_ROW_HEIGHT,
                     Math.max(0, hierarchyHit.width - 4),
                     selectedObjectIds.indexOf(row.objectId) >= 0);
             }

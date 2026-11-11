@@ -3,8 +3,8 @@ package boltspark.ui;
 /**
  * Shared BoltUI context handed to widgets and panels.
  *
- * Bundles the native window reference, embedded UI font family, rounded
- * surface tile, native resize cursors, and current OS window size so widget
+ * Bundles the native window reference, embedded UI font family, native resize
+ * cursors, and current OS window size so widget
  * code never touches global state directly.
  * It is native H2D plumbing only: no DOM, no CSS, no browser stack.
  */
@@ -15,7 +15,6 @@ class UiContext {
     public final captionFont:h2d.Font;
     public final titleFont:h2d.Font;
     public final monoFont:h2d.Font;
-    public final roundedTile:h2d.Tile;
     public final resizeHorizontal:hxd.Cursor;
     public final resizeVertical:hxd.Cursor;
 
@@ -35,9 +34,6 @@ class UiContext {
         captionFont = prepareFont(hxd.Res.fonts.ui_semibold_11.toFont());
         titleFont = prepareFont(hxd.Res.fonts.ui_bold_15.toFont());
         monoFont = prepareFont(hxd.Res.fonts.mono_12.toFont());
-        roundedTile = hxd.Res.surfaces.rounded.toTile();
-        roundedTile.getTexture().filter = h3d.mat.Data.Filter.Linear;
-
         #if hldx
         arrowCursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.Arrow);
         sizeWECursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.SizeWE);

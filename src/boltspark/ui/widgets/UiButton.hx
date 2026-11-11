@@ -6,7 +6,7 @@ import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
 
-/** Compact rounded native button with optional procedural icon. */
+/** Compact square-edged native editor button with an optional icon. */
 class UiButton extends h2d.Object {
     public var onClick:Null<Void->Void>;
 
@@ -138,16 +138,18 @@ class UiButton extends h2d.Object {
     }
 
     function redraw():Void {
+        surface.visible = true;
         var fill = Theme.BUTTON;
         var border = Theme.BORDER;
         var textColor = Theme.TEXT;
         if (quiet) {
-            fill = hovered || selected ? Theme.SURFACE_2 : Theme.TOOLBAR;
-            border = hovered || selected ? Theme.BORDER_STRONG : Theme.TOOLBAR;
+            surface.visible = hovered || selected || pressed;
+            fill = selected ? Theme.ACCENT_MUTED : Theme.SURFACE_2;
+            border = selected ? Theme.ACCENT : Theme.BORDER_STRONG;
         }
         if (primary) {
-            fill = pressed ? 0x377CC5 : (hovered ? Theme.ACCENT_HOVER : Theme.ACCENT);
-            border = fill;
+            fill = pressed ? 0x236B59 : (hovered ? 0x326F60 : Theme.ACCENT_MUTED);
+            border = hovered || pressed ? Theme.ACCENT_HOVER : Theme.ACCENT;
             textColor = 0xFFFFFF;
         } else if (danger) {
             fill = pressed ? 0x673437 : (hovered ? 0x513137 : Theme.SURFACE_2);
@@ -160,7 +162,7 @@ class UiButton extends h2d.Object {
             fill = Theme.BUTTON_HOVER;
             border = Theme.BORDER_STRONG;
         }
-        surface.setStyle(fill, border, quiet ? 0 : 0.16);
+        surface.setStyle(fill, border, 0);
         label.textColor = textColor;
         redrawIcon(textColor);
     }

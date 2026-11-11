@@ -31,7 +31,7 @@ Environment: user-level env vars point at the project toolchain (`HAXEPATH`, `HA
 
 ### BoltUI framework slice (`src/boltspark/ui/`)
 - Modular restructure: `Theme` (tokens), `UiContext` (shared state), `InputAdapter` (central keyboard/focus/pointer reporting — Gate 3), `EditorShell` (chrome layout + command callbacks), `widgets/` (`UiButton`, `Stepper`, `SwatchPicker`, `ConsolePanel`), with `BoltUI` as facade.
-- Editor shell: top bar, hierarchy (clickable `sampleCube` item), **transparent 3D viewport** (starter bug fixed: it used to fill the whole window with an opaque background, hiding `s3d`), inspector with editable spin-speed stepper + 4 color swatches, timestamped editor console, status bar with live input diagnostics. Resize-aware layout.
+- Editor shell: compact square-edged top bar and toolbar, searchable hierarchy (clickable `sampleCube` item), **transparent 3D viewport** (starter bug fixed: it used to fill the whole window with an opaque background, hiding `s3d`), continuous collapsible inspector groups with editable transform/spin controls + 4 color swatches, timestamped editor console, and a slim status bar with live input diagnostics. Resize-aware layout.
 - Command flow: widgets → shell callbacks → `Main` → engine objects (no direct widget→engine mutation).
 
 ### Build tools
@@ -69,6 +69,7 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 | DX12 driver positively identified | `bin/runlog.txt`: `[M0] renderer driver = h3d.impl.DX12Driver` |
 | Native window + chrome + cube | `bin/m0_window.png` (1440x900) |
 | Input (clicks, stepper, swatches, focus, resize) | `bin/m0_input_test.png` (1296x900 after live resize; console shows one log per click, exact 0.25 stepper increments, swatch color change applied to cube, focus 4/4) |
+| Compact editor visual refresh | `bin/ui-compact-editor.png`, `bin/ui-compact-palette.png`, `bin/ui-compact-release-1280.png` (native DX12 development/release renders and live resize) |
 | Environment check | `tools/build.ps1 -Check` exit 0 |
 | Build | `tools/build.ps1` creates the development build and `release\Boltspark.exe` |
 | Clean shutdown | run exit code 0 on window close |

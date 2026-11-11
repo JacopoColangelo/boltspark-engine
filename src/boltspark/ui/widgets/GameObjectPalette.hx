@@ -7,8 +7,8 @@ import boltspark.ui.UiSurface;
 import boltspark.ui.layout.LayoutRect;
 
 class GameObjectPalette extends h2d.Object {
-    static inline var WIDTH:Int = 248;
-    static inline var HEIGHT:Int = 122;
+    static inline var WIDTH:Int = 236;
+    static inline var HEIGHT:Int = 108;
 
     public var onCreateCube:Null<Void->Void>;
     public var onDropCube:Null<Float->Float->Void>;
@@ -37,57 +37,57 @@ class GameObjectPalette extends h2d.Object {
 
         background = new UiSurface(context, this);
         background.setSize(WIDTH, HEIGHT);
-        background.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.48);
+        background.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
 
         title = new h2d.Text(context.semiboldFont, this);
         title.text = "Add object";
         title.textColor = Theme.TEXT;
         title.lineBreak = false;
-        title.x = 14;
-        title.y = 10;
+        title.x = 10;
+        title.y = 7;
         subtitle = new h2d.Text(context.captionFont, this);
         subtitle.text = "Click to create or drag into the viewport";
         subtitle.textColor = Theme.MUTED;
         subtitle.lineBreak = false;
-        subtitle.x = 14;
-        subtitle.y = 29;
+        subtitle.x = 10;
+        subtitle.y = 24;
 
-        closeButton = new UiButton(context, "", 26, 26, this);
+        closeButton = new UiButton(context, "", 22, 22, this);
         closeButton.setIcon(Close).setQuiet();
-        closeButton.x = WIDTH - 34;
-        closeButton.y = 7;
+        closeButton.x = WIDTH - 27;
+        closeButton.y = 4;
         closeButton.onClick = close;
 
         cubeSurface = new UiSurface(context, this);
         cubeSurface.x = 10;
-        cubeSurface.y = 57;
-        cubeSurface.setSize(WIDTH - 20, 54);
-        cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0.12);
-        cubeRow = new h2d.Interactive(WIDTH - 20, 54, this);
+        cubeSurface.y = 48;
+        cubeSurface.setSize(WIDTH - 20, 50);
+        cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
+        cubeRow = new h2d.Interactive(WIDTH - 20, 50, this);
         cubeRow.x = 10;
-        cubeRow.y = 57;
+        cubeRow.y = 48;
         cubeRow.backgroundColor = 0;
         cubeRow.cursor = hxd.Cursor.Move;
-        cubeRow.onOver = function(_) cubeSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0.16);
-        cubeRow.onOut = function(_) cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0.12);
+        cubeRow.onOver = function(_) cubeSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
+        cubeRow.onOut = function(_) cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
         cubeRow.onPush = beginCubeDrag;
 
         cubeIcon = new h2d.Graphics(this);
         UiIcons.draw(cubeIcon, Cube, 0, 0, 24, Theme.CUBE_ORANGE);
-        cubeIcon.x = 24;
-        cubeIcon.y = 71;
+        cubeIcon.x = 22;
+        cubeIcon.y = 61;
         cubeLabel = new h2d.Text(context.semiboldFont, this);
         cubeLabel.text = "Cube";
         cubeLabel.textColor = Theme.TEXT;
         cubeLabel.lineBreak = false;
-        cubeLabel.x = 60;
-        cubeLabel.y = 65;
+        cubeLabel.x = 57;
+        cubeLabel.y = 56;
         cubeDescription = new h2d.Text(context.captionFont, this);
         cubeDescription.text = "3D primitive";
         cubeDescription.textColor = Theme.MUTED;
         cubeDescription.lineBreak = false;
-        cubeDescription.x = 60;
-        cubeDescription.y = 86;
+        cubeDescription.x = 57;
+        cubeDescription.y = 76;
 
         dragPreviewBackground = new UiSurface(context, parent);
         dragPreviewBackground.setSize(92, 32);

@@ -37,7 +37,7 @@ class Main extends hxd.App {
 
     override function init():Void {
         setInteractiveResizeCallback(interactiveResizeFrame);
-        // Fonts, icons, and 9-slice surfaces are compiled into both the HL
+        // Fonts, icons, and vector UI surfaces are compiled into both the HL
         // bytecode and native release executable; no runtime asset folder is
         // required beside Boltspark.exe.
         hxd.Res.initEmbed();

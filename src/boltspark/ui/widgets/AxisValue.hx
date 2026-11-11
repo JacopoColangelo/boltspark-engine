@@ -73,11 +73,11 @@ class AxisValue extends h2d.Object {
     public function setWidth(width:Float):Void {
         widthValue = Math.max(0, width);
         surface.setSize(widthValue, heightValue);
-        axis.x = 7;
+        axis.x = 6;
         axis.y = Math.max(0, Math.round((heightValue - axis.textHeight) * 0.5 - 1));
-        input.x = 23;
+        input.x = 20;
         input.y = Math.max(0, Math.round((heightValue - input.font.lineHeight) * 0.5 - 1));
-        input.inputWidth = Std.int(Math.max(0, widthValue - 29));
+        input.inputWidth = Std.int(Math.max(0, widthValue - 25));
     }
 
     public function setValue(value:Float):Void {

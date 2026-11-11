@@ -98,7 +98,7 @@ class ScrollBar extends h2d.Object {
         var enabled = contentRatio < 1 && trackHeight > 0;
         visible = enabled;
         thumbHeight = enabled
-            ? Math.min(trackHeight, Math.max(28, trackHeight * contentRatio))
+            ? Math.min(trackHeight, Math.max(22, trackHeight * contentRatio))
             : trackHeight;
         var travel = Math.max(0, trackHeight - thumbHeight);
         thumb.x = 0;

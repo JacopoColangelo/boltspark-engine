@@ -27,7 +27,7 @@ class HierarchyRow extends h2d.Object {
 
         surface = new UiSurface(ctx, this);
         surface.visible = false;
-        background = new h2d.Interactive(1, 26, this);
+        background = new h2d.Interactive(1, 22, this);
         background.cursor = hxd.Cursor.Button;
         background.backgroundColor = 0;
         background.onOver = function(_) {
@@ -53,16 +53,16 @@ class HierarchyRow extends h2d.Object {
         selectionEdge = new h2d.Graphics(this);
         disclosure = new h2d.Graphics(this);
         UiIcons.draw(disclosure, ChevronRight, 0, 0, 11, Theme.MUTED);
-        disclosure.x = 8;
-        disclosure.y = 7.5;
+        disclosure.x = 5;
+        disclosure.y = 5.5;
         objectIcon = new h2d.Graphics(this);
-        UiIcons.draw(objectIcon, Cube, 0, 0, 15, Theme.TEXT_SECONDARY);
-        objectIcon.x = 25;
-        objectIcon.y = 5.5;
+        UiIcons.draw(objectIcon, Cube, 0, 0, 13, Theme.TEXT_SECONDARY);
+        objectIcon.x = 21;
+        objectIcon.y = 4.5;
 
         label = new h2d.Text(ctx.font, this);
-        label.x = 48;
-        label.y = 6;
+        label.x = 41;
+        label.y = 4;
         label.textColor = Theme.TEXT;
         label.lineBreak = false;
         setName(name);
@@ -94,7 +94,7 @@ class HierarchyRow extends h2d.Object {
         selectionEdge.clear();
         if (selected) {
             selectionEdge.beginFill(Theme.ACCENT);
-            selectionEdge.drawRoundedRect(1, 4, 3, 16, 1.5);
+            selectionEdge.drawRect(0, 0, 2, background.height);
             selectionEdge.endFill();
         }
     }

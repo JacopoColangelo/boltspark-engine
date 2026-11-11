@@ -4,7 +4,7 @@ import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiSurface;
 
-/** Compact anti-aliased material color swatches. */
+/** Compact square material color swatches. */
 class SwatchPicker extends h2d.Object {
     public var onColorChanged:Null<Int->Void>;
 
@@ -67,7 +67,7 @@ class SwatchPicker extends h2d.Object {
         var active = index == selectedIndex;
         swatches[index].setStyle(colors[index],
             active ? Theme.SWATCH_SELECTED : (hovered[index] ? Theme.TEXT_SECONDARY : Theme.SWATCH_EDGE),
-            active ? 0.20 : 0,
+            0,
             active ? 2 : 1);
     }
 }

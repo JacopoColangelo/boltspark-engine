@@ -7,7 +7,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - A native Windows 11 x64 desktop window ("Boltspark Engine") booted by the HashLink VM, rendering through the **DirectX 12** Heaps driver (positively identified at runtime as `h3d.impl.DX12Driver`).
 - A rotating 3D mesh in `s3d` behind a native `h2d` editor chrome overlay.
 - A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
-- A modern native BoltUI editor shell with embedded anti-aliased Inter/JetBrains Mono atlases, rounded 9-slice surfaces, procedural icons, menu/transform/transport toolbars, searchable hierarchy, structured Details sections, viewport HUD, output log, and status diagnostics.
+- A compact native BoltUI editor shell with embedded anti-aliased Inter/JetBrains Mono atlases, crisp vector surfaces, procedural icons, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
 - Inspector numeric fields support keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
@@ -68,11 +68,11 @@ src/
     layout/                   — reusable dock geometry and local layout persistence
     Theme.hx                  — modern dark-editor color/size tokens
     UiContext.hx              — embedded fonts, 9-slice tile, native cursors, window state
-    UiSurface.hx / UiIcons.hx — rounded surface and procedural icon primitives
+    UiSurface.hx / UiIcons.hx — square-edged surface and procedural icon primitives
     InputAdapter.hx           — central keyboard/focus/pointer reporting
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
-  res/                        — embedded bitmap-font atlases and rounded-surface texture
+  res/                        — embedded bitmap-font atlases
 tests/
   native-foundation-acceptance.md
   repro/DxCArrayRepro.hx      — isolation repro for the DX12/CArray root cause

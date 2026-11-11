@@ -37,10 +37,10 @@ class ConsolePanel extends h2d.Object {
         title.text = "Output Log";
         title.textColor = Theme.TEXT;
         title.lineBreak = false;
-        title.x = 24;
-        title.y = 4;
+        title.x = 25;
+        title.y = 5;
 
-        clearButton = new UiButton(ctx, "Clear", 76, 26, this);
+        clearButton = new UiButton(ctx, "Clear", 74, 22, this);
         clearButton.setIcon(Trash).setQuiet();
         clearButton.onClick = clear;
 
@@ -54,8 +54,8 @@ class ConsolePanel extends h2d.Object {
         };
         text = new h2d.Text(ctx.monoFont, contentMask);
         text.textColor = Theme.TEXT_SECONDARY;
-        text.x = 10;
-        text.y = 7;
+        text.x = 8;
+        text.y = 5;
         text.lineBreak = false;
         scrollBar = new ScrollBar(ctx, this);
         scrollBar.onChange = function(value) {
@@ -89,28 +89,34 @@ class ConsolePanel extends h2d.Object {
         background.beginFill(Theme.PANEL);
         background.drawRect(0, 0, safeW, safeH);
         background.endFill();
+        background.beginFill(Theme.PANEL_HEADER);
+        background.drawRect(0, 0, safeW, 28);
+        background.endFill();
+        background.beginFill(Theme.ACCENT);
+        background.drawRect(0, 0, Math.min(86, safeW), 2);
+        background.endFill();
         background.lineStyle(1, Theme.BORDER, 1);
-        background.moveTo(0, 34);
-        background.lineTo(safeW, 34);
+        background.moveTo(0, 27.5);
+        background.lineTo(safeW, 27.5);
         background.lineStyle();
 
-        titleIcon.x = 2;
+        titleIcon.x = 5;
         titleIcon.y = 7;
-        clearButton.x = Math.max(0, safeW - 80);
+        clearButton.x = Math.max(0, safeW - 78);
         clearButton.y = 3;
         bodySurface.x = 0;
-        bodySurface.y = 38;
-        bodySurface.setSize(Math.max(0, safeW), Math.max(0, safeH - 38));
+        bodySurface.y = 28;
+        bodySurface.setSize(Math.max(0, safeW), Math.max(0, safeH - 28));
         contentMask.x = 0;
-        contentMask.y = 38;
-        contentWidth = Math.max(0, safeW - 18);
-        contentHeight = Math.max(0, safeH - 40);
+        contentMask.y = 29;
+        contentWidth = Math.max(0, safeW - 14);
+        contentHeight = Math.max(0, safeH - 30);
         contentMask.width = Std.int(contentWidth);
         contentMask.height = Std.int(contentHeight);
         scrollHit.width = contentMask.width;
         scrollHit.height = contentMask.height;
         visibleLines = Std.int(Math.floor(contentHeight / Math.max(1, lineHeight)));
-        scrollBar.setBounds(Math.max(0, safeW - 11), 43, 6, Math.max(0, contentHeight - 9));
+        scrollBar.setBounds(Math.max(0, safeW - 8), 32, 4, Math.max(0, contentHeight - 6));
         updateScrollBar();
         refresh();
     }
@@ -134,7 +140,7 @@ class ConsolePanel extends h2d.Object {
     }
 
     function refresh():Void {
-        var maxWidth = Math.max(0, contentWidth - 18);
+        var maxWidth = Math.max(0, contentWidth - 14);
         var displayLines = [];
         firstVisibleLine = Std.int(Math.max(0, Math.min(maxFirstVisibleLine(), firstVisibleLine)));
         var lastVisibleLine = Std.int(Math.min(lines.length, firstVisibleLine + visibleLines));
@@ -152,7 +158,7 @@ class ConsolePanel extends h2d.Object {
             displayLines.push(value);
         }
         text.text = displayLines.join("\n");
-        text.y = 7;
+        text.y = 5;
         updateScrollBar();
     }
 }

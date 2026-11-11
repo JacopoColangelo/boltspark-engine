@@ -66,11 +66,11 @@ class SearchField extends h2d.Object {
 
     function layout():Void {
         surface.setSize(widthValue, heightValue);
-        icon.x = 9;
+        icon.x = 7;
         icon.y = (heightValue - 14) * 0.5;
-        input.x = 31;
+        input.x = 27;
         input.y = Math.max(0, Math.round((heightValue - input.font.lineHeight) * 0.5 - 1));
-        input.inputWidth = Std.int(Math.max(0, widthValue - 41));
+        input.inputWidth = Std.int(Math.max(0, widthValue - 34));
         placeholder.x = input.x;
         placeholder.y = input.y;
         redraw();

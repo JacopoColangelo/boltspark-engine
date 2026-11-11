@@ -1,71 +1,68 @@
 package boltspark.ui;
 
-/**
- * Lightweight anti-aliased rounded surface backed by one embedded 9-slice.
- * Three tinted layers provide a shadow, border, and fill without introducing
- * a shader or native dependency.
- */
+/** Crisp rectangular editor surface with optional border and hard shadow. */
 class UiSurface extends h2d.Object {
-    final shadow:h2d.ScaleGrid;
-    final border:h2d.ScaleGrid;
-    final fill:h2d.ScaleGrid;
+    final graphic:h2d.Graphics;
 
     var widthValue:Float = 0;
     var heightValue:Float = 0;
     var inset:Float = 1;
+    var fillColor:Int = Theme.SURFACE_2;
+    var borderColor:Int = Theme.BORDER;
+    var shadowAlpha:Float = 0;
 
-    public function new(ctx:UiContext, ?parent:h2d.Object) {
+    public function new(_ctx:UiContext, ?parent:h2d.Object) {
         super(parent);
-        shadow = makeGrid(ctx.roundedTile, this);
-        border = makeGrid(ctx.roundedTile, this);
-        fill = makeGrid(ctx.roundedTile, this);
-        setStyle(Theme.SURFACE_2, Theme.BORDER, 0.24);
-    }
-
-    static function makeGrid(tile:h2d.Tile, parent:h2d.Object):h2d.ScaleGrid {
-        var result = new h2d.ScaleGrid(tile, 9, 9, parent);
-        result.tileBorders = false;
-        result.tileCenter = false;
-        return result;
+        graphic = new h2d.Graphics(this);
+        setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
     }
 
     public function setSize(width:Float, height:Float):Void {
         widthValue = Math.max(0, width);
         heightValue = Math.max(0, height);
-        shadow.x = 0;
-        shadow.y = 2;
-        shadow.width = widthValue;
-        shadow.height = heightValue;
-        border.x = 0;
-        border.y = 0;
-        border.width = widthValue;
-        border.height = heightValue;
-        fill.x = inset;
-        fill.y = inset;
-        fill.width = Math.max(0, widthValue - inset * 2);
-        fill.height = Math.max(0, heightValue - inset * 2);
+        redraw();
     }
 
     public function setStyle(fillColor:Int, borderColor:Int, shadowAlpha:Float = 0.0,
             borderInset:Float = 1.0):Void {
         inset = Math.max(0, borderInset);
-        tint(fill, fillColor, 1);
-        tint(border, borderColor, 1);
-        tint(shadow, 0x000000, Math.max(0, Math.min(1, shadowAlpha)));
-        shadow.visible = shadowAlpha > 0;
-        setSize(widthValue, heightValue);
+        this.fillColor = fillColor;
+        this.borderColor = borderColor;
+        this.shadowAlpha = Math.max(0, Math.min(1, shadowAlpha));
+        redraw();
     }
 
     public function setFill(color:Int):Void {
-        tint(fill, color, 1);
+        fillColor = color;
+        redraw();
     }
 
     public function setBorder(color:Int):Void {
-        tint(border, color, 1);
+        borderColor = color;
+        redraw();
     }
 
-    static inline function tint(target:h2d.ScaleGrid, color:Int, alpha:Float):Void {
-        target.color.setColor(0xFF000000 | color);
-        target.color.a = alpha;
+    function redraw():Void {
+        graphic.clear();
+        if (widthValue <= 0 || heightValue <= 0) return;
+        if (shadowAlpha > 0) {
+            graphic.beginFill(0x000000, shadowAlpha);
+            graphic.drawRect(2, 2, widthValue, heightValue);
+            graphic.endFill();
+        }
+        if (inset > 0) {
+            graphic.beginFill(borderColor, 1);
+            graphic.drawRect(0, 0, widthValue, heightValue);
+            graphic.endFill();
+            graphic.beginFill(fillColor, 1);
+            graphic.drawRect(inset, inset,
+                Math.max(0, widthValue - inset * 2),
+                Math.max(0, heightValue - inset * 2));
+            graphic.endFill();
+        } else {
+            graphic.beginFill(fillColor, 1);
+            graphic.drawRect(0, 0, widthValue, heightValue);
+            graphic.endFill();
+        }
     }
 }

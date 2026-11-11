@@ -6,9 +6,8 @@ import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiIcons;
 
 /**
- * Collapsible inspector section header in the Unreal/CryEngine property-panel
- * style: a full-width interactive header with a chevron and title, a divider
- * rule, and a content area owned by the shell.
+ * Collapsible full-width property group. Sections are stacked without card
+ * gaps so the inspector reads as one dense, continuous editor surface.
  */
 class InspectorSection extends h2d.Object {
     /** Invoked after the section expands or collapses so the panel re-lays out. */
@@ -29,15 +28,17 @@ class InspectorSection extends h2d.Object {
 
     public function new(ctx:UiContext, titleText:String, ?parent:h2d.Object) {
         super(parent);
-        chevron = new h2d.Graphics(this);
-        title = new h2d.Text(ctx.semiboldFont, this);
-        title.text = titleText;
-        title.textColor = Theme.TEXT;
-        title.lineBreak = false;
-        title.x = 20;
-        title.y = Math.round((Theme.SECTION_HEADER_HEIGHT - title.textHeight) * 0.5);
+        // The header fill must sit behind its glyphs and label.
         divider = new h2d.Graphics(this);
+        chevron = new h2d.Graphics(this);
+        title = new h2d.Text(ctx.captionFont, this);
+        title.text = titleText.toUpperCase();
+        title.textColor = Theme.TEXT_SECONDARY;
+        title.lineBreak = false;
+        title.x = 19;
+        title.y = Math.round((Theme.SECTION_HEADER_HEIGHT - title.textHeight) * 0.5);
         content = new h2d.Object(this);
+        content.y = Theme.SECTION_HEADER_HEIGHT;
         hit = new h2d.Interactive(1, Theme.SECTION_HEADER_HEIGHT, this);
         hit.backgroundColor = 0;
         hit.cursor = hxd.Cursor.Button;
@@ -70,25 +71,23 @@ class InspectorSection extends h2d.Object {
     /** Total vertical space taken by the section at current expand state. */
     public function totalHeight():Float {
         return expanded
-            ? Theme.SECTION_HEADER_HEIGHT + contentHeight + 6
-            : Theme.SECTION_HEADER_HEIGHT + 2;
+            ? Theme.SECTION_HEADER_HEIGHT + contentHeight + 1
+            : Theme.SECTION_HEADER_HEIGHT + 1;
     }
 
     function drawChevron():Void {
         chevron.clear();
         UiIcons.draw(chevron, expanded ? ChevronDown : ChevronRight, 0, 0, 12, Theme.MUTED);
-        chevron.x = 3;
+        chevron.x = 4;
         chevron.y = Math.round((Theme.SECTION_HEADER_HEIGHT - 12) * 0.5);
     }
 
     function redraw():Void {
         divider.clear();
-        if (hovered) {
-            divider.beginFill(Theme.SURFACE_1, 0.6);
-            divider.drawRect(0, 0, Math.max(0, hit.width), Theme.SECTION_HEADER_HEIGHT - 1);
-            divider.endFill();
-        }
-        divider.lineStyle(1, hovered ? Theme.BORDER_STRONG : Theme.BORDER, 1);
+        divider.beginFill(hovered ? Theme.SURFACE_3 : Theme.SECTION_HEADER, 1);
+        divider.drawRect(0, 0, Math.max(0, hit.width), Theme.SECTION_HEADER_HEIGHT - 1);
+        divider.endFill();
+        divider.lineStyle(1, Theme.BORDER, 1);
         divider.moveTo(0, Theme.SECTION_HEADER_HEIGHT - 1);
         divider.lineTo(Math.max(0, hit.width), Theme.SECTION_HEADER_HEIGHT - 1);
         divider.lineStyle();

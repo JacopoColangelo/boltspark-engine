@@ -94,10 +94,10 @@ class TextInputField extends h2d.Object {
         label.y = Math.max(0, Math.round((heightValue - label.textHeight) * 0.5 - 1));
         fieldBackground.x = fieldX;
         fieldBackground.setSize(fieldWidth, heightValue);
-        input.x = fieldX + 9;
+        input.x = fieldX + 6;
         input.y = Math.max(0, Math.round((heightValue - input.font.lineHeight) * 0.5 - 1));
         input.maxWidth = null;
-        input.inputWidth = Std.int(Math.max(0, fieldWidth - 18));
+        input.inputWidth = Std.int(Math.max(0, fieldWidth - 12));
         updateFieldStyle();
     }
 
