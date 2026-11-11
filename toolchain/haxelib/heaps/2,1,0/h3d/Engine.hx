@@ -271,7 +271,10 @@ class Engine {
 	function set_fullScreen(v) {
 		fullScreen = v;
 		if( mem != null && hxd.System.getValue(IsWindowed) ) {
-			window.displayMode = v ? Borderless : Windowed;
+			if( v && window.displayMode != Borderless )
+				window.displayMode = Borderless;
+			else if( !v && window.displayMode != Windowed )
+				window.displayMode = Windowed;
 		}
 		return v;
 	}

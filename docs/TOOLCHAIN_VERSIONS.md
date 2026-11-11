@@ -22,6 +22,7 @@
 - `D3D12/D3D12Core.dll` version/hash: n/a
 - `D3D12/d3d12SDKLayers.dll` version/hash: n/a
 - Heaps (`haxelib list`): **heaps 2.1.0** (project-local repository `toolchain/haxelib`)
+  - Local compatibility patch in `h3d/Engine.hx`: avoid reapplying the current window display mode during engine initialization. The redundant `Windowed` request made hldx call `ChangeDisplaySettingsEx`, which resets the display color ramp and briefly removes f.lux tint.
 - `format` version: **3.8.0**
 - `hldx` version: **1.16.0**
 - HashLink Haxe/C support library: **1.16.0** (source tag `1.16`)
