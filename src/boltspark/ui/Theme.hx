@@ -46,6 +46,8 @@ class Theme {
     public static inline var BUTTON:Int = 0x34465B;
     public static inline var BUTTON_HOVER:Int = 0x3F566F;
     public static inline var BUTTON_ACTIVE:Int = 0x2C3B4D;
+    public static inline var PROPERTY_BG:Int = 0x222A35;
+    public static inline var SCROLL_THUMB:Int = 0x536579;
     public static inline var SWATCH_EDGE:Int = 0x0B0E13;
     public static inline var SWATCH_SELECTED:Int = 0xFFFFFF;
 

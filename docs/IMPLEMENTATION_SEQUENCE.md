@@ -91,3 +91,39 @@ DX12 is the baseline, not a later experiment. Before declaring the foundation co
 ## Only after Gate 5
 
 Proceed to scene hierarchy, inspectors, asset browser, project settings, and HIDE data migration. Do not start deferred rendering, GI, terrain, physics, or the full editor before the native UI and viewport gates pass.
+
+## Gate 6 — First scene hierarchy editing slice
+
+The initial editor scene contains selectable cube objects managed by the editor. The hierarchy can create and delete cubes; selecting an object updates the inspector, and viewport picking selects the nearest object.
+
+**Exit criteria**
+- Create, rename, select, and delete multiple objects without stale hierarchy rows.
+- Inspector edits affect only the selected object and persist when switching selection.
+- Viewport picking selects the nearest cube; empty-space clicks clear selection.
+- Long hierarchy lists can be navigated without rows escaping the panel bounds.
+- Scene save/load, undo/redo, and general entity/component authoring remain later milestones.
+
+## Gate 7 — Editor panel usability and object creation
+
+The hierarchy lists only scene objects and uses a real scrollbar when its content
+overflows. Ctrl-click and Shift-click support multiple selection; Delete removes
+all selected objects unless an inspector text field is being edited. Inspector
+properties are grouped into styled cards and scroll when the panel is too short.
+The console retains a bounded history, scrolls through it, and has a Clear all
+button.
+
+The toolbar Add Game Object button and hierarchy right-click menu open the same
+object palette. The current palette contains a Cube template: click it to create
+one at the default position, or drag it into the viewport to place it on the
+ground plane. Multi-selection is supported for selection and deletion; inspector
+editing is intentionally limited to a single selected object.
+
+**Exit criteria**
+- The hierarchy contains scene objects only, with selection and scrolling kept
+  inside the panel.
+- Toolbar and hierarchy context menu can create objects; dragging a palette
+  object into the viewport creates it at the drop position.
+- Multi-selection and Delete remove the intended objects; text editing keeps
+  ownership of Delete while an inspector field is focused.
+- Inspector properties and console history remain reachable when their content
+  exceeds panel bounds, and console Clear all removes the stored log.

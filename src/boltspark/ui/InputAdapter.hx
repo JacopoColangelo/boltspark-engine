@@ -15,9 +15,11 @@ class InputAdapter {
     public var focusLostCount(default, null):Int = 0;
     public var focusGotCount(default, null):Int = 0;
     public var pointerInsideWindow(default, null):Bool = true;
+    public var onDeletePressed:Null<Void->Void>;
 
     final scene:h2d.Scene;
     var report:h2d.Text;
+    var deleteKeyDown:Bool = false;
 
     public function new(scene:h2d.Scene) {
         this.scene = scene;
@@ -41,15 +43,21 @@ class InputAdapter {
             case EKeyDown:
                 keyDownCount++;
                 lastKey = hxd.Key.getKeyName(event.keyCode);
+                if (event.keyCode == hxd.Key.DELETE) {
+                    if (!deleteKeyDown && onDeletePressed != null) onDeletePressed();
+                    deleteKeyDown = true;
+                }
                 refresh();
             case EKeyUp:
                 keyUpCount++;
+                if (event.keyCode == hxd.Key.DELETE) deleteKeyDown = false;
                 refresh();
             case EMove:
                 pointerMoves++;
                 pointerInsideWindow = true;
             case EFocusLost:
                 focusLostCount++;
+                deleteKeyDown = false;
                 refresh();
             case EFocus:
                 focusGotCount++;

@@ -69,6 +69,10 @@ class TextInputField extends h2d.Object {
         return input.text;
     }
 
+    public function isFocused():Bool {
+        return focused;
+    }
+
     public function setLabelText(text:String):Void {
         label.text = text;
     }

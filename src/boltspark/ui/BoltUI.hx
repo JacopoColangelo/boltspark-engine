@@ -1,6 +1,7 @@
 package boltspark.ui;
 
 import boltspark.ui.layout.LayoutRect;
+import boltspark.ui.HierarchyEntry;
 
 /**
  * BoltUI foundation facade.
@@ -24,7 +25,10 @@ class BoltUI {
     final shell:EditorShell;
 
     /** Editor commands forwarded to the engine by Main. */
-    public var onTestAction:Null<Void->Void>;
+    public var onCreateObject:Null<Void->Void>;
+    public var onCreateObjectAt:Null<Float->Float->Void>;
+    public var onDeleteObjects:Null<Array<Int>->Void>;
+    public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
@@ -34,7 +38,12 @@ class BoltUI {
         ctx = new UiContext(window, hxd.res.DefaultFont.get());
         var input = new InputAdapter(parent);
         shell = new EditorShell(parent, ctx, input);
-        shell.onTestAction = function() if (onTestAction != null) onTestAction();
+        shell.onCreateObject = function() if (onCreateObject != null) onCreateObject();
+        shell.onCreateObjectAt = function(x, y) if (onCreateObjectAt != null) onCreateObjectAt(x, y);
+        shell.onDeleteObjects = function(ids) if (onDeleteObjects != null) onDeleteObjects(ids);
+        shell.onObjectsSelected = function(ids, primary) {
+            if (onObjectsSelected != null) onObjectsSelected(ids, primary);
+        };
         shell.onSpinSpeedChanged = function(v) if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         shell.onColorChanged = function(c) if (onColorChanged != null) onColorChanged(c);
         shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
@@ -60,8 +69,13 @@ class BoltUI {
         return shell.viewportRect;
     }
 
-    public function setSampleCubeSelected(selected:Bool):Void {
-        shell.setSampleCubeSelected(selected);
+    public function setHierarchyEntries(entries:Array<HierarchyEntry>):Void {
+        shell.setHierarchyEntries(entries);
+    }
+
+    public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
+            name:String, speed:Float, color:Int):Void {
+        shell.setSelectedObjects(ids, primaryId, name, speed, color);
     }
 
     public function setObjectName(name:String):Void {

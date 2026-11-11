@@ -25,6 +25,10 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] H2D editor chrome appears over the bounded 3D viewport (top bar, hierarchy, inspector, console, status bar).
 - [x] 3D content is clipped to the viewport rectangle by the render zone, aligned with the editor panels.
 - [x] Clicking the sample cube selects it from the viewport; clicking empty viewport space clears hierarchy selection.
+- [x] Create multiple cubes, select and rename them from the hierarchy, and verify inspector edits stay with the selected object.
+- [x] Delete selected objects and verify hierarchy rows and viewport meshes are removed together.
+- [x] Navigate a long hierarchy list and select objects above and below the visible range.
+- [x] Pick a created cube in the viewport and verify its hierarchy row and inspector become active.
 - [x] Native window resize (1440x900 to 1280x800) updates viewport framing and picking coordinates without stale content or crashes.
 - [ ] Dock-splitter resize is validated against viewport framing and picking coordinates.
 - [ ] High-DPI scaling and device-loss/reset recovery are validated on a Windows target.
@@ -34,10 +38,18 @@ Evidence files are under `bin/` unless noted otherwise.
 
 ## Input
 
-- [x] Clicking `Test native input` registers once per click (automated Win32 clicks: one `command: test native input (click registered)` line per click, `bin/m0_input_test.png`).
-- [x] Clicking outside the control does not activate it (h2d.Interactive bounds; release-outside is handled by the widget's `onReleaseOutside` state restore).
+- [x] Toolbar object creation and hierarchy context-menu entry both open the game-object palette.
+- [x] Clicking the palette Cube creates a hierarchy object; dragging Cube into the viewport creates and selects it.
+- [x] Ctrl-click selects multiple hierarchy objects; Delete removes all selected objects and clears the inspector selection.
+- [x] A long hierarchy shows a scrollbar without listing editor/debug controls among scene objects.
+- [ ] Hierarchy wheel/thumb scrolling is validated with a long list.
+- [x] Console scrollbar appears after enough log entries and its thumb reaches earlier log lines.
+- [x] Clear all removes the console history.
+- [x] Inspector thumb scrolling reveals properties clipped by a short panel.
+- [x] Shift-click selects a contiguous range in the hierarchy.
+- [ ] Delete suppression while editing an inspector text field is validated.
 - [x] Repeated clicks remain responsive (multiple stepper clicks in a row registered in exact 0.25 increments).
-- [x] Focus loss/regain does not leave stuck visual/input state (input adapter reports focus 4/4 transitions with no stuck hover/pressed state; button color restored on release-outside).
+- [x] Focus loss/regain does not leave stuck visual/input state (input adapter reports focus transitions; button color restored on release-outside).
 - [x] Keyboard event reporting flows through the central input adapter (status bar shows `key ... | dN uN mvN focus G/L` live; `boltspark/ui/InputAdapter.hx`).
 
 ## Platform and toolchain

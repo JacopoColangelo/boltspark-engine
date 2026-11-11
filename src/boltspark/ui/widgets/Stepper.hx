@@ -87,12 +87,16 @@ class Stepper extends h2d.Object {
 
     public function setValue(v:Float):Void {
         value = clamp(v);
-        refresh(true);
+        refresh();
     }
 
     public function setWidth(w:Float):Void {
         width = Math.max(0, w);
         refresh();
+    }
+
+    public function isEditing():Bool {
+        return fieldFocused;
     }
 
     function clamp(v:Float):Float {

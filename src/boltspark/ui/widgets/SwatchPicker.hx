@@ -47,11 +47,16 @@ class SwatchPicker extends h2d.Object {
         return colors[selectedIndex];
     }
 
-    function select(index:Int):Void {
+    public function setColor(color:Int):Void {
+        var index = colors.indexOf(color);
+        if (index >= 0) select(index, false);
+    }
+
+    function select(index:Int, notify:Bool = true):Void {
         selectedIndex = index;
         for (i in 0...edges.length) {
             edges[i].visible = i == index;
         }
-        if (onColorChanged != null) onColorChanged(colors[index]);
+        if (notify && onColorChanged != null) onColorChanged(colors[index]);
     }
 }
