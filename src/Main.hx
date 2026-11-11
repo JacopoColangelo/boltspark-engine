@@ -67,12 +67,17 @@ class Main extends hxd.App {
 
         // BoltUI is a native H2D overlay rendered by Heaps. It is not HTML,
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
+        // Linear sampling for the 2D overlay keeps bitmap font glyphs and UI
+        // surfaces smooth at any window scale; nearest sampling produces the
+        // jagged glyph edges the flat editor must avoid.
+        s2d.defaultSmooth = true;
         boltUI = new BoltUI(s2d, nativeWindow);
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreateObject = createCube;
         boltUI.onCreateObjectAt = createCubeAtViewport;
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
+        boltUI.onTransformChanged = applyTransformChange;
         boltUI.log('renderer driver: ${driverName}');
         boltUI.log("editor shell ready — hierarchy, inspector, console live");
         refreshHierarchy();
@@ -143,6 +148,18 @@ class Main extends hxd.App {
             engine.setRenderZone();
         }
         s2d.render(engine);
+    }
+
+    function applyTransformChange(axis:Int, value:Float):Void {
+        var selected = getSelectedObject();
+        if (selected == null) return;
+        switch (axis) {
+            case 0: selected.mesh.x = value;
+            case 1: selected.mesh.y = value;
+            default: selected.mesh.z = value;
+        }
+        refreshSelectionOutline();
+        boltUI.log('command: ${selected.name} position.${axis == 0 ? "x" : axis == 1 ? "y" : "z"} = ${Math.round(value * 100) / 100}');
     }
 
     function onViewportClick(x:Float, y:Float):Void {

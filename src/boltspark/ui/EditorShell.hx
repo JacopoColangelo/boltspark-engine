@@ -9,6 +9,7 @@ import boltspark.ui.widgets.ConsolePanel;
 import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.GameObjectPalette;
 import boltspark.ui.widgets.HierarchyRow;
+import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
 import boltspark.ui.widgets.Stepper;
@@ -21,8 +22,8 @@ import boltspark.ui.widgets.UiButton;
  * the same DX12 window as the scene; there is no browser or foreign UI layer.
  */
 class EditorShell {
-    static inline var HIERARCHY_ROW_HEIGHT:Int = 32;
-    static inline var INSPECTOR_CONTENT_HEIGHT:Int = 430;
+    static inline var HIERARCHY_ROW_HEIGHT:Int = 26;
+    static inline var INSPECTOR_ROW_HEIGHT:Int = 30;
 
     final ctx:UiContext;
     final input:InputAdapter;
@@ -45,6 +46,7 @@ class EditorShell {
     final hierarchyTitle:h2d.Text;
     final hierarchyCount:h2d.Text;
     final hierarchySearch:SearchField;
+    final hierarchyAddButton:UiButton;
     final hierarchyHit:h2d.Interactive;
     final hierarchyRows:Array<HierarchyRow> = [];
     final allHierarchyEntries:Array<HierarchyEntry> = [];
@@ -59,27 +61,20 @@ class EditorShell {
     final inspectorContentMask:h2d.Mask;
     final inspectorScrollHit:h2d.Interactive;
     final inspectorScrollBar:ScrollBar;
+    final inspectorSections:Array<InspectorSection>;
+    var inspectorContentHeight:Float = 0;
 
-    final identityCard:UiSurface;
-    final identityChevron:h2d.Graphics;
-    final identityTitle:h2d.Text;
+    final objectSection:InspectorSection;
     final objectNameField:TextInputField;
 
-    final transformCard:UiSurface;
-    final transformChevron:h2d.Graphics;
-    final transformTitle:h2d.Text;
-    final transformSubtitle:h2d.Text;
+    final transformSection:InspectorSection;
     final transformFields:Array<AxisValue> = [];
 
-    final behaviorCard:UiSurface;
-    final behaviorChevron:h2d.Graphics;
-    final behaviorTitle:h2d.Text;
+    final behaviorSection:InspectorSection;
     final spinLabel:h2d.Text;
     final spinRow:Stepper;
 
-    final materialCard:UiSurface;
-    final materialChevron:h2d.Graphics;
-    final materialTitle:h2d.Text;
+    final materialSection:InspectorSection;
     final colorLabel:h2d.Text;
     final colorRow:SwatchPicker;
 
@@ -112,6 +107,7 @@ class EditorShell {
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
+    public var onTransformChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var viewportRect(default, null):LayoutRect;
 
@@ -218,7 +214,12 @@ class EditorShell {
         hierarchyCount = new h2d.Text(ctx.captionFont, leftContentMask);
         hierarchyCount.textColor = Theme.MUTED;
         hierarchyCount.lineBreak = false;
-        hierarchySearch = new SearchField(ctx, "Search scene objects", 100, 30, leftContentMask);
+        hierarchyAddButton = new UiButton(ctx, "", 26, 26, leftContentMask);
+        hierarchyAddButton.setIcon(Add).setQuiet();
+        hierarchyAddButton.onClick = function() {
+            if (onCreateObject != null) onCreateObject();
+        };
+        hierarchySearch = new SearchField(ctx, "Search Entities", 100, 26, leftContentMask);
         hierarchySearch.onChange = function(value) applyHierarchyFilter(value);
 
         hierarchyHit = new h2d.Interactive(1, 1, leftContentMask);
@@ -244,7 +245,7 @@ class EditorShell {
         inspectorTitleIcon = new h2d.Graphics(rightContentMask);
         UiIcons.draw(inspectorTitleIcon, Sliders, 0, 0, 17, Theme.TEXT_SECONDARY);
         inspectorTitle = new h2d.Text(ctx.semiboldFont, rightContentMask);
-        inspectorTitle.text = "Details";
+        inspectorTitle.text = "Inspector";
         inspectorTitle.textColor = Theme.TEXT;
         inspectorTitle.lineBreak = false;
         selectionStatus = new h2d.Text(ctx.captionFont, rightContentMask);
@@ -259,32 +260,31 @@ class EditorShell {
             event.propagate = false;
         };
 
-        identityCard = new UiSurface(ctx, inspectorContentMask);
-        identityChevron = makeSectionChevron(inspectorContentMask);
-        identityTitle = makeSectionTitle("IDENTITY", inspectorContentMask);
+        objectSection = new InspectorSection(ctx, "Object", inspectorContentMask);
         objectNameField = new TextInputField(ctx, "Name", Theme.RIGHT_PANEL_WIDTH - 36,
-            Theme.CONTROL_HEIGHT, "", inspectorContentMask);
+            Theme.CONTROL_HEIGHT, "", objectSection.content);
         objectNameField.setLabelWidth(66);
         objectNameField.onCommit = function(name:String) {
             if (onObjectNameChanged != null) onObjectNameChanged(name);
         };
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
 
-        transformCard = new UiSurface(ctx, inspectorContentMask);
-        transformChevron = makeSectionChevron(inspectorContentMask);
-        transformTitle = makeSectionTitle("TRANSFORM", inspectorContentMask);
-        transformSubtitle = new h2d.Text(ctx.captionFont, inspectorContentMask);
-        transformSubtitle.text = "World position";
-        transformSubtitle.textColor = Theme.MUTED;
-        transformSubtitle.lineBreak = false;
-        transformFields.push(new AxisValue(ctx, "X", Theme.AXIS_X, 60, 30, inspectorContentMask));
-        transformFields.push(new AxisValue(ctx, "Y", Theme.AXIS_Y, 60, 30, inspectorContentMask));
-        transformFields.push(new AxisValue(ctx, "Z", Theme.AXIS_Z, 60, 30, inspectorContentMask));
+        transformSection = new InspectorSection(ctx, "Transform", inspectorContentMask);
+        var axisNames = ["X", "Y", "Z"];
+        var axisColors = [Theme.AXIS_X, Theme.AXIS_Y, Theme.AXIS_Z];
+        for (index in 0...axisNames.length) {
+            var field = new AxisValue(ctx, axisNames[index], axisColors[index], 60,
+                Theme.CONTROL_HEIGHT, transformSection.content);
+            var capturedIndex = index;
+            field.onCommit = function(value:Float) {
+                if (onTransformChanged != null) onTransformChanged(capturedIndex, value);
+            };
+            field.onEditRejected = function(message:String) log("inspector: " + message);
+            transformFields.push(field);
+        }
 
-        behaviorCard = new UiSurface(ctx, inspectorContentMask);
-        behaviorChevron = makeSectionChevron(inspectorContentMask);
-        behaviorTitle = makeSectionTitle("BEHAVIOR", inspectorContentMask);
-        spinLabel = new h2d.Text(ctx.font, inspectorContentMask);
+        behaviorSection = new InspectorSection(ctx, "Behavior", inspectorContentMask);
+        spinLabel = new h2d.Text(ctx.font, behaviorSection.content);
         spinLabel.text = "Spin speed";
         spinLabel.textColor = Theme.TEXT_SECONDARY;
         spinLabel.lineBreak = false;
@@ -295,25 +295,28 @@ class EditorShell {
                 var fractional = hundredths % 100;
                 return Std.string(Std.int(hundredths / 100)) + "."
                     + (fractional < 10 ? "0" : "") + Std.string(fractional);
-            }, inspectorContentMask);
+            }, behaviorSection.content);
         spinRow.onValueChanged = function(v:Float) {
             if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         };
         spinRow.onEditRejected = function(message:String) log("inspector: " + message);
 
-        materialCard = new UiSurface(ctx, inspectorContentMask);
-        materialChevron = makeSectionChevron(inspectorContentMask);
-        materialTitle = makeSectionTitle("MATERIAL", inspectorContentMask);
-        colorLabel = new h2d.Text(ctx.font, inspectorContentMask);
+        materialSection = new InspectorSection(ctx, "Material", inspectorContentMask);
+        colorLabel = new h2d.Text(ctx.font, materialSection.content);
         colorLabel.text = "Base color";
         colorLabel.textColor = Theme.TEXT_SECONDARY;
         colorLabel.lineBreak = false;
         colorRow = new SwatchPicker(ctx,
             [Theme.CUBE_ORANGE, Theme.CUBE_STEEL, Theme.CUBE_MOSS, Theme.CUBE_VIOLET],
-            24, 8, inspectorContentMask);
+            22, 8, materialSection.content);
         colorRow.onColorChanged = function(color:Int) {
             if (onColorChanged != null) onColorChanged(color);
         };
+
+        inspectorSections = [objectSection, transformSection, behaviorSection, materialSection];
+        for (section in inspectorSections) {
+            section.onToggle = function() layoutInspectorProperties();
+        }
 
         inspectorScrollBar = new ScrollBar(ctx, rightContentMask);
         inspectorScrollBar.onChange = function(value) {
@@ -407,20 +410,6 @@ class EditorShell {
         selectionStatus.text = selectionStatusValue;
         inspectorContentMask.visible = false;
         resize();
-    }
-
-    function makeSectionChevron(parent:h2d.Object):h2d.Graphics {
-        var graphic = new h2d.Graphics(parent);
-        UiIcons.draw(graphic, ChevronDown, 0, 0, 11, Theme.MUTED);
-        return graphic;
-    }
-
-    function makeSectionTitle(value:String, parent:h2d.Object):h2d.Text {
-        var result = new h2d.Text(ctx.captionFont, parent);
-        result.text = value;
-        result.textColor = Theme.TEXT_SECONDARY;
-        result.lineBreak = false;
-        return result;
     }
 
     function drawBrandMark():Void {
@@ -627,9 +616,12 @@ class EditorShell {
         hierarchyCount.x = Math.max(42, leftWidth - hierarchyCount.textWidth - 15);
         hierarchyCount.y = bodyTop + 12;
 
-        hierarchySearch.x = 12;
+        hierarchySearch.x = 46;
         hierarchySearch.y = bodyTop + 51;
-        hierarchySearch.setWidth(Math.max(0, leftWidth - 24));
+        hierarchySearch.setWidth(Math.max(0, leftWidth - 58));
+        hierarchyAddButton.x = 12;
+        hierarchyAddButton.y = bodyTop + 51;
+        hierarchyAddButton.visible = leftWidth >= 180;
         hierarchyHit.x = 8;
         hierarchyHit.y = bodyTop + 91;
         hierarchyHit.width = Math.max(0, leftWidth - 22);
@@ -648,6 +640,11 @@ class EditorShell {
         selectionStatus.x = 14;
         selectionStatus.y = bodyTop + 36;
         fitText(selectionStatus, selectionStatusValue, Math.max(0, rightWidth - 28));
+        if (!inspectorContentMask.visible && rightWidth > 220) {
+            // Unreal-style empty state: centered hint inside the panel body.
+            selectionStatus.x = Math.round((rightWidth - selectionStatus.textWidth) * 0.5);
+            selectionStatus.y = bodyTop + Math.round((rightContentMask.height - bodyTop) * 0.35);
+        }
 
         inspectorContentMask.x = 0;
         inspectorContentMask.y = bodyTop + 68;
@@ -662,58 +659,57 @@ class EditorShell {
     }
 
     function layoutInspectorProperties():Void {
-        var width = Math.max(0, inspectorContentMask.width - 10);
-        var cardX = 5.0;
-        layoutCard(identityCard, identityChevron, identityTitle, cardX, 4, width, 78);
-        objectNameField.x = cardX + 12;
-        objectNameField.y = 42;
-        objectNameField.setWidth(Math.max(0, width - 24));
+        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT + 4;
+        transformSection.contentHeight = INSPECTOR_ROW_HEIGHT + 4;
+        behaviorSection.contentHeight = INSPECTOR_ROW_HEIGHT + 4;
+        materialSection.contentHeight = INSPECTOR_ROW_HEIGHT + 2;
 
-        layoutCard(transformCard, transformChevron, transformTitle, cardX, 90, width, 112);
-        transformSubtitle.x = cardX + 14;
-        transformSubtitle.y = 121;
+        var width = Math.max(0, inspectorContentMask.width - 8);
+        var y:Float = 0;
+        for (section in inspectorSections) {
+            section.x = 4;
+            section.y = Math.round(y);
+            section.setWidth(width);
+            y += section.totalHeight();
+        }
+
+        // Object: label-left, field-right row inside the section content.
+        objectNameField.x = 8;
+        objectNameField.y = 30;
+        objectNameField.setWidth(Math.max(0, width - 16));
+
+        // Transform: three editable axis fields in one row.
         var axisGap = 6.0;
-        var axisWidth = Math.max(0, (width - 28 - axisGap * 2) / 3);
+        var axisWidth = Math.max(0, (width - 16 - axisGap * 2) / 3);
         for (index in 0...transformFields.length) {
-            transformFields[index].x = cardX + 14 + index * (axisWidth + axisGap);
-            transformFields[index].y = 157;
+            transformFields[index].x = 8 + index * (axisWidth + axisGap);
+            transformFields[index].y = 30;
             transformFields[index].setWidth(axisWidth);
         }
 
-        layoutCard(behaviorCard, behaviorChevron, behaviorTitle, cardX, 210, width, 94);
-        spinLabel.x = cardX + 14;
-        spinLabel.y = 258;
+        // Behavior: label left, stepper right.
+        spinLabel.x = 8;
+        spinLabel.y = 30 + Math.round((Theme.CONTROL_HEIGHT - spinLabel.textHeight) * 0.5);
         var spinWidth = Math.max(84, width - 112);
-        spinRow.x = cardX + width - spinWidth - 14;
-        spinRow.y = 250;
+        spinRow.x = width - spinWidth - 8;
+        spinRow.y = 30;
         spinRow.setWidth(spinWidth);
 
-        layoutCard(materialCard, materialChevron, materialTitle, cardX, 312, width, 100);
-        colorLabel.x = cardX + 14;
-        colorLabel.y = 363;
-        colorRow.x = cardX + Math.max(92, width - 142);
-        colorRow.y = 352;
+        // Material: label left, swatches right.
+        colorLabel.x = 8;
+        colorLabel.y = 30 + Math.round((Theme.CONTROL_HEIGHT - colorLabel.textHeight) * 0.5);
+        colorRow.x = Math.max(96, width - colorRow.totalWidth() - 8);
+        colorRow.y = 30 + Math.round((Theme.CONTROL_HEIGHT - 22) * 0.5);
 
-        var ratio = Math.min(1, inspectorContentMask.height / INSPECTOR_CONTENT_HEIGHT);
+        inspectorContentHeight = Math.round(y) + 4;
+        var ratio = Math.min(1, inspectorContentMask.height / Math.max(1, inspectorContentHeight));
         inspectorScrollBar.setMetrics(ratio, inspectorScrollValue);
         inspectorScrollBar.visible = inspectorContentMask.visible && ratio < 1;
         inspectorContentMask.scrollY = maxInspectorScroll() * inspectorScrollValue;
     }
 
-    function layoutCard(card:UiSurface, chevron:h2d.Graphics, title:h2d.Text,
-            x:Float, y:Float, width:Float, height:Float):Void {
-        card.x = x;
-        card.y = y;
-        card.setSize(width, height);
-        card.setStyle(Theme.PANEL_ALT, Theme.BORDER, 0.10);
-        chevron.x = x + 12;
-        chevron.y = y + 13;
-        title.x = x + 31;
-        title.y = y + 10;
-    }
-
     function maxInspectorScroll():Float {
-        return Math.max(0, INSPECTOR_CONTENT_HEIGHT - inspectorContentMask.height);
+        return Math.max(0, inspectorContentHeight - inspectorContentMask.height);
     }
 
     function scrollInspector(delta:Float):Bool {
@@ -722,7 +718,7 @@ class EditorShell {
             inspectorScrollValue - delta * 36 / maxInspectorScroll()));
         inspectorContentMask.scrollY = maxInspectorScroll() * inspectorScrollValue;
         inspectorScrollBar.setMetrics(
-            inspectorContentMask.height / INSPECTOR_CONTENT_HEIGHT, inspectorScrollValue);
+            inspectorContentMask.height / Math.max(1, inspectorContentHeight), inspectorScrollValue);
         return true;
     }
 

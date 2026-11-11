@@ -32,6 +32,7 @@ class BoltUI {
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
+    public var onTransformChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window) {
@@ -47,6 +48,7 @@ class BoltUI {
         shell.onSpinSpeedChanged = function(v) if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         shell.onColorChanged = function(c) if (onColorChanged != null) onColorChanged(c);
         shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
+        shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
     }
 

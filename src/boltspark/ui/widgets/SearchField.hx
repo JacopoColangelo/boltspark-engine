@@ -4,13 +4,13 @@ import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiIcons;
-import boltspark.ui.UiSurface;
+import boltspark.ui.widgets.FieldSurface;
 
 /** Compact search input used by hierarchy filtering. */
 class SearchField extends h2d.Object {
     public var onChange:Null<String->Void>;
 
-    final surface:UiSurface;
+    final surface:FieldSurface;
     final icon:h2d.Graphics;
     final input:h2d.TextInput;
     final placeholder:h2d.Text;
@@ -23,7 +23,7 @@ class SearchField extends h2d.Object {
         super(parent);
         widthValue = width;
         heightValue = height;
-        surface = new UiSurface(ctx, this);
+        surface = new FieldSurface(this);
         icon = new h2d.Graphics(this);
         UiIcons.draw(icon, Search, 0, 0, 14, Theme.MUTED);
 
@@ -69,7 +69,7 @@ class SearchField extends h2d.Object {
         icon.x = 9;
         icon.y = (heightValue - 14) * 0.5;
         input.x = 31;
-        input.y = Math.max(0, (heightValue - input.font.lineHeight) * 0.5 - 1);
+        input.y = Math.max(0, Math.round((heightValue - input.font.lineHeight) * 0.5 - 1));
         input.inputWidth = Std.int(Math.max(0, widthValue - 41));
         placeholder.x = input.x;
         placeholder.y = input.y;
@@ -78,6 +78,6 @@ class SearchField extends h2d.Object {
 
     function redraw():Void {
         surface.setStyle(focused ? Theme.FIELD_FOCUS : Theme.FIELD_BG,
-            focused ? Theme.ACCENT : Theme.BORDER, 0);
+            focused ? Theme.ACCENT : Theme.BORDER);
     }
 }

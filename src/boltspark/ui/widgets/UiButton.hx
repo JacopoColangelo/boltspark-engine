@@ -119,9 +119,9 @@ class UiButton extends h2d.Object {
         var contentWidth = iconSize + gap + label.textWidth;
         var contentX = Math.max(0, (widthValue - contentWidth) * 0.5);
         icon.x = contentX;
-        icon.y = Math.max(0, (heightValue - iconSize) * 0.5);
+        icon.y = Math.max(0, Math.round((heightValue - iconSize) * 0.5));
         label.x = contentX + iconSize + gap;
-        label.y = Math.max(0, (heightValue - label.textHeight) * 0.5 - 0.5);
+        label.y = Math.max(0, Math.round((heightValue - label.textHeight) * 0.5 - 0.5));
     }
 
     function fitLabel():Void {

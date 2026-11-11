@@ -2,7 +2,7 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
-import boltspark.ui.UiSurface;
+import boltspark.ui.widgets.FieldSurface;
 
 /** Two-column inspector text field with commit-on-blur behavior. */
 class TextInputField extends h2d.Object {
@@ -10,7 +10,7 @@ class TextInputField extends h2d.Object {
     public var onCancel:Null<Void->Void>;
 
     final label:h2d.Text;
-    final fieldBackground:UiSurface;
+    final fieldBackground:FieldSurface;
     final input:h2d.TextInput;
     var widthValue:Float;
     final heightValue:Float;
@@ -25,7 +25,7 @@ class TextInputField extends h2d.Object {
         heightValue = height;
         lastCommitted = initialValue;
 
-        fieldBackground = new UiSurface(ctx, this);
+        fieldBackground = new FieldSurface(this);
         label = new h2d.Text(ctx.font, this);
         label.text = labelText;
         label.textColor = Theme.TEXT_SECONDARY;
@@ -91,11 +91,11 @@ class TextInputField extends h2d.Object {
         var fieldX = Math.min(labelWidth, widthValue);
         var fieldWidth = Math.max(0, widthValue - fieldX);
         label.x = 0;
-        label.y = Math.max(0, (heightValue - label.textHeight) * 0.5 - 1);
+        label.y = Math.max(0, Math.round((heightValue - label.textHeight) * 0.5 - 1));
         fieldBackground.x = fieldX;
         fieldBackground.setSize(fieldWidth, heightValue);
         input.x = fieldX + 9;
-        input.y = Math.max(0, (heightValue - input.font.lineHeight) * 0.5 - 1);
+        input.y = Math.max(0, Math.round((heightValue - input.font.lineHeight) * 0.5 - 1));
         input.maxWidth = null;
         input.inputWidth = Std.int(Math.max(0, fieldWidth - 18));
         updateFieldStyle();
@@ -104,7 +104,6 @@ class TextInputField extends h2d.Object {
     function updateFieldStyle():Void {
         fieldBackground.setStyle(
             focused ? Theme.FIELD_FOCUS : Theme.FIELD_BG,
-            focused ? Theme.ACCENT : Theme.BORDER,
-            0);
+            focused ? Theme.ACCENT : Theme.BORDER);
     }
 }

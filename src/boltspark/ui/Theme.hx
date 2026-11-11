@@ -34,28 +34,30 @@ class Theme {
     public static inline var SPACING:Int = 12;
     public static inline var BUTTON_WIDTH:Int = 184;
     public static inline var BUTTON_HEIGHT:Int = 30;
-    public static inline var CONTROL_HEIGHT:Int = 30;
+    public static inline var CONTROL_HEIGHT:Int = 28;
     public static inline var PANEL_HEADER_HEIGHT:Int = 42;
+    public static inline var SECTION_HEADER_HEIGHT:Int = 28;
     public static inline var RADIUS:Int = 6;
 
-    // Palette.
-    public static inline var APP_BG:Int = 0x0E1116;
-    public static inline var TITLE_BAR:Int = 0x171A20;
-    public static inline var TOOLBAR:Int = 0x1C2027;
+    // Palette. Flat neutral dark surfaces in the Unreal/CryEngine family:
+    // structure comes from borders and inset fields, not from tinted cards.
+    public static inline var APP_BG:Int = 0x0D0D0F;
+    public static inline var TITLE_BAR:Int = 0x141416;
+    public static inline var TOOLBAR:Int = 0x1A1A1D;
     public static inline var TOP_BAR:Int = TITLE_BAR;
-    public static inline var PANEL:Int = 0x181C22;
-    public static inline var PANEL_ALT:Int = 0x1C2129;
-    public static inline var PANEL_HEADER:Int = 0x1D222A;
-    public static inline var SURFACE_1:Int = 0x20252E;
-    public static inline var SURFACE_2:Int = 0x252B35;
-    public static inline var SURFACE_3:Int = 0x2C333E;
-    public static inline var BORDER:Int = 0x303741;
-    public static inline var BORDER_STRONG:Int = 0x424B58;
-    public static inline var PANEL_EDGE:Int = BORDER;
-    public static inline var VIEWPORT_BG:Int = 0x0D1117;
-    public static inline var CONSOLE_BG:Int = 0x11151B;
-    public static inline var FIELD_BG:Int = 0x13171D;
-    public static inline var FIELD_FOCUS:Int = 0x171F2A;
+    public static inline var PANEL:Int = 0x1D1D20;
+    public static inline var PANEL_ALT:Int = 0x212124;
+    public static inline var PANEL_HEADER:Int = 0x222225;
+    public static inline var SURFACE_1:Int = 0x242427;
+    public static inline var SURFACE_2:Int = 0x2A2A2E;
+    public static inline var SURFACE_3:Int = 0x323236;
+    public static inline var BORDER:Int = 0x35353A;
+    public static inline var BORDER_STRONG:Int = 0x46464C;
+    public static inline var PANEL_EDGE:Int = 0x2A2A2E;
+    public static inline var VIEWPORT_BG:Int = 0x131316;
+    public static inline var CONSOLE_BG:Int = 0x141417;
+    public static inline var FIELD_BG:Int = 0x141416;
+    public static inline var FIELD_FOCUS:Int = 0x1A1A1E;
     public static inline var ACCENT:Int = 0x4C9AFF;
     public static inline var ACCENT_HOVER:Int = 0x68AAFF;
     public static inline var ACCENT_MUTED:Int = 0x243B59;
@@ -68,9 +70,9 @@ class Theme {
     public static inline var BUTTON_HOVER:Int = SURFACE_3;
     public static inline var BUTTON_ACTIVE:Int = ACCENT_MUTED;
     public static inline var PROPERTY_BG:Int = PANEL_ALT;
-    public static inline var SCROLL_TRACK:Int = 0x151A20;
-    public static inline var SCROLL_THUMB:Int = 0x48515E;
-    public static inline var SCROLL_THUMB_HOVER:Int = 0x647080;
+    public static inline var SCROLL_TRACK:Int = 0x1A1A1D;
+    public static inline var SCROLL_THUMB:Int = 0x45454B;
+    public static inline var SCROLL_THUMB_HOVER:Int = 0x5C5C63;
     public static inline var SWATCH_EDGE:Int = 0x080A0D;
     public static inline var SWATCH_SELECTED:Int = 0xFFFFFF;
     public static inline var SUCCESS:Int = 0x58C48D;

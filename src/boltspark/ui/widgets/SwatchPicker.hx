@@ -12,6 +12,7 @@ class SwatchPicker extends h2d.Object {
     final swatches:Array<UiSurface> = [];
     final hovered:Array<Bool> = [];
     final size:Float;
+    final gap:Float;
     var selectedIndex:Int = 0;
 
     public function new(ctx:UiContext, colors:Array<Int>, size:Float, gap:Float,
@@ -19,6 +20,7 @@ class SwatchPicker extends h2d.Object {
         super(parent);
         this.colors = colors;
         this.size = size;
+        this.gap = gap;
 
         for (i in 0...colors.length) {
             var swatch = new UiSurface(ctx, this);
@@ -44,6 +46,11 @@ class SwatchPicker extends h2d.Object {
     }
 
     public inline function selectedColor():Int return colors[selectedIndex];
+
+    /** Full row width including gaps; used by right-aligned owners. */
+    public function totalWidth():Float {
+        return colors.length * size + Math.max(0, colors.length - 1) * gap;
+    }
 
     public function setColor(color:Int):Void {
         var index = colors.indexOf(color);
