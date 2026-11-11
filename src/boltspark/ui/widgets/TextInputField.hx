@@ -2,39 +2,38 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
+import boltspark.ui.UiSurface;
 
-/**
- * Compact text field for inspector and editor metadata. It exposes a focusable
- * input widget with an immutable label and commit-on-blur behavior.
- */
+/** Two-column inspector text field with commit-on-blur behavior. */
 class TextInputField extends h2d.Object {
     public var onCommit:Null<String->Void>;
     public var onCancel:Null<Void->Void>;
 
     final label:h2d.Text;
-    final fieldBackground:h2d.Graphics;
+    final fieldBackground:UiSurface;
     final input:h2d.TextInput;
     var widthValue:Float;
     final heightValue:Float;
+    var labelWidth:Float = 82;
     var focused:Bool = false;
     var lastCommitted:String;
 
-    public function new(ctx:UiContext, labelText:String, width:Float, height:Float, initialValue:String, ?parent:h2d.Object) {
+    public function new(ctx:UiContext, labelText:String, width:Float, height:Float,
+            initialValue:String, ?parent:h2d.Object) {
         super(parent);
         widthValue = width;
         heightValue = height;
         lastCommitted = initialValue;
 
+        fieldBackground = new UiSurface(ctx, this);
         label = new h2d.Text(ctx.font, this);
         label.text = labelText;
-        label.textColor = Theme.MUTED;
+        label.textColor = Theme.TEXT_SECONDARY;
         label.lineBreak = false;
 
-        fieldBackground = new h2d.Graphics(this);
         input = new h2d.TextInput(ctx.font, this);
         input.text = initialValue;
         input.textColor = Theme.TEXT;
-        input.inputWidth = Std.int(Math.max(0, width));
         input.useSoftwareKeyboard = false;
         input.onFocus = function(_) {
             focused = true;
@@ -49,14 +48,11 @@ class TextInputField extends h2d.Object {
             if (event.keyCode == hxd.Key.ESCAPE) {
                 input.text = lastCommitted;
                 if (onCancel != null) onCancel();
-            } else if (event.keyCode == hxd.Key.ENTER) {
+            } else if (event.keyCode == hxd.Key.ENTER
+                    || event.keyCode == hxd.Key.NUMPAD_ENTER) {
                 commitValue();
             }
         };
-        input.onChange = function() {
-            updateFieldStyle();
-        };
-
         refresh();
     }
 
@@ -65,16 +61,17 @@ class TextInputField extends h2d.Object {
         lastCommitted = value;
     }
 
-    public function getValue():String {
-        return input.text;
-    }
-
-    public function isFocused():Bool {
-        return focused;
-    }
+    public inline function getValue():String return input.text;
+    public inline function isFocused():Bool return focused;
 
     public function setLabelText(text:String):Void {
         label.text = text;
+        refresh();
+    }
+
+    public function setLabelWidth(width:Float):Void {
+        labelWidth = Math.max(0, width);
+        refresh();
     }
 
     public function setWidth(width:Float):Void {
@@ -91,33 +88,23 @@ class TextInputField extends h2d.Object {
     }
 
     function refresh():Void {
+        var fieldX = Math.min(labelWidth, widthValue);
+        var fieldWidth = Math.max(0, widthValue - fieldX);
         label.x = 0;
-        label.y = 0;
-        input.x = 0;
-        input.y = label.textHeight + 8;
-        fieldBackground.clear();
-        fieldBackground.beginFill(focused ? Theme.FIELD_FOCUS : Theme.FIELD_BG);
-        fieldBackground.drawRect(0, label.textHeight + 8, widthValue, heightValue);
-        fieldBackground.endFill();
-        fieldBackground.lineStyle(1, focused ? Theme.ACCENT : Theme.PANEL_EDGE, 1);
-        fieldBackground.drawRect(0, label.textHeight + 8, widthValue, heightValue);
-        fieldBackground.lineStyle();
-
-        label.maxWidth = null;
-        label.lineBreak = false;
-        input.x = 8;
-        input.y = label.textHeight + 8 + Math.max(0, (heightValue - input.font.lineHeight) * 0.5);
+        label.y = Math.max(0, (heightValue - label.textHeight) * 0.5 - 1);
+        fieldBackground.x = fieldX;
+        fieldBackground.setSize(fieldWidth, heightValue);
+        input.x = fieldX + 9;
+        input.y = Math.max(0, (heightValue - input.font.lineHeight) * 0.5 - 1);
         input.maxWidth = null;
-        input.inputWidth = Std.int(Math.max(0, widthValue - 16));
+        input.inputWidth = Std.int(Math.max(0, fieldWidth - 18));
+        updateFieldStyle();
     }
 
     function updateFieldStyle():Void {
-        fieldBackground.clear();
-        fieldBackground.beginFill(focused ? Theme.FIELD_FOCUS : Theme.FIELD_BG);
-        fieldBackground.drawRect(0, label.textHeight + 8, widthValue, heightValue);
-        fieldBackground.endFill();
-        fieldBackground.lineStyle(1, focused ? Theme.ACCENT : Theme.PANEL_EDGE, 1);
-        fieldBackground.drawRect(0, label.textHeight + 8, widthValue, heightValue);
-        fieldBackground.lineStyle();
+        fieldBackground.setStyle(
+            focused ? Theme.FIELD_FOCUS : Theme.FIELD_BG,
+            focused ? Theme.ACCENT : Theme.BORDER,
+            0);
     }
 }

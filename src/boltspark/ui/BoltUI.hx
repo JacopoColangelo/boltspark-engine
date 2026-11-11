@@ -35,7 +35,7 @@ class BoltUI {
     public var onViewportClick:Null<Float->Float->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window) {
-        ctx = new UiContext(window, hxd.res.DefaultFont.get());
+        ctx = new UiContext(window);
         var input = new InputAdapter(parent);
         shell = new EditorShell(parent, ctx, input);
         shell.onCreateObject = function() if (onCreateObject != null) onCreateObject();
@@ -74,8 +74,9 @@ class BoltUI {
     }
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
-            name:String, speed:Float, color:Int):Void {
-        shell.setSelectedObjects(ids, primaryId, name, speed, color);
+            name:String, speed:Float, color:Int, posX:Float = 0, posY:Float = 0,
+            posZ:Float = 0):Void {
+        shell.setSelectedObjects(ids, primaryId, name, speed, color, posX, posY, posZ);
     }
 
     public function setObjectName(name:String):Void {

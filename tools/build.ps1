@@ -457,7 +457,10 @@ function New-NativeRelease {
         @{ Source = (Join-Path $nekoDir 'vcruntime140_1.dll'); Name = 'vcruntime140_1.dll' },
         @{ Source = (Join-Path $nekoDir 'msvcp140.dll'); Name = 'msvcp140.dll' },
         @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.dll'); Name = 'WinPixEventRuntime.dll' },
-        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt'); Name = 'WinPixEventRuntime-LICENSE.txt' }
+        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt'); Name = 'WinPixEventRuntime-LICENSE.txt' },
+        @{ Source = (Join-Path $repoRoot 'docs\THIRD_PARTY_NOTICES.md'); Name = 'THIRD-PARTY-NOTICES.md' },
+        @{ Source = (Join-Path $repoRoot 'tools\font-source\Inter-LICENSE.txt'); Name = 'Inter-LICENSE.txt' },
+        @{ Source = (Join-Path $repoRoot 'tools\font-source\JetBrainsMono-LICENSE.txt'); Name = 'JetBrainsMono-LICENSE.txt' }
     )
     foreach ($runtimeFile in $runtimeFiles) {
         if (-not (Test-Path $runtimeFile.Source)) {
@@ -486,7 +489,10 @@ function New-NativeRelease {
         'vcruntime140_1.dll',
         'msvcp140.dll',
         'WinPixEventRuntime.dll',
-        'WinPixEventRuntime-LICENSE.txt'
+        'WinPixEventRuntime-LICENSE.txt',
+        'THIRD-PARTY-NOTICES.md',
+        'Inter-LICENSE.txt',
+        'JetBrainsMono-LICENSE.txt'
     )
     $replaceNames += Get-ChildItem $hashLinkDir -Filter '*.hdll' -File | Select-Object -ExpandProperty Name
     foreach ($name in ($replaceNames | Select-Object -Unique)) {

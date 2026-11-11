@@ -26,13 +26,14 @@ class DockSplitter extends h2d.Object {
         graphic = new h2d.Graphics(this);
         hit = new h2d.Interactive(1, 1, this);
         hit.backgroundColor = 0;
-        hit.cursor = hxd.Cursor.Move;
+        hit.cursor = vertical ? context.resizeHorizontal : context.resizeVertical;
         hit.onOver = function(_) {
             hovered = true;
             redraw(hit.width, hit.height);
         };
         hit.onOut = function(_) {
             hovered = false;
+            if (!dragging) context.restoreArrowCursor();
             redraw(hit.width, hit.height);
         };
         hit.onPush = function(_) beginDrag();
@@ -70,6 +71,7 @@ class DockSplitter extends h2d.Object {
 
     function finishDrag():Void {
         dragging = false;
+        if (!hovered) context.restoreArrowCursor();
         redraw(hit.width, hit.height);
         if (onDragEnd != null) onDragEnd();
     }

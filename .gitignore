@@ -2,6 +2,7 @@
 !/bin/.gitkeep
 !/bin/Makefile
 /release/
+/src/res/.tmp/
 /.haxelib/
 toolchain/haxelib/hashlink/
 toolchain/hashlink/WinPixEventRuntime.LICENSE.txt

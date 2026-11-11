@@ -16,6 +16,8 @@ class Main extends hxd.App {
     var boltUI:BoltUI;
     var nativeWindow:hxd.Window;
     var cubePrimitive:h3d.prim.Cube;
+    var groundGrid:h3d.scene.Graphics;
+    var selectionOutline:h3d.scene.Graphics;
     final sceneObjects:Array<SceneObject> = [];
     final selectedObjectIds:Array<Int> = [];
     var nextObjectId:Int = 1;
@@ -35,21 +37,33 @@ class Main extends hxd.App {
 
     override function init():Void {
         setInteractiveResizeCallback(interactiveResizeFrame);
+        // Fonts, icons, and 9-slice surfaces are compiled into both the HL
+        // bytecode and native release executable; no runtime asset folder is
+        // required beside Boltspark.exe.
+        hxd.Res.initEmbed();
         nativeWindow = hxd.Window.getInstance();
         nativeWindow.title = "Boltspark Engine";
         nativeWindow.vsync = true;
 
         // M0 evidence: log which Heaps driver backend is actually running.
         var engine = h3d.Engine.getCurrent();
+        engine.backgroundColor = 0xFF000000 | Theme.APP_BG;
         var driverName = Type.getClassName(Type.getClass(engine.driver));
         Sys.println('[M0] renderer driver = ${driverName}');
 
         cubePrimitive = new h3d.prim.Cube(1, 1, 1, true);
-        cubePrimitive.addNormals();
+        // Cube.addUVs() unindexes the primitive; calculate normals afterwards
+        // so each face stays flat instead of sharing smoothed corner normals.
         cubePrimitive.addUVs();
+        cubePrimitive.addNormals();
+        setupViewportScene();
         addSceneObject("sampleCube", 0, Theme.CUBE_ORANGE);
 
-        s3d.camera.pos.set(5, 5, 5);
+        s3d.camera.pos.set(5.8, 4.2, 6.4);
+        s3d.camera.target.set(0, 0, 0);
+        // Boltspark's scene editing logic is Y-up (ground placement intersects
+        // y = 0), while Heaps defaults its camera to Z-up.
+        s3d.camera.up.set(0, 1, 0);
 
         // BoltUI is a native H2D overlay rendered by Heaps. It is not HTML,
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
@@ -89,7 +103,8 @@ class Main extends hxd.App {
             if (trimmedName.length == 0) {
                 boltUI.log("inspector: object name cannot be empty");
                 boltUI.setSelectedObjects(selectedObjectIds, selected.id,
-                    selected.name, selected.spinSpeed, selected.color);
+                    selected.name, selected.spinSpeed, selected.color,
+                    selected.mesh.x, selected.mesh.y, selected.mesh.z);
                 return;
             }
             selected.name = trimmedName;
@@ -104,7 +119,7 @@ class Main extends hxd.App {
         // Visible motion confirms the 3D update path is alive; the editor
         // controls the rate through the inspector stepper.
         for (sceneObject in sceneObjects) {
-            sceneObject.mesh.rotate(0.0, 0.0, dt * sceneObject.spinSpeed);
+            sceneObject.mesh.rotate(0.0, dt * sceneObject.spinSpeed, 0.0);
         }
     }
 
@@ -123,6 +138,7 @@ class Main extends hxd.App {
             s3d.camera.viewX = centerX * 2 / engine.width - 1;
             s3d.camera.viewY = 1 - centerY * 2 / engine.height;
             engine.setRenderZone(x, y, width, height);
+            engine.clear(0xFF000000 | Theme.VIEWPORT_BG, 1, 0);
             s3d.render(engine);
             engine.setRenderZone();
         }
@@ -164,6 +180,9 @@ class Main extends hxd.App {
         mesh.name = name;
         mesh.setPosition(x, 0, z);
         mesh.material.color.setColor(color);
+        mesh.material.shadows = false;
+        mesh.material.specularAmount = 0.18;
+        mesh.material.specularPower = 24;
         var sceneObject = new SceneObject(nextObjectId++, mesh, color);
         sceneObjects.push(sceneObject);
         return sceneObject;
@@ -242,12 +261,14 @@ class Main extends hxd.App {
             ? primaryId
             : (selectedObjectIds.length == 0 ? -1 : selectedObjectIds[selectedObjectIds.length - 1]);
         var selected = getSelectedObject();
+        refreshSelectionOutline();
         if (selected == null) {
             boltUI.setSelectedObjects(selectedObjectIds, -1, "", 0, 0);
             return;
         }
         boltUI.setSelectedObjects(selectedObjectIds, selected.id,
-            selected.name, selected.spinSpeed, selected.color);
+            selected.name, selected.spinSpeed, selected.color,
+            selected.mesh.x, selected.mesh.y, selected.mesh.z);
     }
 
     function getSelectedObject():Null<SceneObject> {
@@ -265,6 +286,87 @@ class Main extends hxd.App {
             entries.push(new HierarchyEntry(sceneObject.id, sceneObject.name));
         }
         boltUI.setHierarchyEntries(entries);
+    }
+
+    function setupViewportScene():Void {
+        var lightSystem = Std.downcast(s3d.lightSystem, h3d.scene.fwd.LightSystem);
+        if (lightSystem != null) {
+            lightSystem.ambientLight.set(0.62, 0.65, 0.70);
+            lightSystem.perPixelLighting = true;
+        }
+
+        var keyLight = new h3d.scene.fwd.DirLight(new h3d.Vector(-0.8, -1.0, -0.55), s3d);
+        keyLight.color = new h3d.Vector(0.55, 0.50, 0.44);
+        keyLight.enableSpecular = true;
+        var rimLight = new h3d.scene.fwd.DirLight(new h3d.Vector(0.65, -0.45, 0.8), s3d);
+        rimLight.color = new h3d.Vector(0.10, 0.14, 0.22);
+        var fillLight = new h3d.scene.fwd.DirLight(new h3d.Vector(-0.25, -0.2, -1.0), s3d);
+        fillLight.color = new h3d.Vector(0.12, 0.14, 0.17);
+        var bounceLight = new h3d.scene.fwd.DirLight(new h3d.Vector(1.0, -0.15, 0.25), s3d);
+        bounceLight.color = new h3d.Vector(0.10, 0.12, 0.16);
+
+        groundGrid = new h3d.scene.Graphics(s3d);
+        groundGrid.name = "EditorGrid";
+        groundGrid.material.mainPass.depthWrite = false;
+        var extent = 20;
+        var gridY = -0.505;
+        for (i in -extent...(extent + 1)) {
+            var major = i % 5 == 0;
+            groundGrid.lineStyle(major ? 1.25 : 1.0,
+                major ? 0x384450 : 0x252D37, 1);
+            groundGrid.moveTo(i, gridY, -extent);
+            groundGrid.lineTo(i, gridY, extent);
+            groundGrid.moveTo(-extent, gridY, i);
+            groundGrid.lineTo(extent, gridY, i);
+        }
+        groundGrid.lineStyle(1.8, Theme.AXIS_X, 1);
+        groundGrid.moveTo(-extent, gridY + 0.003, 0);
+        groundGrid.lineTo(extent, gridY + 0.003, 0);
+        groundGrid.lineStyle(1.8, Theme.AXIS_Z, 1);
+        groundGrid.moveTo(0, gridY + 0.003, -extent);
+        groundGrid.lineTo(0, gridY + 0.003, extent);
+
+        selectionOutline = new h3d.scene.Graphics(s3d);
+        selectionOutline.name = "SelectionOutline";
+        selectionOutline.material.mainPass.depthWrite = false;
+    }
+
+    function refreshSelectionOutline():Void {
+        if (selectionOutline == null) return;
+        selectionOutline.clear();
+        selectionOutline.lineStyle(2.0, Theme.ACCENT, 1);
+        for (sceneObject in sceneObjects) {
+            if (selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
+            drawSelectionBox(selectionOutline, sceneObject.mesh.x,
+                sceneObject.mesh.y, sceneObject.mesh.z, 0.57);
+        }
+    }
+
+    function drawSelectionBox(graphic:h3d.scene.Graphics, cx:Float, cy:Float,
+            cz:Float, extent:Float):Void {
+        var x0 = cx - extent;
+        var x1 = cx + extent;
+        var y0 = cy - extent;
+        var y1 = cy + extent;
+        var z0 = cz - extent;
+        var z1 = cz + extent;
+        inline function segment(ax:Float, ay:Float, az:Float,
+                bx:Float, by:Float, bz:Float):Void {
+            graphic.moveTo(ax, ay, az);
+            graphic.lineTo(bx, by, bz);
+        }
+        segment(x0, y0, z0, x1, y0, z0);
+        segment(x1, y0, z0, x1, y0, z1);
+        segment(x1, y0, z1, x0, y0, z1);
+        segment(x0, y0, z1, x0, y0, z0);
+        segment(x0, y1, z0, x1, y1, z0);
+        segment(x1, y1, z0, x1, y1, z1);
+        segment(x1, y1, z1, x0, y1, z1);
+        segment(x0, y1, z1, x0, y1, z0);
+        segment(x0, y0, z0, x0, y1, z0);
+        segment(x1, y0, z0, x1, y1, z0);
+        segment(x1, y0, z1, x1, y1, z1);
+        segment(x0, y0, z1, x0, y1, z1);
     }
 
     static function main():Void {

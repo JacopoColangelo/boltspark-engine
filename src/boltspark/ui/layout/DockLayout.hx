@@ -55,7 +55,7 @@ class DockLayout {
         var consoleHeight:Float;
         var viewportHeight:Float;
         if (bodyHeight >= 168 + splitterSize + 96) {
-            this.consoleHeight = clamp(this.consoleHeight, 96, bodyHeight - 168 - splitterSize);
+            this.consoleHeight = clamp(this.consoleHeight, 140, bodyHeight - 168 - splitterSize);
             consoleHeight = this.consoleHeight;
             viewportHeight = bodyHeight - consoleHeight - splitterSize;
         } else {

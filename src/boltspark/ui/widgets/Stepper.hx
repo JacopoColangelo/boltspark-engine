@@ -1,5 +1,9 @@
 package boltspark.ui.widgets;
 
+import boltspark.ui.Theme;
+import boltspark.ui.UiContext;
+import boltspark.ui.UiSurface;
+
 /**
  * Numeric stepper widget: [-] value [+].
  *
@@ -18,13 +22,13 @@ class Stepper extends h2d.Object {
     final minus:UiButton;
     final plus:UiButton;
     final valueInput:h2d.TextInput;
-    final fieldBackground:h2d.Graphics;
+    final fieldBackground:UiSurface;
     final format:Float->String;
     var width:Float;
     final height:Float;
     var fieldFocused:Bool = false;
 
-    public function new(ctx:boltspark.ui.UiContext, w:Float, h:Float,
+    public function new(ctx:UiContext, w:Float, h:Float,
             min:Float, max:Float, step:Float, initial:Float,
             format:Float->String, ?parent:h2d.Object) {
         super(parent);
@@ -37,21 +41,23 @@ class Stepper extends h2d.Object {
         this.format = format;
 
         var buttonSize = h;
-        fieldBackground = new h2d.Graphics(this);
+        fieldBackground = new UiSurface(ctx, this);
         minus = new UiButton(ctx, "-", buttonSize, h, this);
+        minus.setQuiet();
         minus.onClick = function() {
             value = clamp(value - step);
             refresh(true);
         };
 
         plus = new UiButton(ctx, "+", buttonSize, h, this);
+        plus.setQuiet();
         plus.onClick = function() {
             value = clamp(value + step);
             refresh(true);
         };
 
-        valueInput = new h2d.TextInput(ctx.font, this);
-        valueInput.textColor = boltspark.ui.Theme.TEXT;
+        valueInput = new h2d.TextInput(ctx.monoFont, this);
+        valueInput.textColor = Theme.TEXT;
         valueInput.lineBreak = false;
         valueInput.inputWidth = Std.int(Math.max(0, width - buttonSize * 2 - 12));
         valueInput.useSoftwareKeyboard = false;
@@ -114,10 +120,8 @@ class Stepper extends h2d.Object {
         valueInput.y = Math.max(0, (height - valueInput.font.lineHeight) / 2);
         valueInput.maxWidth = null;
         valueInput.inputWidth = Std.int(Math.max(0, width - buttonSize * 2 - 12));
-        fieldBackground.clear();
-        fieldBackground.beginFill(boltspark.ui.Theme.FIELD_BG);
-        fieldBackground.drawRect(buttonSize, 0, Math.max(0, width - buttonSize * 2), height);
-        fieldBackground.endFill();
+        fieldBackground.x = buttonSize + 4;
+        fieldBackground.setSize(Math.max(0, width - buttonSize * 2 - 8), height);
         updateFieldStyle();
         if (notify && onValueChanged != null) onValueChanged(value);
     }
@@ -160,15 +164,9 @@ class Stepper extends h2d.Object {
     }
 
     function updateFieldStyle():Void {
-        fieldBackground.clear();
-        fieldBackground.beginFill(fieldFocused ? boltspark.ui.Theme.FIELD_FOCUS : boltspark.ui.Theme.FIELD_BG);
-        fieldBackground.drawRect(height, 0, Math.max(0, width - height * 2), height);
-        fieldBackground.endFill();
-        fieldBackground.lineStyle(
-            1,
-            fieldFocused ? boltspark.ui.Theme.ACCENT : boltspark.ui.Theme.PANEL_EDGE,
-            1);
-        fieldBackground.drawRect(height, 0, Math.max(0, width - height * 2), height);
-        fieldBackground.lineStyle();
+        fieldBackground.setStyle(
+            fieldFocused ? Theme.FIELD_FOCUS : Theme.FIELD_BG,
+            fieldFocused ? Theme.ACCENT : Theme.BORDER,
+            0);
     }
 }

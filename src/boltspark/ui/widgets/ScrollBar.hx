@@ -2,12 +2,14 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
+import boltspark.ui.UiSurface;
 
 class ScrollBar extends h2d.Object {
     public var onChange:Null<Float->Void>;
 
     final context:UiContext;
-    final graphic:h2d.Graphics;
+    final trackSurface:UiSurface;
+    final thumbSurface:UiSurface;
     final track:h2d.Interactive;
     final thumb:h2d.Interactive;
     var trackHeight:Float = 0;
@@ -16,11 +18,14 @@ class ScrollBar extends h2d.Object {
     var contentRatio:Float = 1;
     var dragPointerY:Float = 0;
     var dragScrollValue:Float = 0;
+    var hovered:Bool = false;
+    var dragging:Bool = false;
 
     public function new(context:UiContext, ?parent:h2d.Object) {
         super(parent);
         this.context = context;
-        graphic = new h2d.Graphics(this);
+        trackSurface = new UiSurface(context, this);
+        thumbSurface = new UiSurface(context, this);
         track = new h2d.Interactive(1, 1, this);
         track.backgroundColor = 0;
         track.cursor = hxd.Cursor.Button;
@@ -33,7 +38,15 @@ class ScrollBar extends h2d.Object {
 
         thumb = new h2d.Interactive(1, 1, this);
         thumb.backgroundColor = 0;
-        thumb.cursor = hxd.Cursor.Move;
+        thumb.cursor = hxd.Cursor.Button;
+        thumb.onOver = function(_) {
+            hovered = true;
+            refresh();
+        };
+        thumb.onOut = function(_) {
+            hovered = false;
+            refresh();
+        };
         thumb.onPush = function(_) beginDrag();
     }
 
@@ -54,8 +67,10 @@ class ScrollBar extends h2d.Object {
 
     function beginDrag():Void {
         if (thumbHeight >= trackHeight || trackHeight <= 0) return;
+        dragging = true;
         dragPointerY = context.window.mouseY;
         dragScrollValue = scrollValue;
+        refresh();
         thumb.startCapture(function(event) {
             switch (event.kind) {
                 case EMove:
@@ -68,8 +83,10 @@ class ScrollBar extends h2d.Object {
                     }
                     event.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
+                    dragging = false;
                     event.propagate = false;
                     thumb.stopCapture();
+                    refresh();
                 case _:
                     event.propagate = false;
             }
@@ -81,7 +98,7 @@ class ScrollBar extends h2d.Object {
         var enabled = contentRatio < 1 && trackHeight > 0;
         visible = enabled;
         thumbHeight = enabled
-            ? Math.min(trackHeight, Math.max(24, trackHeight * contentRatio))
+            ? Math.min(trackHeight, Math.max(28, trackHeight * contentRatio))
             : trackHeight;
         var travel = Math.max(0, trackHeight - thumbHeight);
         thumb.x = 0;
@@ -89,21 +106,16 @@ class ScrollBar extends h2d.Object {
         thumb.width = width;
         thumb.height = thumbHeight;
 
-        graphic.clear();
-        if (!enabled) return;
-        graphic.beginFill(Theme.FIELD_BG);
-        graphic.drawRect(0, 0, width, trackHeight);
-        graphic.endFill();
-        graphic.beginFill(Theme.SCROLL_THUMB);
-        graphic.drawRect(0, thumb.y, width, thumbHeight);
-        graphic.endFill();
-        graphic.lineStyle(1, Theme.PANEL_EDGE, 1);
-        graphic.drawRect(0, 0, width, trackHeight);
-        graphic.lineStyle();
-        thumb.visible = true;
+        trackSurface.setSize(width, trackHeight);
+        trackSurface.setStyle(Theme.SCROLL_TRACK, Theme.SCROLL_TRACK, 0, 0);
+        thumbSurface.x = 0;
+        thumbSurface.y = thumb.y;
+        thumbSurface.setSize(width, thumbHeight);
+        var thumbColor = hovered || dragging ? Theme.SCROLL_THUMB_HOVER : Theme.SCROLL_THUMB;
+        thumbSurface.setStyle(thumbColor, thumbColor, 0, 0);
     }
 
-    static function clamp01(value:Float):Float {
+    static inline function clamp01(value:Float):Float {
         return Math.max(0, Math.min(1, value));
     }
 }

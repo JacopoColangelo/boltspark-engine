@@ -1,80 +1,176 @@
 package boltspark.ui.widgets;
 
-/**
- * Native button widget: an h2d.Interactive hit region with a centered label.
- *
- * Hover/pressed states are handled here; click callbacks are forwarded to
- * the owner (editor commands), which keeps widget code free of engine state.
- */
+import boltspark.ui.Theme;
+import boltspark.ui.UiContext;
+import boltspark.ui.UiIcons.UiIconKind;
+import boltspark.ui.UiIcons;
+import boltspark.ui.UiSurface;
+
+/** Compact rounded native button with optional procedural icon. */
 class UiButton extends h2d.Object {
     public var onClick:Null<Void->Void>;
 
-    final bg:h2d.Interactive;
+    final surface:UiSurface;
+    final hit:h2d.Interactive;
+    final icon:h2d.Graphics;
     final label:h2d.Text;
     var fullText:String;
-    var width:Float;
-    final height:Float;
+    var widthValue:Float;
+    final heightValue:Float;
+    var iconKind:UiIconKind = None;
+    var hovered:Bool = false;
+    var pressed:Bool = false;
+    var primary:Bool = false;
+    var danger:Bool = false;
+    var quiet:Bool = false;
+    var selected:Bool = false;
 
-    public function new(ctx:boltspark.ui.UiContext, text:String, w:Float, h:Float, ?parent:h2d.Object) {
+    public function new(ctx:UiContext, text:String, w:Float, h:Float, ?parent:h2d.Object) {
         super(parent);
-        this.width = w;
-        this.height = h;
-        this.fullText = text;
+        widthValue = w;
+        heightValue = h;
+        fullText = text;
 
-        bg = new h2d.Interactive(w, h, this);
-        bg.backgroundColor = boltspark.ui.Theme.BUTTON;
-        bg.cursor = hxd.Cursor.Button;
-        bg.onOver = function(_) bg.backgroundColor = boltspark.ui.Theme.BUTTON_HOVER;
-        bg.onOut = function(_) bg.backgroundColor = boltspark.ui.Theme.BUTTON;
-        bg.onPush = function(_) bg.backgroundColor = boltspark.ui.Theme.BUTTON_ACTIVE;
-        // On release (inside or outside), restore the resting color; only a
-        // release inside the control counts as a click.
-        bg.onRelease = function(_) {
-            bg.backgroundColor = boltspark.ui.Theme.BUTTON;
+        surface = new UiSurface(ctx, this);
+        surface.setSize(w, h);
+        hit = new h2d.Interactive(w, h, this);
+        hit.backgroundColor = 0;
+        hit.cursor = hxd.Cursor.Button;
+        hit.onOver = function(_) {
+            hovered = true;
+            redraw();
+        };
+        hit.onOut = function(_) {
+            hovered = false;
+            pressed = false;
+            redraw();
+        };
+        hit.onPush = function(_) {
+            pressed = true;
+            redraw();
+        };
+        hit.onRelease = function(_) {
+            pressed = false;
+            redraw();
             if (onClick != null) onClick();
         };
-        bg.onReleaseOutside = function(_) bg.backgroundColor = boltspark.ui.Theme.BUTTON;
+        hit.onReleaseOutside = function(_) {
+            pressed = false;
+            redraw();
+        };
 
-        label = new h2d.Text(ctx.font, bg);
-        label.text = text;
-        label.textColor = boltspark.ui.Theme.TEXT;
+        icon = new h2d.Graphics(this);
+        label = new h2d.Text(ctx.semiboldFont, this);
+        label.textColor = Theme.TEXT;
         label.lineBreak = false;
-        bg.addChild(label);
+        setText(text);
+        redraw();
     }
 
-    /** Set text and re-center; call after the widget is positioned. */
+    public function setIcon(kind:UiIconKind):UiButton {
+        iconKind = kind;
+        redrawIcon();
+        center();
+        return this;
+    }
+
+    public function setPrimary(value:Bool = true):UiButton {
+        primary = value;
+        redraw();
+        return this;
+    }
+
+    public function setDanger(value:Bool = true):UiButton {
+        danger = value;
+        redraw();
+        return this;
+    }
+
+    public function setQuiet(value:Bool = true):UiButton {
+        quiet = value;
+        redraw();
+        return this;
+    }
+
+    public function setSelected(value:Bool):UiButton {
+        selected = value;
+        redraw();
+        return this;
+    }
+
+    /** Set text and re-center; long values are elided. */
     public function setText(text:String):Void {
         fullText = text;
-        label.text = text;
-        if (label.calcTextWidth(text) > width) {
-            label.text = "";
-            for (i in 0...text.length) {
-                var candidate = text.substr(0, i + 1) + "...";
-                if (label.calcTextWidth(candidate) > width) break;
-                label.text = candidate;
-            }
-        }
+        fitLabel();
         center();
     }
 
     public function setWidth(w:Float):Void {
-        width = Math.max(0, w);
-        bg.width = width;
-        var fitted = fullText;
-        if (label.calcTextWidth(fitted) > width) {
-            fitted = "";
-            for (i in 0...fullText.length) {
-                var candidate = fullText.substr(0, i + 1) + "...";
-                if (label.calcTextWidth(candidate) > width) break;
-                fitted = candidate;
-            }
-        }
-        label.text = fitted;
+        widthValue = Math.max(0, w);
+        hit.width = widthValue;
+        surface.setSize(widthValue, heightValue);
+        fitLabel();
         center();
     }
 
     public function center():Void {
-        label.x = Math.max(0, (width - label.textWidth) / 2);
-        label.y = Math.max(0, (height - label.textHeight) / 2);
+        var iconSize = iconKind == None ? 0.0 : Math.min(16, heightValue - 10);
+        var gap = iconSize > 0 && label.text.length > 0 ? 7.0 : 0.0;
+        var contentWidth = iconSize + gap + label.textWidth;
+        var contentX = Math.max(0, (widthValue - contentWidth) * 0.5);
+        icon.x = contentX;
+        icon.y = Math.max(0, (heightValue - iconSize) * 0.5);
+        label.x = contentX + iconSize + gap;
+        label.y = Math.max(0, (heightValue - label.textHeight) * 0.5 - 0.5);
+    }
+
+    function fitLabel():Void {
+        var iconReserve = iconKind == None ? 12.0 : 39.0;
+        var maxWidth = Math.max(0, widthValue - iconReserve);
+        label.text = fullText;
+        if (label.calcTextWidth(fullText) <= maxWidth) return;
+        label.text = "";
+        for (i in 0...fullText.length) {
+            var candidate = fullText.substr(0, i + 1) + "...";
+            if (label.calcTextWidth(candidate) > maxWidth) break;
+            label.text = candidate;
+        }
+    }
+
+    function redraw():Void {
+        var fill = Theme.BUTTON;
+        var border = Theme.BORDER;
+        var textColor = Theme.TEXT;
+        if (quiet) {
+            fill = hovered || selected ? Theme.SURFACE_2 : Theme.TOOLBAR;
+            border = hovered || selected ? Theme.BORDER_STRONG : Theme.TOOLBAR;
+        }
+        if (primary) {
+            fill = pressed ? 0x377CC5 : (hovered ? Theme.ACCENT_HOVER : Theme.ACCENT);
+            border = fill;
+            textColor = 0xFFFFFF;
+        } else if (danger) {
+            fill = pressed ? 0x673437 : (hovered ? 0x513137 : Theme.SURFACE_2);
+            border = hovered ? Theme.DANGER : Theme.BORDER;
+            textColor = hovered ? 0xFFB7B7 : Theme.TEXT;
+        } else if (pressed || selected) {
+            fill = Theme.ACCENT_MUTED;
+            border = Theme.ACCENT;
+        } else if (hovered) {
+            fill = Theme.BUTTON_HOVER;
+            border = Theme.BORDER_STRONG;
+        }
+        surface.setStyle(fill, border, quiet ? 0 : 0.16);
+        label.textColor = textColor;
+        redrawIcon(textColor);
+    }
+
+    function redrawIcon(?color:Int):Void {
+        icon.clear();
+        if (iconKind == None) return;
+        UiIcons.draw(icon, iconKind, 0, 0, Math.min(16, heightValue - 10),
+            color == null ? label.textColor : color);
+        fitLabel();
+        center();
     }
 }

@@ -2,27 +2,46 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
+import boltspark.ui.UiIcons;
+import boltspark.ui.UiSurface;
 
 class HierarchyRow extends h2d.Object {
     public var objectId:Int;
     public var onWheel:Null<Float->Void>;
+    public var onSelect:Null<Int->Bool->Bool->Void>;
 
+    final surface:UiSurface;
     final background:h2d.Interactive;
     final selectionEdge:h2d.Graphics;
+    final disclosure:h2d.Graphics;
+    final objectIcon:h2d.Graphics;
     final label:h2d.Text;
     var fullName:String;
+    var selected:Bool = false;
+    var hovered:Bool = false;
 
     public function new(ctx:UiContext, objectId:Int, name:String, ?parent:h2d.Object) {
         super(parent);
         this.objectId = objectId;
         fullName = name;
 
-        background = new h2d.Interactive(1, 26, this);
+        surface = new UiSurface(ctx, this);
+        surface.visible = false;
+        background = new h2d.Interactive(1, 28, this);
         background.cursor = hxd.Cursor.Button;
         background.backgroundColor = 0;
+        background.onOver = function(_) {
+            hovered = true;
+            updateStyle();
+        };
+        background.onOut = function(_) {
+            hovered = false;
+            updateStyle();
+        };
         background.onClick = function(_) {
             if (onSelect != null) {
-                onSelect(this.objectId, hxd.Key.isDown(hxd.Key.CTRL), hxd.Key.isDown(hxd.Key.SHIFT));
+                onSelect(this.objectId, hxd.Key.isDown(hxd.Key.CTRL),
+                    hxd.Key.isDown(hxd.Key.SHIFT));
             }
         };
         background.onWheel = function(event) {
@@ -31,35 +50,53 @@ class HierarchyRow extends h2d.Object {
             event.propagate = false;
         };
 
+        selectionEdge = new h2d.Graphics(this);
+        disclosure = new h2d.Graphics(this);
+        UiIcons.draw(disclosure, ChevronRight, 0, 0, 11, Theme.MUTED);
+        disclosure.x = 8;
+        disclosure.y = 8.5;
+        objectIcon = new h2d.Graphics(this);
+        UiIcons.draw(objectIcon, Cube, 0, 0, 15, Theme.TEXT_SECONDARY);
+        objectIcon.x = 25;
+        objectIcon.y = 6.5;
+
         label = new h2d.Text(ctx.font, this);
-        label.x = 12;
-        label.y = 6;
+        label.x = 48;
+        label.y = 4;
         label.textColor = Theme.TEXT;
         label.lineBreak = false;
-        selectionEdge = new h2d.Graphics(this);
         setName(name);
     }
 
-    public var onSelect:Null<Int->Bool->Bool->Void>;
-
     public function setName(name:String):Void {
         fullName = name;
-        fitLabel(background.width);
+        fitLabel(background.width - label.x - 8);
     }
 
     public function setBounds(x:Float, y:Float, width:Float, selected:Bool):Void {
         this.x = x;
         this.y = y;
+        this.selected = selected;
         background.width = width;
-        background.backgroundColor = selected ? Theme.BUTTON_ACTIVE : 0;
-        label.textColor = selected ? Theme.ACCENT : Theme.TEXT;
+        surface.setSize(width, background.height);
+        updateStyle();
+        fitLabel(width - label.x - 8);
+    }
+
+    function updateStyle():Void {
+        surface.visible = selected || hovered;
+        if (selected) {
+            surface.setStyle(Theme.ACCENT_MUTED, Theme.ACCENT_MUTED, 0, 0);
+        } else if (hovered) {
+            surface.setStyle(Theme.SURFACE_2, Theme.SURFACE_2, 0, 0);
+        }
+        label.textColor = selected ? 0xF3F7FF : Theme.TEXT;
         selectionEdge.clear();
         if (selected) {
             selectionEdge.beginFill(Theme.ACCENT);
-            selectionEdge.drawRect(0, 0, 3, background.height);
+            selectionEdge.drawRoundedRect(1, 5, 3, 18, 1.5);
             selectionEdge.endFill();
         }
-        fitLabel(width - label.x - 8);
     }
 
     function fitLabel(maxWidth:Float):Void {
@@ -69,7 +106,6 @@ class HierarchyRow extends h2d.Object {
         }
         label.text = fullName;
         if (label.calcTextWidth(fullName) <= maxWidth) return;
-
         label.text = "";
         for (i in 0...fullName.length) {
             var candidate = fullName.substr(0, i + 1) + "...";
