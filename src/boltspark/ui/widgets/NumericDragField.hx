@@ -2,6 +2,8 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
+import boltspark.ui.UiText;
+import boltspark.ui.UiIcons;
 
 /**
  * Compact DCC-style numeric editor.
@@ -27,6 +29,8 @@ class NumericDragField extends h2d.Object {
     final prefix:h2d.Text;
     final input:h2d.TextInput;
     final arrowGraphic:h2d.Graphics;
+    final upArrow:h2d.Graphics;
+    final downArrow:h2d.Graphics;
     final scrubHit:h2d.Interactive;
     final upHit:h2d.Interactive;
     final downHit:h2d.Interactive;
@@ -58,12 +62,13 @@ class NumericDragField extends h2d.Object {
 
         surface = new FieldSurface(this);
 
-        prefix = new h2d.Text(ctx.semiboldFont, this);
+        prefix = new UiText(ctx.semiboldFont, this);
         prefix.text = prefixText;
         prefix.textColor = prefixColor;
         prefix.lineBreak = false;
 
         input = new h2d.TextInput(ctx.monoFont, this);
+        input.smooth = true;
         input.text = format(value);
         input.textColor = Theme.TEXT;
         input.lineBreak = false;
@@ -95,6 +100,8 @@ class NumericDragField extends h2d.Object {
         };
 
         arrowGraphic = new h2d.Graphics(this);
+        upArrow = new h2d.Graphics(this);
+        downArrow = new h2d.Graphics(this);
 
         scrubHit = new h2d.Interactive(1, height, this);
         scrubHit.backgroundColor = 0;
@@ -282,6 +289,8 @@ class NumericDragField extends h2d.Object {
 
     function redrawArrows():Void {
         arrowGraphic.clear();
+        upArrow.removeChildren();
+        downArrow.removeChildren();
         if (widthValue <= 0 || heightValue <= 0) return;
         var arrowWidth = Math.min(ARROW_WIDTH, widthValue);
         var x = widthValue - arrowWidth;
@@ -310,17 +319,15 @@ class NumericDragField extends h2d.Object {
         var centerX = x + arrowWidth * 0.5;
         var upY = half * 0.5;
         var downY = half + (heightValue - half) * 0.5;
-        arrowGraphic.beginFill(upHovered ? Theme.TEXT : Theme.MUTED);
-        arrowGraphic.moveTo(centerX, upY - 2);
-        arrowGraphic.lineTo(centerX + 3, upY + 2);
-        arrowGraphic.lineTo(centerX - 3, upY + 2);
-        arrowGraphic.lineTo(centerX, upY - 2);
-        arrowGraphic.endFill();
-        arrowGraphic.beginFill(downHovered ? Theme.TEXT : Theme.MUTED);
-        arrowGraphic.moveTo(centerX - 3, downY - 2);
-        arrowGraphic.lineTo(centerX + 3, downY - 2);
-        arrowGraphic.lineTo(centerX, downY + 2);
-        arrowGraphic.lineTo(centerX - 3, downY - 2);
-        arrowGraphic.endFill();
+        upArrow.clear();
+        UiIcons.draw(upArrow, ChevronUp, 0, 0, 8,
+            upHovered ? Theme.TEXT : Theme.MUTED);
+        upArrow.x = Math.round(centerX - 4);
+        upArrow.y = Math.round(upY - 4);
+        downArrow.clear();
+        UiIcons.draw(downArrow, ChevronDown, 0, 0, 8,
+            downHovered ? Theme.TEXT : Theme.MUTED);
+        downArrow.x = Math.round(centerX - 4);
+        downArrow.y = Math.round(downY - 4);
     }
 }

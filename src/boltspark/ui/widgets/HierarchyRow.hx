@@ -4,6 +4,7 @@ import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
+import boltspark.ui.UiText;
 
 class HierarchyRow extends h2d.Object {
     public var objectId:Int;
@@ -65,7 +66,7 @@ class HierarchyRow extends h2d.Object {
         objectIcon.x = 21;
         objectIcon.y = 4.5;
 
-        label = new h2d.Text(ctx.font, this);
+        label = new UiText(ctx.font, this);
         label.x = 41;
         label.y = 4;
         label.textColor = Theme.TEXT;

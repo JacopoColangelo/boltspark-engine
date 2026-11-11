@@ -57,13 +57,15 @@ The pinned Haxe/HashLink toolchain ships under `toolchain/`. Native release buil
 2. **Pinned compiler** `toolchain/haxe-dev` — Haxe `5.0.0-preview.1+dcda605` (dev build dated 2025-10-23; see `docs/TOOLCHAIN_VERSIONS.md` for why Haxe 4.3.x stable cannot run Heaps 2.1.0's DX12 driver).
 3. **HashLink runtime** `toolchain/hashlink` — official HashLink 1.16.0 win64 binary with both `directx.hdll` and `dx12.hdll`.
 4. **Haxelib packages** in the project-local repository `toolchain/haxelib`: `heaps` **2.1.0**, `format` **3.8.0**, `hldx` **1.16.0**, and HashLink/C **1.16.0**.
-5. A Windows 11 GPU and driver supporting Direct3D 12.
-6. No Agility SDK required (see the section above).
-7. Pinned Microsoft WinPixEventRuntime **1.0.240308001**, installed by the dependency script for native linking.
+5. Project-local hlfreetype **1.0.0** + FreeType **2.14.3** source, installed and built by the dependency/build scripts; nothing is installed system-wide.
+6. A Windows 11 GPU and driver supporting Direct3D 12.
+7. No Agility SDK required (see the section above).
+8. Pinned Microsoft WinPixEventRuntime **1.0.240308001**, installed by the dependency script for native linking.
 
 ### Install dependencies (PowerShell)
 
-Run from the project root to install the pinned Haxe/C library and PIX runtime:
+Run from the project root to install the pinned Haxe/C library, PIX runtime,
+and verified project-local FreeType source:
 
 ```powershell
 .\tools\build.ps1 -InstallDependencies
@@ -94,7 +96,9 @@ $env:NEKOPATH      = "$tc\neko"
 New-Item -ItemType Directory -Force bin | Out-Null
 haxe compile.hxml
 if ($LASTEXITCODE -ne 0) { throw 'Haxe compilation failed.' }
-hl bin/boltspark.hl
+Push-Location bin
+hl boltspark.hl
+Pop-Location
 ```
 
 The development output is HashLink bytecode (`bin/boltspark.hl`); the native Windows release is packaged separately in `release\Boltspark.exe`.
@@ -109,7 +113,7 @@ The development output is HashLink bytecode (`bin/boltspark.hl`); the native Win
 
 ## Windows native release
 
-Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C support library and pinned PIX runtime. Then `.\tools\build.ps1` builds the development bytecode and compiles the native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules and required DLLs alongside the executable. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
+Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C support library, pinned PIX runtime, and pinned FreeType source. Then `.\tools\build.ps1` builds the project-local `freetype.hdll`, development bytecode, and native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules, `freetype.hdll`, licenses, and required DLLs alongside the executable. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
 
 ## Important scope boundary
 

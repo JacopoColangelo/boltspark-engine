@@ -16,6 +16,14 @@ $hlExe = Join-Path $hashLinkDir 'hl.exe'
 $pixVersion = '1.0.240308001'
 $pixPackageHash = '726ACC93D6968E2146261A1E415521747D50AD69894C2B42B5D0D4C29FD66EC4'
 $pixRuntimeHash = '81ADCFD8253C3489BE720DA7E30F16004DC9A1F02A8B418C6C3AEF4993032E6D'
+$hlFreeTypeVersion = '1.0.0'
+$hlFreeTypeCommit = '56c8aac44b1874f0e50c61d970fe8c171c3c5e70'
+$freeTypeVersion = '2.14.3'
+$freeTypeCommit = '0a0221a1347e2f1e07c395263540026e9a0aa7c7'
+$freeTypePackageHash = 'A4C2B6F10C8C78013B410B1ED861485B1BE413F424BF9A6F92AABA844E13C934'
+$freeTypeHeaderHash = 'FD45E7EE01C8F0F2419186D3FC9DD58E25CD866EF0C49F0B347C2D141665A364'
+$hlFreeTypeRoot = Join-Path $repoRoot 'third_party\hlfreetype'
+$freeTypeSource = Join-Path $hlFreeTypeRoot 'vendor\freetype'
 
 $actionCount = 0
 foreach ($requestedAction in @($InstallDependencies, $Check, $Run)) {
@@ -30,6 +38,64 @@ $env:HAXELIB_PATH = Join-Path $toolchain 'haxelib'
 $env:NEKOPATH = $nekoDir
 $env:HASHLINK = $hashLinkDir
 $env:Path = "$haxeDevDir;$nekoDir;$hashLinkDir;$env:Path"
+
+function Test-FreeTypeSource {
+    $marker = Join-Path $freeTypeSource '.boltspark-version'
+    $header = Join-Path $freeTypeSource 'include\freetype\freetype.h'
+    if (-not (Test-Path $marker) -or -not (Test-Path $header)) {
+        throw "FreeType $freeTypeVersion source is missing. Run .\tools\build.ps1 -InstallDependencies."
+    }
+    if ((Get-Content $marker -Raw).Trim() -ne $freeTypeCommit) {
+        throw "Unexpected FreeType source version under $freeTypeSource. Run .\tools\build.ps1 -InstallDependencies."
+    }
+    if ((Get-FileHash $header -Algorithm SHA256).Hash -ne $freeTypeHeaderHash) {
+        throw "FreeType source verification failed under $freeTypeSource. Run .\tools\build.ps1 -InstallDependencies."
+    }
+}
+
+function Install-FreeTypeSource {
+    try {
+        Test-FreeTypeSource
+        Write-Host "FreeType $freeTypeVersion source is already installed." -ForegroundColor DarkGray
+        return
+    }
+    catch {
+        if (Test-Path $freeTypeSource) {
+            Remove-Item -LiteralPath $freeTypeSource -Recurse -Force
+        }
+    }
+
+    $downloadRoot = Join-Path $repoRoot 'bin\dependency-downloads\freetype'
+    $archive = Join-Path $downloadRoot "freetype-$freeTypeVersion.zip"
+    $extractRoot = Join-Path $downloadRoot 'extract'
+    try {
+        New-Item -ItemType Directory -Force $downloadRoot | Out-Null
+        Invoke-WebRequest `
+            -Uri "https://codeload.github.com/freetype/freetype/zip/$freeTypeCommit" `
+            -OutFile $archive
+        if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $freeTypePackageHash) {
+            throw "Downloaded FreeType $freeTypeVersion source failed SHA256 verification."
+        }
+        Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
+        $source = Get-ChildItem $extractRoot -Directory | Select-Object -First 1
+        if ($null -eq $source) {
+            throw "FreeType $freeTypeVersion archive did not contain a source directory."
+        }
+        New-Item -ItemType Directory -Force (Split-Path -Parent $freeTypeSource) | Out-Null
+        Move-Item -LiteralPath $source.FullName -Destination $freeTypeSource
+        [System.IO.File]::WriteAllText(
+            (Join-Path $freeTypeSource '.boltspark-version'),
+            $freeTypeCommit,
+            (New-Object System.Text.UTF8Encoding($false)))
+        Test-FreeTypeSource
+    }
+    finally {
+        if (Test-Path $downloadRoot) {
+            Remove-Item -LiteralPath $downloadRoot -Recurse -Force
+        }
+    }
+    Write-Host "Installed pinned FreeType $freeTypeVersion source project-locally." -ForegroundColor Green
+}
 
 function Install-Dependencies {
     if (-not (Test-Path $haxeExe)) {
@@ -99,7 +165,10 @@ function Install-Dependencies {
         }
     }
 
-    Write-Host "Dependencies ready: Heaps 2.1.0, format, hldx 1.16.0, HashLink/C 1.16.0, PIX $pixVersion." -ForegroundColor Green
+    Install-FreeTypeSource
+    Build-FreeTypeModule
+
+    Write-Host "Dependencies ready: Heaps 2.1.0, format, hldx 1.16.0, HashLink/C 1.16.0, PIX $pixVersion, hlfreetype $hlFreeTypeVersion, FreeType $freeTypeVersion." -ForegroundColor Green
 }
 
 function Get-RequiredFile([string]$Path, [string]$Message) {
@@ -157,6 +226,50 @@ function Get-VisualStudioConfiguration {
         MSBuild = $msbuild
         VSWhere = $vswhere
     }
+}
+
+function Get-CMakeExecutable($VisualStudio) {
+    $cmakeExe = Join-Path $VisualStudio.InstallationPath `
+        'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+    if (Test-Path $cmakeExe) { return $cmakeExe }
+
+    $cmakeCommand = Get-Command cmake -ErrorAction SilentlyContinue
+    if ($null -ne $cmakeCommand) { return $cmakeCommand.Source }
+    throw 'CMake is required. Install the C++ CMake tools for Visual Studio.'
+}
+
+function Build-FreeTypeModule {
+    Test-FreeTypeSource
+    $visualStudio = Get-VisualStudioConfiguration
+    $cmakeExe = Get-CMakeExecutable $visualStudio
+    $buildRoot = Join-Path $repoRoot 'bin\freetype-native'
+    $env:HASHLINK = $hashLinkDir
+    $cmakeArgs = @(
+        '-S', $hlFreeTypeRoot,
+        '-B', $buildRoot,
+        '-G', $visualStudio.CMakeGenerator,
+        '-A', 'x64',
+        "-DFETCHCONTENT_SOURCE_DIR_FREETYPE=$freeTypeSource"
+    )
+    & $cmakeExe @cmakeArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw 'CMake configuration for the FreeType HashLink module failed.'
+    }
+    & $cmakeExe --build $buildRoot --config Release --target extension
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Building the FreeType HashLink module failed.'
+    }
+
+    $module = Join-Path $buildRoot 'extension\Release\freetype.hdll'
+    $importLibrary = Join-Path $buildRoot 'extension\Release\freetype.lib'
+    if (-not (Test-Path $module) -or -not (Test-Path $importLibrary)) {
+        throw "FreeType build completed without the expected freetype.hdll/freetype.lib outputs."
+    }
+    $binDir = Join-Path $repoRoot 'bin'
+    New-Item -ItemType Directory -Force $binDir | Out-Null
+    Copy-Item -LiteralPath $module -Destination (Join-Path $binDir 'freetype.hdll') -Force
+    Copy-Item -LiteralPath $importLibrary -Destination (Join-Path $binDir 'freetype.lib') -Force
+    Write-Host "Native FreeType glyph module built (hlfreetype $hlFreeTypeVersion, FreeType $freeTypeVersion)." -ForegroundColor Green
 }
 
 function Apply-HashLinkPatch([string]$SourceRoot, [string]$PatchPath, [string]$Description) {
@@ -256,6 +369,11 @@ function Test-Environment {
     foreach ($required in $requiredFiles) {
         Get-RequiredFile $required.Path $required.Message | Out-Null
     }
+    Get-RequiredFile (Join-Path $hlFreeTypeRoot 'freetype\heaps\DynamicFreeTypeFont.hx') `
+        "Restore pinned hlfreetype $hlFreeTypeVersion source at commit $hlFreeTypeCommit." | Out-Null
+    Get-RequiredFile (Join-Path $hlFreeTypeRoot 'extension\freetype.c') `
+        "Restore pinned hlfreetype $hlFreeTypeVersion native source." | Out-Null
+    Test-FreeTypeSource
     $actualPixHash = (Get-FileHash (Join-Path $hashLinkDir 'WinPixEventRuntime.dll') -Algorithm SHA256).Hash
     if ($actualPixHash -ne $pixRuntimeHash) {
         throw "Unexpected WinPixEventRuntime.dll hash: $actualPixHash. Run .\tools\build.ps1 -InstallDependencies to restore it."
@@ -271,6 +389,12 @@ function Test-Environment {
     if ($buildConfig -notmatch '(?m)^\s*-D\s+hl_ver=1\.16\.0\s*$') {
         throw 'compile.hxml must define -D hl_ver=1.16.0.'
     }
+    if ($buildConfig -notmatch '(?m)^\s*-cp\s+third_party/hlfreetype\s*$') {
+        throw 'compile.hxml must include the pinned project-local hlfreetype source.'
+    }
+    if ($buildConfig -notmatch 'freetype\.heaps\.Macro\.main\(\)') {
+        throw 'compile.hxml must register the hlfreetype Heaps resource integration.'
+    }
     if ($buildConfig -match 'hlsdl|sdl|opengl') {
         throw 'compile.hxml must not select SDL/OpenGL for the Windows DirectX 12 target.'
     }
@@ -279,7 +403,7 @@ function Test-Environment {
     Write-Host "Visual Studio: $($visualStudio.Version) | MSBuild: $($visualStudio.MSBuild)"
 
     Write-Host 'Environment check passed.' -ForegroundColor Green
-    Write-Host "Toolchain: Haxe $haxeVersion | HashLink $hlVersion | Heaps 2.1.0 | hldx 1.16.0 | HashLink/C 1.16.0" -ForegroundColor Green
+    Write-Host "Toolchain: Haxe $haxeVersion | HashLink $hlVersion | Heaps 2.1.0 | hldx 1.16.0 | HashLink/C 1.16.0 | hlfreetype $hlFreeTypeVersion | FreeType $freeTypeVersion" -ForegroundColor Green
 }
 
 function New-NativeRelease {
@@ -290,6 +414,10 @@ function New-NativeRelease {
     $cmakeGenerator = $visualStudio.CMakeGenerator
     $msbuild = $visualStudio.MSBuild
     $env:VSWHERE = $visualStudio.VSWhere
+    $freeTypeModule = Get-RequiredFile (Join-Path $repoRoot 'bin\freetype.hdll') `
+        'Build the native FreeType module before creating a release.'
+    $freeTypeImportLibrary = Get-RequiredFile (Join-Path $repoRoot 'bin\freetype.lib') `
+        'Build the native FreeType import library before creating a release.'
 
     $hashLinkSource = Join-Path $env:HAXELIB_PATH 'hashlink\git'
     if (-not (Test-Path (Join-Path $hashLinkSource 'libs\directx\window.c'))) {
@@ -305,15 +433,7 @@ function New-NativeRelease {
         Apply-HashLinkPatch $hashLinkSource $vs2026ToolsetPatch 'Visual Studio 2026 v145 toolset'
     }
 
-    $cmakeExe = Join-Path $vsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-    if (-not (Test-Path $cmakeExe)) {
-        $cmakeCommand = Get-Command cmake -ErrorAction SilentlyContinue
-        if ($null -ne $cmakeCommand) {
-            $cmakeExe = $cmakeCommand.Source
-        } else {
-            throw 'CMake is required to rebuild the patched DirectX module. Install the C++ CMake tools for Visual Studio.'
-        }
-    }
+    $cmakeExe = Get-CMakeExecutable $visualStudio
 
     $nativeModuleBuild = Join-Path $repoRoot 'bin\native-modules'
     $cmakeArgs = @(
@@ -352,6 +472,13 @@ function New-NativeRelease {
     }
     $directXImportLibrary = Join-Path $hashLinkDir 'directx.lib'
     $directXImportLibraryBackup = Join-Path $nativeModuleBuild 'directx-original.lib'
+    $hashLinkFreeTypeImportLibrary = Join-Path $hashLinkDir 'freetype.lib'
+    $freeTypeImportLibraryBackup = Join-Path $nativeModuleBuild 'freetype-original.lib'
+    $hadFreeTypeImportLibrary = Test-Path $hashLinkFreeTypeImportLibrary
+    if ($hadFreeTypeImportLibrary) {
+        Copy-Item -LiteralPath $hashLinkFreeTypeImportLibrary `
+            -Destination $freeTypeImportLibraryBackup -Force
+    }
     Copy-Item -LiteralPath $directXImportLibrary -Destination $directXImportLibraryBackup -Force
     Copy-Item -LiteralPath $patchedDirectXModule -Destination (Join-Path $hashLinkDir 'directx.hdll') -Force
     Write-Host 'Patched DirectX module built for interactive window resizing.' -ForegroundColor Green
@@ -365,6 +492,7 @@ function New-NativeRelease {
 
     $compileArgs = @(
         '-cp', 'src',
+        '-cp', 'third_party/hlfreetype',
         '-lib', 'heaps',
         '-lib', 'format',
         '-lib', 'hldx',
@@ -373,11 +501,13 @@ function New-NativeRelease {
         '-D', 'hl_ver=1.16.0',
         '-D', 'windowSize=1440x900',
         '-D', "hlgen.makefile=$vsTemplate",
+        '--macro', 'freetype.heaps.Macro.main()',
         '-hl', $nativeSource,
         '-main', 'Main'
     )
 
     Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
+    Copy-Item -LiteralPath $freeTypeImportLibrary -Destination $hashLinkFreeTypeImportLibrary -Force
     try {
         $previousErrorActionPreference = $ErrorActionPreference
         try {
@@ -391,6 +521,12 @@ function New-NativeRelease {
     }
     finally {
         Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
+        if ($hadFreeTypeImportLibrary) {
+            Copy-Item -LiteralPath $freeTypeImportLibraryBackup `
+                -Destination $hashLinkFreeTypeImportLibrary -Force
+        } elseif (Test-Path $hashLinkFreeTypeImportLibrary) {
+            Remove-Item -LiteralPath $hashLinkFreeTypeImportLibrary -Force
+        }
     }
     $haxeOutput |
         Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
@@ -429,6 +565,7 @@ function New-NativeRelease {
 
     try {
         Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
+        Copy-Item -LiteralPath $freeTypeImportLibrary -Destination $hashLinkFreeTypeImportLibrary -Force
         & $msbuild $nativeSolution '-t:Boltspark' '-nologo' '-verbosity:minimal' `
             '-property:Configuration=Release' '-property:Platform=x64' `
             "-property:PlatformToolset=$platformToolset"
@@ -438,6 +575,12 @@ function New-NativeRelease {
     }
     finally {
         Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
+        if ($hadFreeTypeImportLibrary) {
+            Copy-Item -LiteralPath $freeTypeImportLibraryBackup `
+                -Destination $hashLinkFreeTypeImportLibrary -Force
+        } elseif (Test-Path $hashLinkFreeTypeImportLibrary) {
+            Remove-Item -LiteralPath $hashLinkFreeTypeImportLibrary -Force
+        }
     }
 
     $nativeExe = Join-Path $buildRoot 'x64\Release\Boltspark.exe'
@@ -460,7 +603,9 @@ function New-NativeRelease {
         @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt'); Name = 'WinPixEventRuntime-LICENSE.txt' },
         @{ Source = (Join-Path $repoRoot 'docs\THIRD_PARTY_NOTICES.md'); Name = 'THIRD-PARTY-NOTICES.md' },
         @{ Source = (Join-Path $repoRoot 'tools\font-source\Inter-LICENSE.txt'); Name = 'Inter-LICENSE.txt' },
-        @{ Source = (Join-Path $repoRoot 'tools\font-source\JetBrainsMono-LICENSE.txt'); Name = 'JetBrainsMono-LICENSE.txt' }
+        @{ Source = (Join-Path $repoRoot 'tools\font-source\JetBrainsMono-LICENSE.txt'); Name = 'JetBrainsMono-LICENSE.txt' },
+        @{ Source = (Join-Path $hlFreeTypeRoot 'LICENSE'); Name = 'hlfreetype-LICENSE.txt' },
+        @{ Source = (Join-Path $hlFreeTypeRoot 'FreeType-LICENSE.txt'); Name = 'FreeType-LICENSE.txt' }
     )
     foreach ($runtimeFile in $runtimeFiles) {
         if (-not (Test-Path $runtimeFile.Source)) {
@@ -471,7 +616,11 @@ function New-NativeRelease {
 
     foreach ($module in $nativeModules) {
         $moduleFile = "$module.hdll"
-        $modulePath = Join-Path $hashLinkDir $moduleFile
+        $modulePath = if ($module -eq 'freetype') {
+            $freeTypeModule
+        } else {
+            Join-Path $hashLinkDir $moduleFile
+        }
         if (-not (Test-Path $modulePath)) {
             throw "Required HashLink module not found: $modulePath"
         }
@@ -492,7 +641,10 @@ function New-NativeRelease {
         'WinPixEventRuntime-LICENSE.txt',
         'THIRD-PARTY-NOTICES.md',
         'Inter-LICENSE.txt',
-        'JetBrainsMono-LICENSE.txt'
+        'JetBrainsMono-LICENSE.txt',
+        'hlfreetype-LICENSE.txt',
+        'FreeType-LICENSE.txt',
+        'freetype.hdll'
     )
     $replaceNames += Get-ChildItem $hashLinkDir -Filter '*.hdll' -File | Select-Object -ExpandProperty Name
     foreach ($name in ($replaceNames | Select-Object -Unique)) {
@@ -514,7 +666,9 @@ if ($Run) {
     $runtime = Get-RequiredFile $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
     $bytecode = Get-RequiredFile (Join-Path $repoRoot 'bin\boltspark.hl') `
         'Build output not found (bin\boltspark.hl). Run .\tools\build.ps1 first.'
-    Push-Location $repoRoot
+    Get-RequiredFile (Join-Path $repoRoot 'bin\freetype.hdll') `
+        'FreeType runtime module not found. Run .\tools\build.ps1 first.' | Out-Null
+    Push-Location (Join-Path $repoRoot 'bin')
     try {
         & $runtime $bytecode
         if ($LASTEXITCODE -ne 0) { throw "Boltspark exited with code $LASTEXITCODE." }
@@ -531,6 +685,7 @@ try {
     if ($Check) { return }
 
     New-Item -ItemType Directory -Force (Join-Path $repoRoot 'bin') | Out-Null
+    Build-FreeTypeModule
     & $haxeExe (Join-Path $repoRoot 'compile.hxml')
     if ($LASTEXITCODE -ne 0) { throw "Haxe compilation failed with exit code $LASTEXITCODE." }
     if (-not (Test-Path (Join-Path $repoRoot 'bin\boltspark.hl'))) {

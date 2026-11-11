@@ -1,5 +1,7 @@
 package boltspark.ui;
 
+import freetype.heaps.types.FontTypes.FreeTypeFontOptions;
+
 /**
  * Shared BoltUI context handed to widgets and panels.
  *
@@ -9,10 +11,13 @@ package boltspark.ui;
  * It is native H2D plumbing only: no DOM, no CSS, no browser stack.
  */
 class UiContext {
+    static final UI_PRELOAD_CHARS:String = hxd.Charset.ASCII + "°±·×–—•…";
+
     public final window:hxd.Window;
     public final font:h2d.Font;
     public final semiboldFont:h2d.Font;
     public final captionFont:h2d.Font;
+    public final labelFont:h2d.Font;
     public final titleFont:h2d.Font;
     public final monoFont:h2d.Font;
     public final resizeHorizontal:hxd.Cursor;
@@ -29,10 +34,11 @@ class UiContext {
 
     public function new(window:hxd.Window) {
         this.window = window;
-        font = prepareFont(hxd.Res.fonts.ui_regular_13.toFont());
-        semiboldFont = prepareFont(hxd.Res.fonts.ui_semibold_13.toFont());
-        captionFont = prepareFont(hxd.Res.fonts.ui_semibold_11.toFont());
-        titleFont = prepareFont(hxd.Res.fonts.ui_bold_15.toFont());
+        font = prepareFont(hxd.Res.fonts.inter_regular.toDynamicFont(13, fontOptions()));
+        semiboldFont = prepareFont(hxd.Res.fonts.inter_semibold.toDynamicFont(13, fontOptions()));
+        captionFont = prepareFont(hxd.Res.fonts.inter_semibold.toDynamicFont(11, fontOptions()));
+        labelFont = prepareFont(hxd.Res.fonts.inter_semibold.toDynamicFont(12, fontOptions()));
+        titleFont = prepareFont(hxd.Res.fonts.inter_bold.toDynamicFont(15, fontOptions()));
         monoFont = prepareFont(hxd.Res.fonts.mono_12.toFont());
         #if hldx
         arrowCursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.Arrow);
@@ -44,6 +50,17 @@ class UiContext {
         resizeHorizontal = hxd.Cursor.Move;
         resizeVertical = hxd.Cursor.Move;
         #end
+    }
+
+    function fontOptions():FreeTypeFontOptions {
+        return {
+            antiAliasing: true,
+            atlasWidth: 256,
+            chars: UI_PRELOAD_CHARS,
+            kerning: true,
+            padding: 2,
+            uploadTexture: true
+        };
     }
 
     function prepareFont(result:h2d.Font):h2d.Font {
@@ -77,11 +94,11 @@ class UiContext {
 
     /** Center a text widget horizontally inside [x, x + width]. */
     public function centerX(label:h2d.Text, x:Float, w:Float):Void {
-        label.x = x + Math.max(0, (w - label.textWidth) / 2);
+        label.x = Math.round(x + Math.max(0, (w - label.textWidth) / 2));
     }
 
     /** Vertically center a text widget inside [y, y + height]. */
     public function centerY(label:h2d.Text, y:Float, h:Float):Void {
-        label.y = y + Math.max(0, (h - label.textHeight) / 2);
+        label.y = Math.round(y + Math.max(0, (h - label.textHeight) / 2));
     }
 }

@@ -23,7 +23,9 @@ class InputAdapter {
 
     public function new(scene:h2d.Scene) {
         this.scene = scene;
-        scene.addEventListener(onSceneEvent);
+        // Listen at the window level so full-window editor interactives (which
+        // consume events before scene listeners run) cannot starve the adapter.
+        hxd.Window.getInstance().addEventTarget(onSceneEvent);
     }
 
     /** Optional status text updated as events arrive. */

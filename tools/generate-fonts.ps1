@@ -179,48 +179,6 @@ function Build-BMFont {
 }
 
 $fontSource = Join-Path $PSScriptRoot 'font-source'
-Build-BMFont -BaseName 'ui_regular_13' -FontPath (Join-Path $fontSource 'Inter-Regular.ttf') -PixelSize 13 -FontStyle ([System.Drawing.FontStyle]::Regular) -AtlasWidth 256 -AtlasHeight 256
-Build-BMFont -BaseName 'ui_semibold_13' -FontPath (Join-Path $fontSource 'Inter-SemiBold.ttf') -PixelSize 13 -FontStyle ([System.Drawing.FontStyle]::Regular) -AtlasWidth 256 -AtlasHeight 256
-Build-BMFont -BaseName 'ui_semibold_11' -FontPath (Join-Path $fontSource 'Inter-SemiBold.ttf') -PixelSize 11 -FontStyle ([System.Drawing.FontStyle]::Regular) -AtlasWidth 256 -AtlasHeight 256
-Build-BMFont -BaseName 'ui_bold_15' -FontPath (Join-Path $fontSource 'Inter-Bold.ttf') -PixelSize 15 -FontStyle ([System.Drawing.FontStyle]::Bold) -AtlasWidth 256 -AtlasHeight 256
+# Inter is loaded directly from TTF by the runtime FreeType cache. The console
+# intentionally retains its existing fixed mono atlas, regenerated here.
 Build-BMFont -BaseName 'mono_12' -FontPath (Join-Path $fontSource 'JetBrainsMono.ttf') -PixelSize 12 -FontStyle ([System.Drawing.FontStyle]::Regular) -AtlasWidth 256 -AtlasHeight 256
-
-function Build-RoundedSurface {
-    param(
-        [string]$Path,
-        [int]$Size = 32,
-        [double]$Radius = 8.0
-    )
-
-    $bitmap = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $samples = 4
-    $half = $Size / 2.0
-    $innerHalf = $half - $Radius
-
-    for ($y = 0; $y -lt $Size; $y++) {
-        for ($x = 0; $x -lt $Size; $x++) {
-            $covered = 0
-            for ($sy = 0; $sy -lt $samples; $sy++) {
-                for ($sx = 0; $sx -lt $samples; $sx++) {
-                    $px = ($x + ($sx + 0.5) / $samples) - $half
-                    $py = ($y + ($sy + 0.5) / $samples) - $half
-                    $qx = [Math]::Max([Math]::Abs($px) - $innerHalf, 0.0)
-                    $qy = [Math]::Max([Math]::Abs($py) - $innerHalf, 0.0)
-                    if (($qx * $qx + $qy * $qy) -le ($Radius * $Radius)) {
-                        $covered++
-                    }
-                }
-            }
-            $alpha = [int][Math]::Round(255.0 * $covered / ($samples * $samples))
-            $bitmap.SetPixel($x, $y, [System.Drawing.Color]::FromArgb($alpha, 255, 255, 255))
-        }
-    }
-
-    $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
-    $bitmap.Dispose()
-}
-
-$surfaceDir = Join-Path $repoRoot 'src\res\surfaces'
-New-Item -ItemType Directory -Force $surfaceDir | Out-Null
-Build-RoundedSurface -Path (Join-Path $surfaceDir 'rounded.png')
-Write-Host 'Generated anti-aliased rounded 9-slice surface' -ForegroundColor Green

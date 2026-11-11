@@ -5,7 +5,7 @@ Rules for AI agents (and humans) working in this repository. Read this before ma
 ## Non-negotiable platform rules
 
 1. **Native only.** The Windows target is HashLink + `hldx` + `-D dx12`. Never introduce or suggest Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, DOM, HTML, CSS, Node, SDL (`hlsdl`), or OpenGL as UI or rendering technology. There is no fallback to DX11: `-D dx12` must stay in `compile.hxml`.
-2. **Never touch the locked toolchain set.** Do not update Haxe, HashLink, Heaps, `format`, `hldx`, or any file in `toolchain/` without an explicit user decision. Any upgrade requires a clean compile and the full acceptance suite. The current lock is documented in `docs/TOOLCHAIN_VERSIONS.md` (compiler: `5.0.0-preview.1+dcda605` at `toolchain/haxe-dev`; HashLink 1.16.0 at `toolchain/hashlink`; the pin is the newest compiler that works with Heaps 2.1.0 — newer dev builds break Heaps, older/stable compilers cannot run DX12 with Heaps 2.1.0).
+2. **Never touch the locked toolchain set.** Do not update Haxe, HashLink, Heaps, `format`, `hldx`, hlfreetype, FreeType, or any file in `toolchain/` without an explicit user decision. Any upgrade requires a clean compile and the full acceptance suite. The current lock is documented in `docs/TOOLCHAIN_VERSIONS.md` (compiler: `5.0.0-preview.1+dcda605` at `toolchain/haxe-dev`; HashLink 1.16.0 at `toolchain/hashlink`; hlfreetype 1.0.0 at pinned commit `56c8aac`; FreeType 2.14.3; the compiler pin is the newest one that works with Heaps 2.1.0 — newer dev builds break Heaps, older/stable compilers cannot run DX12 with Heaps 2.1.0).
 3. **Do not modify `docs/DEVELOPMENT_PLAN.md`.** It is the master plan. Propose changes to the user instead.
 
 ## Environment rules
@@ -40,3 +40,4 @@ Rules for AI agents (and humans) working in this repository. Read this before ma
 15. Build with `tools/build.ps1`, run with `tools/build.ps1 -Run`. For screenshots of the native window use `PrintWindow` (screen-copy grabs the wrong monitor on multi-monitor setups).
 16. Run `tools/build.ps1 -Check` before diagnosing "environment" issues — it validates OS, pins, native modules, and build config in one pass. Install third-party build dependencies only when required with `tools/build.ps1 -InstallDependencies`.
 17. Keep the DX12/CArray regression repro (`tests/repro/DxCArrayRepro.hx`) compiling and passing whenever toolchain changes are ever approved.
+18. Keep `tests/repro/FreeTypeRuntimeRepro.hx` passing when changing fonts, hlfreetype, FreeType, glyph metrics, or atlas behavior.

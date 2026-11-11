@@ -7,7 +7,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - A native Windows 11 x64 desktop window ("Boltspark Engine") booted by the HashLink VM, rendering through the **DirectX 12** Heaps driver (positively identified at runtime as `h3d.impl.DX12Driver`).
 - A rotating 3D mesh in `s3d` behind a native `h2d` editor chrome overlay.
 - A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
-- A compact native BoltUI editor shell with embedded anti-aliased Inter/JetBrains Mono atlases, crisp vector surfaces, procedural icons, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics.
+- A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter, analytic anti-aliased icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
 - Inspector numeric fields support compact up/down stepping, horizontal drag scrubbing, and keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
@@ -28,6 +28,7 @@ The Haxe/HashLink toolchain and Haxelib dependencies are project-local. Building
 | `toolchain/hashlink` | Official HashLink **1.16.0** win64 binary (with `directx.hdll`, `dx12.hdll`, `libhl.dll`, `dxcompiler.dll`, `dxil.dll`) |
 | `toolchain/haxelib` | Project-local Haxelib repository (heaps 2.1.0, format 3.8.0, hldx 1.16.0, HashLink/C 1.16.0) |
 | `toolchain/neko` | Neko runtime (needed by `haxelib.exe`) |
+| `third_party/hlfreetype` | Pinned HashLink FreeType 1.0.0 integration; statically links project-local FreeType 2.14.3 into `freetype.hdll` |
 | `WinPixEventRuntime` | Pinned x64 native dependency installed by `tools/build.ps1 -InstallDependencies` |
 
 Full version lock, hashes, and the reasoning behind the compiler pin: [`docs/TOOLCHAIN_VERSIONS.md`](docs/TOOLCHAIN_VERSIONS.md).
@@ -45,7 +46,7 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -Run                # run the development HashLink build
 ```
 
-The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library and PIX runtime only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable and its required runtime files.
+The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library, PIX runtime, and verified FreeType source only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable, `freetype.hdll`, licenses, and its other required runtime files.
 
 ## Documentation
 
@@ -54,7 +55,7 @@ The single script sets the Haxe/HashLink environment per-session and uses projec
 - [`docs/TOOLCHAIN_VERSIONS.md`](docs/TOOLCHAIN_VERSIONS.md) — the pinned, hash-verified toolchain set
 - [`docs/M0_IMPLEMENTATION_REPORT.md`](docs/M0_IMPLEMENTATION_REPORT.md) — what was done, evidence, deviations, known issues
 - [`docs/AI_AGENT_GUIDELINES.md`](docs/AI_AGENT_GUIDELINES.md) — rules for AI agents working on this repo
-- [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) — licenses for embedded UI font atlases
+- [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) — licenses for fonts, hlfreetype, and FreeType
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — master development plan (do not modify)
 - [`tests/native-foundation-acceptance.md`](tests/native-foundation-acceptance.md) — acceptance checklist with executed results
 
@@ -67,17 +68,19 @@ src/
     BoltUI.hx                 — facade: theme + input adapter + editor shell
     layout/                   — reusable dock geometry and local layout persistence
     Theme.hx                  — modern dark-editor color/size tokens
-    UiContext.hx              — embedded fonts, 9-slice tile, native cursors, window state
-    UiSurface.hx / UiIcons.hx — square-edged surface and procedural icon primitives
+    UiContext.hx              — embedded fonts, native cursors, window state
+    UiSurface.hx / UiIcons.hx — square-edged surfaces and analytic icon primitives
+    UiText*.hx / shaders/     — runtime FreeType text wrappers and analytic icon coverage
     InputAdapter.hx           — central keyboard/focus/pointer reporting
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
-  res/                        — embedded bitmap-font atlases
+  res/fonts/                  — embedded Inter TTF faces + fixed console mono atlas
 tests/
   native-foundation-acceptance.md
   repro/DxCArrayRepro.hx      — isolation repro for the DX12/CArray root cause
 tools/
   build.ps1                   — install dependencies, check, build, and run
-  generate-fonts.ps1          — deterministically regenerate embedded UI font atlases
-  font-source/                — OFL-licensed Inter and JetBrains Mono source fonts
+  generate-fonts.ps1          — deterministically regenerate the fixed console mono atlas
+  font-source/                — JetBrains Mono source + OFL font license texts
+third_party/hlfreetype/       — pinned runtime TTF/OTF rasterizer and Heaps glyph cache
 ```

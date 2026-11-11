@@ -26,9 +26,12 @@
 - `format` version: **3.8.0**
 - `hldx` version: **1.16.0**
 - HashLink Haxe/C support library: **1.16.0** (source tag `1.16`)
+- hlfreetype: **1.0.0**, pinned project-local source at commit `56c8aac44b1874f0e50c61d970fe8c171c3c5e70` (`third_party/hlfreetype`; upstream archive SHA256 `1D8320D1CAF8C36A3FB9331E3EAC43341080395FDE0039AB3D8F0A2EEBBD57F2`)
+- FreeType: **2.14.3** / tag `VER-2-14-3`, commit `0a0221a1347e2f1e07c395263540026e9a0aa7c7`; source archive SHA256 `A4C2B6F10C8C78013B410B1ED861485B1BE413F424BF9A6F92AABA844E13C934`. Source is installed project-locally by `tools/build.ps1 -InstallDependencies` and statically linked into `freetype.hdll`.
+- Project-built `freetype.hdll` verification hash: sha256 `2258306D2D51367B6D41024ADA5A11195868394FA593BBE196006D79FC8C0432` (x64 Release, VS2026 v145; output can change with compiler/toolset changes and must then be re-recorded).
 - WinPixEventRuntime: **1.0.240308001** (NuGet package SHA256 `726ACC93D6968E2146261A1E415521747D50AD69894C2B42B5D0D4C29FD66EC4`)
 - Backend: `hldx` + `-D dx12` / Direct3D 12
-- Haxe build config: `compile.hxml` (`-lib heaps -lib format -lib hldx -D dx12 -D hl_ver=1.16.0 -debug -hl bin/boltspark.hl`)
+- Haxe build config: `compile.hxml` (`-cp third_party/hlfreetype -lib heaps -lib format -lib hldx --macro freetype.heaps.Macro.main() -D dx12 -D hl_ver=1.16.0 -debug -hl bin/boltspark.hl`)
 - Runtime proof: `[M0] renderer driver = h3d.impl.DX12Driver` logged at startup (`bin/runlog.txt`); window "Boltspark Engine" renders 3D cube + H2D editor chrome (`bin/m0_window.png`, `bin/m0_input_test.png`)
 - Date verified: 2026-11-11
 
@@ -50,4 +53,4 @@ The Heaps DX12 driver requires `hl.CArray`. The pinned dev compiler ships its ow
 
 ## Backend compatibility rule
 
-Keep the HashLink VM, `directx.hdll`, `dx12.hdll`, `libhl.dll`, and `hldx` binding versions aligned as one tested set (official 1.16.0 release). Keep the pinned Haxe dev build exactly as recorded (any newer dev build past 2025-10-23 breaks Heaps 2.1.0; any stable release cannot run DX12 with Heaps 2.1.0). Agents must not update Haxe, HashLink, Heaps, `format`, `hldx`, or native modules independently. Any upgrade requires a clean compile and the full Windows native acceptance suite (`tests/native-foundation-acceptance.md`).
+Keep the HashLink VM, `directx.hdll`, `dx12.hdll`, `libhl.dll`, and `hldx` binding versions aligned as one tested set (official 1.16.0 release). Keep the pinned Haxe dev build exactly as recorded (any newer dev build past 2025-10-23 breaks Heaps 2.1.0; any stable release cannot run DX12 with Heaps 2.1.0). hlfreetype and FreeType are also a tested pair and must remain at the pins above unless their native module, exact-size metrics, dynamic cache repro, and editor rendering are re-verified. Agents must not update these dependencies or native modules independently. Any upgrade requires a clean compile and the full Windows native acceptance suite (`tests/native-foundation-acceptance.md`).

@@ -5,6 +5,7 @@ import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
+import boltspark.ui.UiText;
 
 /** Compact square-edged native editor button with an optional icon. */
 class UiButton extends h2d.Object {
@@ -62,7 +63,7 @@ class UiButton extends h2d.Object {
         };
 
         icon = new h2d.Graphics(this);
-        label = new h2d.Text(ctx.semiboldFont, this);
+        label = new UiText(ctx.semiboldFont, this);
         label.textColor = Theme.TEXT;
         label.lineBreak = false;
         setText(text);
@@ -119,7 +120,7 @@ class UiButton extends h2d.Object {
         var iconSize = iconKind == None ? 0.0 : Math.min(16, heightValue - 10);
         var gap = iconSize > 0 && label.text.length > 0 ? 7.0 : 0.0;
         var contentWidth = iconSize + gap + label.textWidth;
-        var contentX = Math.max(0, (widthValue - contentWidth) * 0.5);
+        var contentX = Math.round(Math.max(0, (widthValue - contentWidth) * 0.5));
         icon.x = contentX;
         icon.y = Math.max(0, Math.round((heightValue - iconSize) * 0.5));
         label.x = contentX + iconSize + gap;

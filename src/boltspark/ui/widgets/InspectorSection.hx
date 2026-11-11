@@ -4,6 +4,7 @@ import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiIcons;
+import boltspark.ui.UiText;
 
 /**
  * Collapsible full-width property group. Sections are stacked without card
@@ -31,7 +32,7 @@ class InspectorSection extends h2d.Object {
         // The header fill must sit behind its glyphs and label.
         divider = new h2d.Graphics(this);
         chevron = new h2d.Graphics(this);
-        title = new h2d.Text(ctx.captionFont, this);
+        title = new UiText(ctx.labelFont, this);
         title.text = titleText.toUpperCase();
         title.textColor = Theme.TEXT_SECONDARY;
         title.lineBreak = false;

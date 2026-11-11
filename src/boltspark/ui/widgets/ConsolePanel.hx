@@ -4,6 +4,7 @@ import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
+import boltspark.ui.UiText;
 
 class ConsolePanel extends h2d.Object {
     public static inline var MAX_LINES:Int = 500;
@@ -35,7 +36,7 @@ class ConsolePanel extends h2d.Object {
         bodySurface.setStyle(Theme.CONSOLE_BG, Theme.BORDER, 0);
         titleIcon = new h2d.Graphics(this);
         UiIcons.draw(titleIcon, Console, 0, 0, 15, Theme.TEXT_SECONDARY);
-        title = new h2d.Text(ctx.semiboldFont, this);
+        title = new UiText(ctx.semiboldFont, this);
         title.text = "Output Log";
         title.textColor = Theme.TEXT;
         title.lineBreak = false;
@@ -59,6 +60,9 @@ class ConsolePanel extends h2d.Object {
             if (event.button == 0 && onBackgroundClick != null) onBackgroundClick();
         };
         text = new h2d.Text(ctx.monoFont, contentMask);
+        // Preserve the console's existing mono rendering; it was already
+        // legible and does not need the proportional-font coverage shader.
+        text.smooth = true;
         text.textColor = Theme.TEXT_SECONDARY;
         text.x = 8;
         text.y = 5;

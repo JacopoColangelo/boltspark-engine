@@ -23,6 +23,9 @@
 *.jpg    binary
 *.dds    binary
 *.fbx    binary
+*.ttf    binary
+*.otf    binary
+*.ttc    binary
 *.envd   binary
 *.fnt    binary
 *.zip    binary

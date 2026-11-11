@@ -9,12 +9,13 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] Haxe compilation succeeds with the pinned toolchain using `compile.hxml` (`tools\build.ps1`).
 - [x] Native release build links HashLink/C into `release\Boltspark.exe` and stages the required runtime modules beside it.
 - [x] `compile.hxml` selects `-lib hldx`, explicitly defines `-D dx12`, and pins `-D hl_ver=1.16.0`.
-- [x] HashLink VM starts the compiled `.hl` file (`toolchain/hashlink/hl.exe bin/boltspark.hl`).
+- [x] HashLink VM starts the compiled `.hl` file through `tools/build.ps1 -Run`, with `bin/freetype.hdll` available in the bytecode working directory.
 - [x] HashLink native module `directx.hdll` (window/input/event services) is present and loads at runtime (window opens, input works).
 - [x] HashLink native module `dx12.hdll` (Direct3D 12 rendering driver) is present and loads at runtime (rendering succeeds; driver positively identified as `h3d.impl.DX12Driver`).
+- [x] Project-local `freetype.hdll` loads in both HashLink and native-release runs; FreeType 2.14.3 is statically linked, so no system font-rendering dependency is installed.
 - [x] **Agility SDK: not required.** The official HashLink 1.16.0 binary is a standard DX12 build; no `D3D12/` folder or Agility DLLs are needed.
 - [x] Process opens a normal native Windows desktop window (`bin/m0_window.png` — title "Boltspark Engine").
-- [x] No Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, browser, Node, SDL, or OpenGL fallback is launched/used: the only modules loaded are HashLink runtime + `dx12.hdll`/`directx.hdll`/`heaps.hdll`; `hlsdl`/`sdl.hdll` is never referenced by the build (`compile.hxml` checked by `tools/build.ps1 -Check`).
+- [x] No Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, browser, Node, SDL, or OpenGL fallback is launched/used: the native modules are HashLink runtime services + `dx12.hdll`/`directx.hdll`/`heaps.hdll` and the project-local `freetype.hdll`; `hlsdl`/`sdl.hdll` is never referenced by the build (`compile.hxml` checked by `tools/build.ps1 -Check`).
 - [x] Window closes cleanly (run exits with code 0 on close).
 
 ## Rendering
@@ -35,6 +36,7 @@ Evidence files are under `bin/` unless noted otherwise.
 - [ ] Dock-splitter resize is validated against viewport framing and picking coordinates.
 - [ ] High-DPI scaling and device-loss/reset recovery are validated on a Windows target.
 - [x] Text is legible at baseline window size (1440x900 default; verified at 1296x900 after resize).
+- [x] Inter Regular, SemiBold, and Bold are rasterized from embedded TTF data by FreeType at exact 11/13/15px sizes, using native face hinting and correct pen advances; un-preloaded characters are cached on demand (`bin/ui-freetype-native-hint.png`, `bin/ui-freetype-release.png`, `bin/freetype-runtime-repro.log`). The already-legible console mono path is preserved.
 - [x] Resize behavior: chrome redraws to the new client size (`bin/m0_input_test.png` was captured at a resized 1296x900 window with correct layout). Maximize/restore re-uses the same `resize()` path.
 - [x] No Direct3D 12 device/runtime errors during the test (no exception dialogs, clean run log).
 
@@ -67,7 +69,7 @@ Evidence files are under `bin/` unless noted otherwise.
 
 ## Platform and toolchain
 
-- [x] Record Haxe, HashLink, Heaps, `format`, and `hldx` versions (`docs/TOOLCHAIN_VERSIONS.md`).
+- [x] Record Haxe, HashLink, Heaps, `format`, `hldx`, hlfreetype, and FreeType versions (`docs/TOOLCHAIN_VERSIONS.md`).
 - [x] Record HashLink distribution source and hashes of native modules (`docs/TOOLCHAIN_VERSIONS.md`).
 - [x] Agility SDK: n/a — not required by the official HashLink 1.16.0 binary (documented, with rationale).
 - [x] Record GPU model, driver version (`docs/TOOLCHAIN_VERSIONS.md`). D3D12 feature level recorded from hardware class (12_1); Heaps DX12Driver does not expose a device feature-level query at M0 — direct runtime feature-level read is deferred to a later milestone if needed.

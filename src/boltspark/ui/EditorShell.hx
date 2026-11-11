@@ -32,7 +32,7 @@ class EditorShell {
     final editorBackgroundHit:h2d.Interactive;
 
     // Title/menu bar and editor toolbar.
-    final brandMark:h2d.Graphics;
+    final brandMark:h2d.Object;
     final appTitle:h2d.Text;
     final projectTitle:h2d.Text;
     final menuButtons:Array<UiButton> = [];
@@ -162,13 +162,13 @@ class EditorShell {
         };
 
         // Native title/menu bar.
-        brandMark = new h2d.Graphics(root);
+        brandMark = new h2d.Object(root);
         drawBrandMark();
-        appTitle = new h2d.Text(ctx.titleFont, root);
+        appTitle = new UiText(ctx.titleFont, root);
         appTitle.text = "BOLTSPARK";
         appTitle.textColor = Theme.TEXT;
         appTitle.lineBreak = false;
-        projectTitle = new h2d.Text(ctx.font, root);
+        projectTitle = new UiText(ctx.font, root);
         projectTitle.text = "Untitled Scene";
         projectTitle.textColor = Theme.MUTED;
         projectTitle.lineBreak = false;
@@ -221,11 +221,11 @@ class EditorShell {
         // Hierarchy header, search, and rows.
         hierarchyTitleIcon = new h2d.Graphics(leftContentMask);
         UiIcons.draw(hierarchyTitleIcon, Hierarchy, 0, 0, 14, Theme.TEXT_SECONDARY);
-        hierarchyTitle = new h2d.Text(ctx.semiboldFont, leftContentMask);
+        hierarchyTitle = new UiText(ctx.semiboldFont, leftContentMask);
         hierarchyTitle.text = "Scene Hierarchy";
         hierarchyTitle.textColor = Theme.TEXT;
         hierarchyTitle.lineBreak = false;
-        hierarchyCount = new h2d.Text(ctx.captionFont, leftContentMask);
+        hierarchyCount = new UiText(ctx.captionFont, leftContentMask);
         hierarchyCount.textColor = Theme.MUTED;
         hierarchyCount.lineBreak = false;
         hierarchyAddButton = new UiButton(ctx, "", 24, 24, leftContentMask);
@@ -260,11 +260,11 @@ class EditorShell {
         // Inspector panel header.
         inspectorTitleIcon = new h2d.Graphics(rightContentMask);
         UiIcons.draw(inspectorTitleIcon, Sliders, 0, 0, 14, Theme.TEXT_SECONDARY);
-        inspectorTitle = new h2d.Text(ctx.semiboldFont, rightContentMask);
+        inspectorTitle = new UiText(ctx.semiboldFont, rightContentMask);
         inspectorTitle.text = "Inspector";
         inspectorTitle.textColor = Theme.TEXT;
         inspectorTitle.lineBreak = false;
-        selectionStatus = new h2d.Text(ctx.captionFont, rightContentMask);
+        selectionStatus = new UiText(ctx.captionFont, rightContentMask);
         selectionStatus.textColor = Theme.MUTED;
         selectionStatus.lineBreak = false;
 
@@ -298,7 +298,7 @@ class EditorShell {
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
 
         transformSection = new InspectorSection(ctx, "Transform", inspectorContentMask);
-        transformLabel = new h2d.Text(ctx.font, transformSection.content);
+        transformLabel = new UiText(ctx.labelFont, transformSection.content);
         transformLabel.text = "Position";
         transformLabel.textColor = Theme.TEXT_SECONDARY;
         transformLabel.lineBreak = false;
@@ -316,7 +316,7 @@ class EditorShell {
         }
 
         behaviorSection = new InspectorSection(ctx, "Behavior", inspectorContentMask);
-        spinLabel = new h2d.Text(ctx.font, behaviorSection.content);
+        spinLabel = new UiText(ctx.labelFont, behaviorSection.content);
         spinLabel.text = "Spin speed";
         spinLabel.textColor = Theme.TEXT_SECONDARY;
         spinLabel.lineBreak = false;
@@ -334,7 +334,7 @@ class EditorShell {
         spinRow.onEditRejected = function(message:String) log("inspector: " + message);
 
         materialSection = new InspectorSection(ctx, "Material", inspectorContentMask);
-        colorLabel = new h2d.Text(ctx.font, materialSection.content);
+        colorLabel = new UiText(ctx.labelFont, materialSection.content);
         colorLabel.text = "Base color";
         colorLabel.textColor = Theme.TEXT_SECONDARY;
         colorLabel.lineBreak = false;
@@ -366,7 +366,7 @@ class EditorShell {
         UiIcons.draw(viewportModeIcon, Grid, 0, 0, 12, Theme.TEXT_SECONDARY);
         viewportModeIcon.x = 7;
         viewportModeIcon.y = 6;
-        viewportModeText = new h2d.Text(ctx.captionFont, viewportHud);
+        viewportModeText = new UiText(ctx.captionFont, viewportHud);
         viewportModeText.text = "PERSPECTIVE  ·  LIT";
         viewportModeText.textColor = Theme.TEXT_SECONDARY;
         viewportModeText.lineBreak = false;
@@ -378,7 +378,7 @@ class EditorShell {
         viewportHintSurface.setSize(80, 24);
         viewportHintIcon = new h2d.Graphics(viewportHud);
         UiIcons.draw(viewportHintIcon, Move, 0, 0, 12, Theme.TEXT_SECONDARY);
-        viewportHintText = new h2d.Text(ctx.captionFont, viewportHud);
+        viewportHintText = new UiText(ctx.captionFont, viewportHud);
         viewportHintText.text = "LOCAL";
         viewportHintText.textColor = Theme.TEXT_SECONDARY;
         viewportHintText.lineBreak = false;
@@ -387,21 +387,19 @@ class EditorShell {
         console.onBackgroundClick = closePaletteIfOpen;
 
         statusDot = new h2d.Graphics(root);
-        statusDot.beginFill(Theme.SUCCESS);
-        statusDot.drawCircle(3, 3, 3, 10);
-        statusDot.endFill();
-        statusText = new h2d.Text(ctx.captionFont, root);
+        UiIcons.draw(statusDot, StatusDot, 0, 0, 6, Theme.SUCCESS);
+        statusText = new UiText(ctx.captionFont, root);
         statusText.text = "Ready";
         statusText.textColor = Theme.TEXT_SECONDARY;
         statusText.lineBreak = false;
-        rendererStatus = new h2d.Text(ctx.captionFont, root);
+        rendererStatus = new UiText(ctx.captionFont, root);
         rendererStatus.text = "DX12  ·  Native  ·  1 object";
         rendererStatus.textColor = Theme.MUTED;
         rendererStatus.lineBreak = false;
-        inputStatus = new h2d.Text(ctx.captionFont, root);
+        inputStatus = new UiText(ctx.captionFont, root);
         inputStatus.textColor = Theme.MUTED;
         inputStatus.lineBreak = false;
-        input.bindReport(inputStatus);
+        // Input diagnostics are intentionally not surfaced in the shipped status bar.
         input.onDeletePressed = function() {
             if (objectNameField.isFocused() || spinRow.isEditing() || hierarchySearch.isFocused()) return;
             for (field in transformFields) if (field.isEditing()) return;
@@ -448,27 +446,11 @@ class EditorShell {
     }
 
     function drawBrandMark():Void {
-        brandMark.clear();
-        brandMark.beginFill(Theme.BRAND);
-        brandMark.moveTo(0, 4);
-        brandMark.lineTo(4, 0);
-        brandMark.lineTo(17, 0);
-        brandMark.lineTo(21, 4);
-        brandMark.lineTo(21, 17);
-        brandMark.lineTo(17, 21);
-        brandMark.lineTo(4, 21);
-        brandMark.lineTo(0, 17);
-        brandMark.lineTo(0, 4);
-        brandMark.endFill();
-        brandMark.beginFill(0x161A20);
-        brandMark.moveTo(11, 2);
-        brandMark.lineTo(5, 11);
-        brandMark.lineTo(10, 11);
-        brandMark.lineTo(8, 19);
-        brandMark.lineTo(16, 8);
-        brandMark.lineTo(11, 8);
-        brandMark.lineTo(11, 2);
-        brandMark.endFill();
+        brandMark.removeChildren();
+        var outer = new h2d.Graphics(brandMark);
+        UiIcons.draw(outer, BrandOuter, 0, 0, 21, Theme.BRAND);
+        var bolt = new h2d.Graphics(brandMark);
+        UiIcons.draw(bolt, BrandBolt, 0, 0, 21, 0x161A20);
     }
 
     function fitText(target:h2d.Text, value:String, maxWidth:Float):Void {
@@ -559,11 +541,7 @@ class EditorShell {
         statusText.y = statusY + 2;
         rendererStatus.x = 70;
         rendererStatus.y = statusY + 2;
-        inputStatus.visible = width >= 930;
-        if (inputStatus.visible) {
-            inputStatus.x = Math.max(0, width - inputStatus.textWidth - 10);
-            inputStatus.y = statusY + 2;
-        }
+        inputStatus.visible = false;
     }
 
     function drawChrome(width:Float, height:Float, geometry:DockLayoutGeometry):Void {

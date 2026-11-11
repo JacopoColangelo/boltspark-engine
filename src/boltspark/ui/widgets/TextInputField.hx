@@ -3,6 +3,8 @@ package boltspark.ui.widgets;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.widgets.FieldSurface;
+import boltspark.ui.UiText;
+import boltspark.ui.UiTextInput;
 
 /** Two-column inspector text field with commit-on-blur behavior. */
 class TextInputField extends h2d.Object {
@@ -26,12 +28,12 @@ class TextInputField extends h2d.Object {
         lastCommitted = initialValue;
 
         fieldBackground = new FieldSurface(this);
-        label = new h2d.Text(ctx.font, this);
+        label = new UiText(ctx.labelFont, this);
         label.text = labelText;
         label.textColor = Theme.TEXT_SECONDARY;
         label.lineBreak = false;
 
-        input = new h2d.TextInput(ctx.font, this);
+        input = new UiTextInput(ctx.font, this);
         input.text = initialValue;
         input.textColor = Theme.TEXT;
         input.useSoftwareKeyboard = false;

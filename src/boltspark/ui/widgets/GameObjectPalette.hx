@@ -4,6 +4,7 @@ import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
+import boltspark.ui.UiText;
 import boltspark.ui.layout.LayoutRect;
 
 class GameObjectPalette extends h2d.Object {
@@ -38,7 +39,7 @@ class GameObjectPalette extends h2d.Object {
         background.setSize(WIDTH, HEIGHT);
         background.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
 
-        title = new h2d.Text(context.semiboldFont, this);
+        title = new UiText(context.semiboldFont, this);
         title.text = "Add Object";
         title.textColor = Theme.TEXT;
         title.lineBreak = false;
@@ -69,7 +70,7 @@ class GameObjectPalette extends h2d.Object {
         UiIcons.draw(cubeIcon, Cube, 0, 0, 14, Theme.CUBE_ORANGE);
         cubeIcon.x = 11;
         cubeIcon.y = 38;
-        cubeLabel = new h2d.Text(context.semiboldFont, this);
+        cubeLabel = new UiText(context.semiboldFont, this);
         cubeLabel.text = "Cube";
         cubeLabel.textColor = Theme.TEXT;
         cubeLabel.lineBreak = false;
@@ -83,7 +84,7 @@ class GameObjectPalette extends h2d.Object {
         dragPreviewIcon = new h2d.Graphics(parent);
         UiIcons.draw(dragPreviewIcon, Cube, 0, 0, 15, Theme.CUBE_ORANGE);
         dragPreviewIcon.visible = false;
-        dragPreview = new h2d.Text(context.semiboldFont, parent);
+        dragPreview = new UiText(context.semiboldFont, parent);
         dragPreview.text = "Cube";
         dragPreview.textColor = Theme.TEXT;
         dragPreview.visible = false;

@@ -67,10 +67,11 @@ class Main extends hxd.App {
 
         // BoltUI is a native H2D overlay rendered by Heaps. It is not HTML,
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
-        // Linear sampling for the 2D overlay keeps bitmap font glyphs and UI
-        // surfaces smooth at any window scale; nearest sampling produces the
-        // jagged glyph edges the flat editor must avoid.
-        s2d.defaultSmooth = true;
+        // Proportional UI fonts are rasterized from their embedded TTF faces by
+        // FreeType at the exact requested size and cached on demand. Everything
+        // else defaults to pixel-exact sampling; procedural icons perform
+        // analytic shader anti-aliasing.
+        s2d.defaultSmooth = false;
         boltUI = new BoltUI(s2d, nativeWindow);
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreateObject = createCube;

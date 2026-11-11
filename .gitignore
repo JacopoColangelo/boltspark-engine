@@ -3,6 +3,7 @@
 !/bin/Makefile
 /release/
 /src/res/.tmp/
+/third_party/hlfreetype/vendor/freetype/
 /.haxelib/
 toolchain/haxelib/hashlink/
 toolchain/hashlink/WinPixEventRuntime.LICENSE.txt

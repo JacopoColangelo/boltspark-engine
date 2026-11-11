@@ -1,8 +1,10 @@
 # Windows 11 native editor build — HashLink + Heaps + DirectX 12 (hldx)
 -cp src
+-cp third_party/hlfreetype
 -lib heaps
 -lib format
 -lib hldx
+--macro freetype.heaps.Macro.main()
 -D dx12
 # HashLink runtime version in toolchain/hashlink. Required for Heaps' DX12 driver,
 # which uses hl.CArray (HashLink 1.13+ API) that the compiler does not enable by default.

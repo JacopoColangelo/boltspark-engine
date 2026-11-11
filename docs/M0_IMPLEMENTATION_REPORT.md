@@ -17,6 +17,8 @@ This report is factual: every claim below links to evidence (files, logs, screen
 | Heaps | 2.1.0 | `toolchain/haxelib` |
 | hldx bindings | 1.16.0 | `toolchain/haxelib` |
 | format | 3.8.0 | `toolchain/haxelib` |
+| hlfreetype | 1.0.0 (`56c8aac`) | `third_party/hlfreetype` |
+| FreeType | 2.14.3 | project-local source under `third_party/hlfreetype/vendor`, statically linked into `freetype.hdll` |
 | Neko | (bundled) | `toolchain/neko` |
 
 The user ratified the dev-compiler pin (2026-11-11) after a rigorous root-cause analysis (section 4). Full hashes: `docs/TOOLCHAIN_VERSIONS.md`.
@@ -32,11 +34,12 @@ Environment: user-level env vars point at the project toolchain (`HAXEPATH`, `HA
 ### BoltUI framework slice (`src/boltspark/ui/`)
 - Modular restructure: `Theme` (tokens), `UiContext` (shared state), `InputAdapter` (central keyboard/focus/pointer reporting — Gate 3), `EditorShell` (chrome layout + command callbacks), `widgets/` (`UiButton`, `Stepper`, `SwatchPicker`, `ConsolePanel`), with `BoltUI` as facade.
 - Editor shell: compact square-edged top bar and toolbar, searchable hierarchy (clickable `sampleCube` item), **transparent 3D viewport** (starter bug fixed: it used to fill the whole window with an opaque background, hiding `s3d`), continuous collapsible inspector groups with editable transform/spin controls + 4 color swatches, timestamped editor console, and a slim status bar with live input diagnostics. Resize-aware layout.
+- UI edge quality: embedded Inter Regular, SemiBold, and Bold TTF faces are rasterized by FreeType at each exact requested UI size (11/13/15px), with native TrueType hinting, correct pen advances and an on-demand internal glyph atlas. This preserves font identity and weight without the previous blur/sharpen or supersampling tradeoffs; the console keeps its existing mono rendering. Small icons and symbols remain analytic signed-distance shader shapes with physical-pixel anti-aliasing.
 - Command flow: widgets → shell callbacks → `Main` → engine objects (no direct widget→engine mutation).
 
 ### Build tools
 - The initial M0 scripts were consolidated into `tools/build.ps1`. It supports environment validation (`-Check`), explicit dependency installation (`-InstallDependencies`), development/release builds (default), and running the development build (`-Run`).
-- The environment check verifies the OS, pinned compiler, HashLink 1.16.0, native modules + hashes, Haxelib packages, and build configuration. The incorrect Agility SDK hard-requirement was removed: the official HashLink 1.16.0 binary is a standard DX12 build, verified by runtime evidence.
+- The environment check verifies the OS, pinned compiler, HashLink 1.16.0, native modules + hashes, Haxelib packages, exact hlfreetype/FreeType pins, and build configuration. The default build compiles `freetype.hdll` project-locally before the bytecode/native targets. The incorrect Agility SDK hard-requirement was removed: the official HashLink 1.16.0 binary is a standard DX12 build, verified by runtime evidence.
 
 ### Tests / docs
 - `tests/native-foundation-acceptance.md`: executed checklist with results and evidence links.
@@ -70,6 +73,7 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 | Native window + chrome + cube | `bin/m0_window.png` (1440x900) |
 | Input (clicks, stepper, swatches, focus, resize) | `bin/m0_input_test.png` (1296x900 after live resize; console shows one log per click, exact 0.25 stepper increments, swatch color change applied to cube, focus 4/4) |
 | Compact editor visual refresh | `bin/ui-compact-editor.png`, `bin/ui-compact-palette.png`, `bin/ui-compact-release-1280.png` (native DX12 development/release renders and live resize) |
+| Editor text/icon anti-aliasing | `bin/ui-freetype-native-hint.png`, `bin/ui-freetype-release.png` (matching DX12 development/native-release renders; exact-size native-hinted Inter faces, analytic toolbar/panel icons, and retained console mono path); `bin/freetype-runtime-repro.log` proves an un-preloaded glyph is created once and cached |
 | Wheel/scrollbar routing regression | `bin/wheel-property-focused-after-down.png`, `bin/wheel-scrollbar-after-down.png`, `bin/wheel-hierarchy-after-down.png`, `bin/wheel-console-after-up.png`, `bin/thumb-inspector-after-down.png`, `bin/thumb-hierarchy-after-up.png` (property-focus routing plus wheel and thumb direction across all scrollable panels) |
 | Native cursor state regression | `bin/cursor-regression.txt`, `bin/numeric-cursor-dismiss-regression.txt` (Win32 `GetCursorInfo`: Arrow for ordinary controls, IBeam for text values, SizeWE/SizeNS for splitters, SizeAll only for draggable palette content; numeric scrubbing uses SizeWE only while hovered/dragging and restores Arrow after leaving or an outside release) |
 | Compact hierarchy creation workflow | `bin/ui-no-delete-button.png`, `bin/context-viewport-no-menu.png`, `bin/context-hierarchy-compact.png`, `bin/compact-add-hierarchy-button.png`, `bin/compact-toolbar-row-click-fixed.png`, `bin/compact-add-drag-created.png`, `bin/delete-key-object-removed.png` (hierarchy-only context menu, dense item row, click/drag creation, keyboard deletion) |

@@ -5,6 +5,8 @@ import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiIcons;
 import boltspark.ui.widgets.FieldSurface;
+import boltspark.ui.UiText;
+import boltspark.ui.UiTextInput;
 
 /** Compact search input used by hierarchy filtering. */
 class SearchField extends h2d.Object {
@@ -27,12 +29,12 @@ class SearchField extends h2d.Object {
         icon = new h2d.Graphics(this);
         UiIcons.draw(icon, Search, 0, 0, 14, Theme.MUTED);
 
-        placeholder = new h2d.Text(ctx.font, this);
+        placeholder = new UiText(ctx.font, this);
         placeholder.text = placeholderText;
         placeholder.textColor = Theme.MUTED;
         placeholder.lineBreak = false;
 
-        input = new h2d.TextInput(ctx.font, this);
+        input = new UiTextInput(ctx.font, this);
         input.textColor = Theme.TEXT;
         input.useSoftwareKeyboard = false;
         input.onChange = function() {
