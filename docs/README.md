@@ -51,7 +51,7 @@ placed beside the application executable, with the SDK package version matching 
 
 ## Prerequisites
 
-The pinned Haxe/HashLink toolchain ships under `toolchain/`. Native release builds additionally require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
+The pinned Haxe/HashLink toolchain ships under `toolchain/`. Native release builds additionally require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK. The build script discovers the installed instance with `vswhere`, without assuming a Visual Studio edition or install path.
 
 1. Windows 11 x64.
 2. **Pinned compiler** `toolchain/haxe-dev` — Haxe `5.0.0-preview.1+dcda605` (dev build dated 2025-10-23; see `docs/TOOLCHAIN_VERSIONS.md` for why Haxe 4.3.x stable cannot run Heaps 2.1.0's DX12 driver).
@@ -69,7 +69,7 @@ Run from the project root to install the pinned Haxe/C library and PIX runtime:
 .\tools\build.ps1 -InstallDependencies
 ```
 
-Use `.\tools\build.ps1 -Check` to verify the whole set (OS, compiler pin, HashLink modules, build config) before building.
+Use `.\tools\build.ps1 -Check` to verify the whole set (OS, compiler pin, HashLink modules, build config, and detected Visual Studio/MSBuild) before building.
 
 ## Build and run (Windows PowerShell)
 
@@ -81,7 +81,7 @@ From the repository root:
 
 The default action builds both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files). Use `.\tools\build.ps1 -Run` to launch the bytecode build; launch the native release directly from `release\Boltspark.exe`.
 
-The scripts prefer the project-local toolchain (`toolchain/haxe-dev`, `toolchain/hashlink`, `toolchain/haxelib`) and set the required environment (`HAXE_STD_PATH`, `HAXELIB_PATH`, `NEKOPATH`) per session.
+The scripts prefer the project-local toolchain (`toolchain/haxe-dev`, `toolchain/hashlink`, `toolchain/haxelib`) and set the required environment (`HAXE_STD_PATH`, `HAXELIB_PATH`, `NEKOPATH`) per session. Native projects use the matching Visual Studio toolset (VS2026 `v145`, VS2022 `v143`).
 
 Equivalent manual commands (PowerShell, from the repo root):
 

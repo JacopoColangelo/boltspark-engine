@@ -102,9 +102,99 @@ function Install-Dependencies {
     Write-Host "Dependencies ready: Heaps 2.1.0, format, hldx 1.16.0, HashLink/C 1.16.0, PIX $pixVersion." -ForegroundColor Green
 }
 
-function Require-File([string]$Path, [string]$Message) {
+function Get-RequiredFile([string]$Path, [string]$Message) {
     if (-not (Test-Path $Path)) { throw "Missing file: $Path`n$Message" }
     return (Resolve-Path $Path).Path
+}
+
+function Get-VisualStudioConfiguration {
+    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $vswhere = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) {
+        throw 'Visual Studio 2022 or newer with the Desktop C++ workload is required for native builds.'
+    }
+
+    $vsRequirements = @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64')
+    $vsPathOutput = & $vswhere @vsRequirements '-property' 'installationPath'
+    $vswhereExitCode = $LASTEXITCODE
+    $vsPath = ($vsPathOutput | Select-Object -First 1)
+    if ($vswhereExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($vsPath)) {
+        throw 'Could not find Visual Studio with the x64 C++ toolset. Install the Desktop C++ workload.'
+    }
+    $vsPath = $vsPath.Trim()
+
+    $vsVersionOutput = & $vswhere @vsRequirements '-property' 'installationVersion'
+    $vswhereExitCode = $LASTEXITCODE
+    $vsVersion = ($vsVersionOutput | Select-Object -First 1)
+    if ($vswhereExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($vsVersion)) {
+        throw "Could not determine the Visual Studio version at $vsPath."
+    }
+    $vsVersion = $vsVersion.Trim()
+    $vsMajor = [int]$vsVersion.Split('.')[0]
+    if ($vsMajor -ge 18) {
+        $vsTemplate = 'vs2026'
+        $platformToolset = 'v145'
+        $cmakeGenerator = 'Visual Studio 18 2026'
+    } elseif ($vsMajor -eq 17) {
+        $vsTemplate = 'vs2022'
+        $platformToolset = 'v143'
+        $cmakeGenerator = 'Visual Studio 17 2022'
+    } else {
+        throw "Unsupported Visual Studio version '$vsVersion'. Install Visual Studio 2022 or newer."
+    }
+
+    $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
+    if (-not (Test-Path $msbuild)) {
+        throw "MSBuild was not found at $msbuild. Install the Visual Studio C++ workload."
+    }
+
+    return [PSCustomObject]@{
+        InstallationPath = $vsPath
+        Version = $vsVersion
+        Template = $vsTemplate
+        PlatformToolset = $platformToolset
+        CMakeGenerator = $cmakeGenerator
+        MSBuild = $msbuild
+        VSWhere = $vswhere
+    }
+}
+
+function Apply-HashLinkPatch([string]$SourceRoot, [string]$PatchPath, [string]$Description) {
+    if (-not (Test-Path $PatchPath)) {
+        throw "$Description patch was not found: $PatchPath"
+    }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & git -C $SourceRoot apply --check $PatchPath 2>&1
+        $patchCheckExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($patchCheckExitCode -eq 0) {
+        & git -C $SourceRoot apply $PatchPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not apply the $Description patch to HashLink."
+        }
+        Write-Host "$Description patch applied." -ForegroundColor DarkGray
+        return
+    }
+
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & git -C $SourceRoot apply --reverse --check $PatchPath 2>&1
+        $reversePatchCheckExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($reversePatchCheckExitCode -ne 0) {
+        throw "HashLink source differs from the expected version; the $Description patch cannot be applied."
+    }
+    Write-Host "$Description patch is already applied." -ForegroundColor DarkGray
 }
 
 function Test-Environment {
@@ -121,10 +211,10 @@ function Test-Environment {
     }
     Write-Host "OS: $($os.Caption) build $($os.BuildNumber) x64"
 
-    $compiler = Require-File $haxeExe `
+    $compiler = Get-RequiredFile $haxeExe `
         'Restore the pinned Haxe dev compiler (2025-10-23, dcda605) into toolchain/haxe-dev.'
-    $runtime = Require-File $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
-    Require-File $haxelibExe 'The pinned Haxe distribution must include haxelib.exe.' | Out-Null
+    $runtime = Get-RequiredFile $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
+    Get-RequiredFile $haxelibExe 'The pinned Haxe distribution must include haxelib.exe.' | Out-Null
 
     $haxeVersion = (& $compiler --version).Trim()
     $hlVersion = (& $runtime --version).Trim()
@@ -164,7 +254,7 @@ function Test-Environment {
         @{ Path = (Join-Path $hashLinkDir 'WinPixEventRuntime.dll'); Message = 'Run .\tools\build.ps1 -InstallDependencies to install the pinned PIX runtime.' }
     )
     foreach ($required in $requiredFiles) {
-        Require-File $required.Path $required.Message | Out-Null
+        Get-RequiredFile $required.Path $required.Message | Out-Null
     }
     $actualPixHash = (Get-FileHash (Join-Path $hashLinkDir 'WinPixEventRuntime.dll') -Algorithm SHA256).Hash
     if ($actualPixHash -ne $pixRuntimeHash) {
@@ -185,41 +275,21 @@ function Test-Environment {
         throw 'compile.hxml must not select SDL/OpenGL for the Windows DirectX 12 target.'
     }
 
+    $visualStudio = Get-VisualStudioConfiguration
+    Write-Host "Visual Studio: $($visualStudio.Version) | MSBuild: $($visualStudio.MSBuild)"
+
     Write-Host 'Environment check passed.' -ForegroundColor Green
     Write-Host "Toolchain: Haxe $haxeVersion | HashLink $hlVersion | Heaps 2.1.0 | hldx 1.16.0 | HashLink/C 1.16.0" -ForegroundColor Green
 }
 
-function Build-NativeRelease {
-    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
-    $vswhere = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (-not (Test-Path $vswhere)) {
-        throw 'Visual Studio 2022 or newer with the Desktop C++ workload is required for native releases.'
-    }
-
-    $vsRequirements = @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64')
-    $vsPath = (& $vswhere @vsRequirements '-property' 'installationPath' | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsPath)) {
-        throw 'Could not find Visual Studio with the x64 C++ toolset. Install the Desktop C++ workload.'
-    }
-    $vsPath = $vsPath.Trim()
-    $vsVersion = (& $vswhere @vsRequirements '-property' 'installationVersion' | Select-Object -First 1).Trim()
-    $vsMajor = [int]$vsVersion.Split('.')[0]
-    if ($vsMajor -ge 18) {
-        $vsTemplate = 'vs2026'
-        $platformToolset = 'v145'
-        $cmakeGenerator = 'Visual Studio 18 2026'
-    } elseif ($vsMajor -eq 17) {
-        $vsTemplate = 'vs2022'
-        $platformToolset = 'v143'
-        $cmakeGenerator = 'Visual Studio 17 2022'
-    } else {
-        throw "Unsupported Visual Studio version '$vsVersion'. Install Visual Studio 2022 or newer."
-    }
-
-    $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
-    if (-not (Test-Path $msbuild)) {
-        throw "MSBuild was not found at $msbuild. Install the Visual Studio C++ workload."
-    }
+function New-NativeRelease {
+    $visualStudio = Get-VisualStudioConfiguration
+    $vsPath = $visualStudio.InstallationPath
+    $vsTemplate = $visualStudio.Template
+    $platformToolset = $visualStudio.PlatformToolset
+    $cmakeGenerator = $visualStudio.CMakeGenerator
+    $msbuild = $visualStudio.MSBuild
+    $env:VSWHERE = $visualStudio.VSWhere
 
     $hashLinkSource = Join-Path $env:HAXELIB_PATH 'hashlink\git'
     if (-not (Test-Path (Join-Path $hashLinkSource 'libs\directx\window.c'))) {
@@ -227,36 +297,12 @@ function Build-NativeRelease {
     }
 
     $resizePatch = Join-Path $repoRoot 'tools\patches\hashlink-directx-live-resize.patch'
-    if (-not (Test-Path $resizePatch)) {
-        throw "Interactive resize patch was not found: $resizePatch"
-    }
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $null = & git -C $hashLinkSource apply --check $resizePatch 2>&1
-        $patchCheckExitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($patchCheckExitCode -eq 0) {
-        & git -C $hashLinkSource apply $resizePatch
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Could not apply the interactive resize patch to HashLink.'
-        }
-    } else {
-        try {
-            $ErrorActionPreference = 'Continue'
-            $null = & git -C $hashLinkSource apply --reverse --check $resizePatch 2>&1
-            $reversePatchCheckExitCode = $LASTEXITCODE
-        }
-        finally {
-            $ErrorActionPreference = $previousErrorActionPreference
-        }
-        if ($reversePatchCheckExitCode -ne 0) {
-            throw 'HashLink source differs from the expected version; the interactive resize patch cannot be applied.'
-        }
-        Write-Host 'Interactive resize patch is already applied.' -ForegroundColor DarkGray
+    Apply-HashLinkPatch $hashLinkSource $resizePatch 'Interactive resize'
+    $vswherePatch = Join-Path $repoRoot 'tools\patches\hashlink-vswhere-path.patch'
+    Apply-HashLinkPatch $hashLinkSource $vswherePatch 'Visual Studio locator path'
+    if ($vsTemplate -eq 'vs2026') {
+        $vs2026ToolsetPatch = Join-Path $repoRoot 'tools\patches\hashlink-vs2026-v145.patch'
+        Apply-HashLinkPatch $hashLinkSource $vs2026ToolsetPatch 'Visual Studio 2026 v145 toolset'
     }
 
     $cmakeExe = Join-Path $vsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
@@ -331,14 +377,20 @@ function Build-NativeRelease {
         '-main', 'Main'
     )
 
-    $previousErrorActionPreference = $ErrorActionPreference
+    Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
     try {
-        $ErrorActionPreference = 'Continue'
-        $haxeOutput = & $haxeExe @compileArgs 2>&1
-        $haxeExitCode = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $haxeOutput = & $haxeExe @compileArgs 2>&1
+            $haxeExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
     }
     finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+        Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
     }
     $haxeOutput |
         Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
@@ -453,8 +505,8 @@ if ($InstallDependencies) {
 }
 
 if ($Run) {
-    $runtime = Require-File $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
-    $bytecode = Require-File (Join-Path $repoRoot 'bin\boltspark.hl') `
+    $runtime = Get-RequiredFile $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
+    $bytecode = Get-RequiredFile (Join-Path $repoRoot 'bin\boltspark.hl') `
         'Build output not found (bin\boltspark.hl). Run .\tools\build.ps1 first.'
     Push-Location $repoRoot
     try {
@@ -479,7 +531,7 @@ try {
         throw 'Expected output bin\boltspark.hl was not created.'
     }
     Write-Host 'Development build succeeded: bin\boltspark.hl' -ForegroundColor Green
-    Build-NativeRelease
+    New-NativeRelease
     Write-Host 'Release executable: release\Boltspark.exe' -ForegroundColor Green
     Write-Host 'Launch the development build with .\tools\build.ps1 -Run.' -ForegroundColor Green
 }

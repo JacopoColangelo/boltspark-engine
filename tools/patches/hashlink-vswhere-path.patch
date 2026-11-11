@@ -1,0 +1,23 @@
+diff --git a/other/haxelib/Run.hx b/other/haxelib/Run.hx
+--- a/other/haxelib/Run.hx
++++ b/other/haxelib/Run.hx
+@@ -64,7 +64,18 @@
+ 					case "vs2022": "[17.0,18.0]";
+ 					case "vs2026": "[18.0,19.0]";
+ 					default: null;
+ 				}
+-				var vswhereProc = new sys.io.Process("C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe", ["-requires", "Microsoft.Component.MSBuild", "-find", "MSBuild",
++				var vswherePath = Sys.getEnv("VSWHERE");
++				if( vswherePath == null || vswherePath.length == 0 ) {
++					var programFiles = Sys.getEnv("ProgramFiles(x86)");
++					if( programFiles == null )
++						programFiles = Sys.getEnv("ProgramFiles");
++					if( programFiles == null ) {
++						log("Could not locate Visual Studio Installer; set VSWHERE to vswhere.exe.");
++						return 1;
++					}
++					vswherePath = haxe.io.Path.join([programFiles, "Microsoft Visual Studio", "Installer", "vswhere.exe"]);
++				}
++				var vswhereProc = new sys.io.Process(vswherePath, ["-requires", "Microsoft.Component.MSBuild", "-find", "MSBuild",
+ 					"-version", version
+ 				]);

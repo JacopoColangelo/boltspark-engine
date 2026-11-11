@@ -18,7 +18,7 @@ The editor must not use Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, D
 
 ## Project-local toolchain
 
-The Haxe/HashLink toolchain and Haxelib dependencies are project-local. Building a native Windows release additionally requires Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
+The Haxe/HashLink toolchain and Haxelib dependencies are project-local. Building a native Windows release additionally requires Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK. The build script discovers the installed Visual Studio instance with `vswhere`; it does not depend on a specific edition or install path.
 
 | Path | Contents |
 |---|---|
@@ -44,7 +44,7 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -Run                # run the development HashLink build
 ```
 
-The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library and PIX runtime only when requested. Native release builds also require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK. The generated `release\` folder contains the executable and its required runtime files.
+The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library and PIX runtime only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable and its required runtime files.
 
 ## Documentation
 
