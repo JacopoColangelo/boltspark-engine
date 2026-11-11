@@ -51,18 +51,19 @@ placed beside the application executable, with the SDK package version matching 
 
 ## Prerequisites
 
-All prerequisites ship inside the repository under `toolchain/` — nothing needs to be installed system-wide:
+The pinned Haxe/HashLink toolchain ships under `toolchain/`. Native release builds additionally require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
 
 1. Windows 11 x64.
 2. **Pinned compiler** `toolchain/haxe-dev` — Haxe `5.0.0-preview.1+dcda605` (dev build dated 2025-10-23; see `docs/TOOLCHAIN_VERSIONS.md` for why Haxe 4.3.x stable cannot run Heaps 2.1.0's DX12 driver).
 3. **HashLink runtime** `toolchain/hashlink` — official HashLink 1.16.0 win64 binary with both `directx.hdll` and `dx12.hdll`.
-4. **Haxelib packages** in the project-local repository `toolchain/haxelib`: `heaps` **2.1.0**, `format` **3.8.0**, `hldx` **1.16.0**.
+4. **Haxelib packages** in the project-local repository `toolchain/haxelib`: `heaps` **2.1.0**, `format` **3.8.0**, `hldx` **1.16.0**, and HashLink/C **1.16.0**.
 5. A Windows 11 GPU and driver supporting Direct3D 12.
 6. No Agility SDK required (see the section above).
+7. Pinned Microsoft WinPixEventRuntime **1.0.240308001**, installed by the dependency script for native linking.
 
 ### Install Haxe libraries (PowerShell)
 
-The pinned packages are pre-installed in `toolchain/haxelib`. To reinstall from scratch, run from the project root:
+Run from the project root to install the native build dependencies and verify the project-local Haxelib packages:
 
 ```powershell
 .\tools\install-dependencies.ps1
@@ -75,10 +76,13 @@ The pinned packages are pre-installed in `toolchain/haxelib`. To reinstall from 
 From the repository root:
 
 ```powershell
+.\tools\install-dependencies.ps1
 .\tools\check-windows.ps1
 .\tools\build-windows.ps1
 .\tools\run-windows.ps1
 ```
+
+`build-windows.ps1` produces both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files). `run-windows.ps1` launches the bytecode build; launch the native release directly from `release\Boltspark.exe`.
 
 The scripts prefer the project-local toolchain (`toolchain/haxe-dev`, `toolchain/hashlink`, `toolchain/haxelib`) and set the required environment (`HAXE_STD_PATH`, `HAXELIB_PATH`, `NEKOPATH`) per session.
 
@@ -100,11 +104,15 @@ The output is HashLink bytecode (`bin/boltspark.hl`), not a standalone Windows e
 
 ## What you should see
 
-- A native Windows window titled `Boltspark Engine — Native Foundation`.
+- A native Windows window titled `Boltspark Engine`.
 - A 3D cube rotating in the transparent center viewport using the DX12 driver (runtime log prints `[M0] renderer driver = h3d.impl.DX12Driver`).
 - Editor chrome drawn with H2D: top bar (`BOLTSPARK`), left hierarchy (`sampleCube` + `Test native input`), right inspector (`Spin speed (rad/s)` stepper and `Base color` swatches), an editor console below the viewport, and a bottom status bar with central input diagnostics.
 - Clicking `Test native input` (or the swatches / stepper) logs `command: ...` lines into the console; swatches change the cube color live; the stepper changes the spin rate live.
 - Resizing the OS window redraws the editor chrome to the new dimensions.
+
+## Windows native release
+
+Run `.\tools\install-dependencies.ps1` once to install the HashLink/C support library and pinned PIX runtime. Then `.\tools\build-windows.ps1` builds the development bytecode and compiles the native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules and required DLLs alongside the executable. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
 
 ## Important scope boundary
 

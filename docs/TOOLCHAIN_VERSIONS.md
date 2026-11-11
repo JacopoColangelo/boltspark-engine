@@ -24,9 +24,11 @@
 - Heaps (`haxelib list`): **heaps 2.1.0** (project-local repository `toolchain/haxelib`)
 - `format` version: **3.8.0**
 - `hldx` version: **1.16.0**
+- HashLink Haxe/C support library: **1.16.0** (source tag `1.16`)
+- WinPixEventRuntime: **1.0.240308001** (NuGet package SHA256 `726ACC93D6968E2146261A1E415521747D50AD69894C2B42B5D0D4C29FD66EC4`)
 - Backend: `hldx` + `-D dx12` / Direct3D 12
 - Haxe build config: `compile.hxml` (`-lib heaps -lib format -lib hldx -D dx12 -D hl_ver=1.16.0 -debug -hl bin/boltspark.hl`)
-- Runtime proof: `[M0] renderer driver = h3d.impl.DX12Driver` logged at startup (`bin/runlog.txt`); window "Boltspark Engine — Native Foundation" renders 3D cube + H2D editor chrome (`bin/m0_window.png`, `bin/m0_input_test.png`)
+- Runtime proof: `[M0] renderer driver = h3d.impl.DX12Driver` logged at startup (`bin/runlog.txt`); window "Boltspark Engine" renders 3D cube + H2D editor chrome (`bin/m0_window.png`, `bin/m0_input_test.png`)
 - Date verified: 2026-11-11
 
 ## Environment variables (project-local toolchain)

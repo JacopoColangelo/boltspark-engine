@@ -23,7 +23,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Haxe compilation failed with exit code $LASTEXITCODE." }
     if (-not (Test-Path 'bin/boltspark.hl')) { throw 'Expected output bin/boltspark.hl was not created.' }
     Write-Host 'Build succeeded: bin/boltspark.hl' -ForegroundColor Green
+    & (Join-Path $PSScriptRoot 'build-release-windows.ps1')
     Write-Host 'Run with .\tools\run-windows.ps1' -ForegroundColor Green
+    Write-Host 'Release executable: .\release\Boltspark.exe' -ForegroundColor Green
 }
 finally {
     Pop-Location

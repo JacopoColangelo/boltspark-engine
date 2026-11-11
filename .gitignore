@@ -1,6 +1,9 @@
 /bin/*
 !/bin/.gitkeep
+/release/
 /.haxelib/
+toolchain/haxelib/hashlink/
+toolchain/hashlink/WinPixEventRuntime.LICENSE.txt
 *.hl
 *.hdll
 *.dll

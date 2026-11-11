@@ -86,7 +86,12 @@ class EditorShell {
 
         spinRow = new Stepper(ctx, Theme.RIGHT_PANEL_WIDTH - 32, Theme.CONTROL_HEIGHT,
             0.0, 4.0, 0.25, 0.35,
-            function(v:Float) return Std.string(Math.round(v * 100) / 100),
+            function(v:Float) {
+                var hundredths = Math.round(v * 100);
+                var fractional = hundredths % 100;
+                return Std.string(Std.int(hundredths / 100)) + "."
+                    + (fractional < 10 ? "0" : "") + Std.string(fractional);
+            },
             root);
         spinRow.onValueChanged = function(v:Float) {
             if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
@@ -108,7 +113,7 @@ class EditorShell {
             if (onTestAction != null) onTestAction();
         };
 
-        console = new ConsolePanel(ctx, 0, Theme.CONSOLE_HEIGHT - 28, root);
+        console = new ConsolePanel(ctx, root);
 
         statusText = new h2d.Text(ctx.font, root);
         statusText.text = "Native window | HashLink | Heaps | BoltUI";

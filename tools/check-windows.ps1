@@ -67,7 +67,7 @@ if ($hlVersion -ne '1.16.0') {
 }
 
 # --- Haxelib packages (project-local repository) ---
-foreach ($library in @('heaps', 'format', 'hldx')) {
+foreach ($library in @('heaps', 'format', 'hldx', 'hashlink')) {
     # cmd /c keeps haxelib's stderr warnings from becoming PowerShell errors.
     cmd /c "`"$haxeHaxelib`" path $library 2>nul" | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -78,6 +78,10 @@ foreach ($library in @('heaps', 'format', 'hldx')) {
 $hldxVersion = (cmd /c "`"$haxeHaxelib`" list hldx 2>nul") -join ''
 if ($hldxVersion -notmatch '1\.16\.0') {
     throw "hldx 1.16.0 is pinned for M0 (bindings must match the HashLink runtime). Found: $hldxVersion"
+}
+$hashlinkHaxelibVersion = (cmd /c "`"$haxeHaxelib`" path hashlink 2>nul") -join ''
+if ($LASTEXITCODE -ne 0 -or $hashlinkHaxelibVersion -notmatch '-D hashlink=1\.16\.0') {
+    throw "The HashLink 1.16.0 Haxe/C support library is required for release builds. Found: $hashlinkHaxelibVersion"
 }
 
 # --- HashLink native modules ---
@@ -93,6 +97,12 @@ $dxCompiler = Require-File (Join-Path $hashLinkDir 'dxcompiler.dll') `
     'The official HashLink 1.16.0 build ships dxcompiler.dll beside dx12.hdll.'
 $dxil = Require-File (Join-Path $hashLinkDir 'dxil.dll') `
     'The official HashLink 1.16.0 build ships dxil.dll beside dx12.hdll.'
+$pixRuntime = Require-File (Join-Path $hashLinkDir 'WinPixEventRuntime.dll') `
+    'Run tools\install-dependencies.ps1 to install the pinned PIX runtime required by dx12debug.hdll.'
+$pixRuntimeHash = (Get-FileHash $pixRuntime -Algorithm SHA256).Hash
+if ($pixRuntimeHash -ne '81ADCFD8253C3489BE720DA7E30F16004DC9A1F02A8B418C6C3AEF4993032E6D') {
+    throw "Unexpected WinPixEventRuntime.dll hash: $pixRuntimeHash. Run tools\install-dependencies.ps1 to restore the pinned runtime."
+}
 
 foreach ($module in @($dx12Module, $directxModule, $libhl, $dxCompiler, $dxil)) {
     $hash = (Get-FileHash $module -Algorithm SHA256).Hash
@@ -116,4 +126,4 @@ if ($buildConfig -match 'hlsdl|sdl|opengl') {
 
 Write-Host ''
 Write-Host 'Environment check passed. Build with .\tools\build-windows.ps1' -ForegroundColor Green
-Write-Host "Toolchain: haxe-dev $haxeVersion | HashLink $hlVersion | hldx 1.16.0 | heaps 2.1.0" -ForegroundColor Green
+Write-Host "Toolchain: haxe-dev $haxeVersion | HashLink $hlVersion | hldx 1.16.0 | heaps 2.1.0 | HashLink/C 1.16.0" -ForegroundColor Green

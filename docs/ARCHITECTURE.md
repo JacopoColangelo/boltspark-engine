@@ -49,7 +49,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | `widgets/UiButton.hx` | `h2d.Interactive` hit region + centered label; hover/push/release-outside color states; click callback. |
 | `widgets/Stepper.hx` | Bounded numeric editing in fixed steps (`[-] value [+]`); reports changes via `onValueChanged`. |
 | `widgets/SwatchPicker.hx` | Color swatch row with selected-outline highlight; reports via `onColorChanged`. |
-| `widgets/ConsolePanel.hx` | Bounded append-only log (timestamped, last N lines) rendered as one multiline `h2d.Text`. |
+| `widgets/ConsolePanel.hx` | Bounded append-only log (timestamped, up to 9 complete visible lines) rendered as one clipped multiline `h2d.Text`. |
 
 ## Key design rules established at M0
 

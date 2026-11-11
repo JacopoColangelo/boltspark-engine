@@ -19,7 +19,7 @@ class Main extends hxd.App {
 
     override function init():Void {
         nativeWindow = hxd.Window.getInstance();
-        nativeWindow.title = "Boltspark Engine — Native Foundation";
+        nativeWindow.title = "Boltspark Engine";
         nativeWindow.vsync = true;
 
         // M0 evidence: log which Heaps driver backend is actually running.
