@@ -1,0 +1,84 @@
+diff --git a/libs/directx/window.c b/libs/directx/window.c
+index 17be432..0f8bce9 100644
+--- a/libs/directx/window.c
++++ b/libs/directx/window.c
+@@ -73,6 +73,8 @@ typedef struct {
+ 	int next_event;
+ 	bool is_over;
+ 	bool is_focused;
++	bool is_interactive_sizing;
++	DWORD last_interactive_resize;
+ } dx_events;
+ 
+ typedef struct HWND__ dx_window;
+@@ -95,6 +97,9 @@ static bool relative_mouse = false;
+ 
+ typedef HCURSOR dx_cursor;
+ typedef HICON dx_icon;
++static vclosure *interactive_resize_callback = NULL;
++static bool interactive_resize_callback_rooted = false;
++static bool interactive_resize_callback_running = false;
+ 
+ #define TICON _ABSTRACT(dx_icon)
+ 
+@@ -198,6 +203,13 @@ static LRESULT CALLBACK WndProc( HWND wnd, UINT umsg, WPARAM wparam, LPARAM lpar
+ 		}
+ 		addState(Resize);
+ 		break;
++	case WM_ENTERSIZEMOVE:
++		get_events(wnd)->is_interactive_sizing = true;
++		get_events(wnd)->last_interactive_resize = GetTickCount();
++		break;
++	case WM_EXITSIZEMOVE:
++		get_events(wnd)->is_interactive_sizing = false;
++		break;
+ 	case WM_LBUTTONDOWN: addMouse(MouseDown,1); break;
+ 	case WM_LBUTTONUP: addMouse(MouseUp,1); break;
+ 	case WM_MBUTTONDOWN: addMouse(MouseDown,2); break;
+@@ -347,6 +359,23 @@ static LRESULT CALLBACK WndProc( HWND wnd, UINT umsg, WPARAM wparam, LPARAM lpar
+ 			}
+ 		}
+ 
++		{
++			dx_events *buf = get_events(wnd);
++			DWORD now = GetTickCount();
++			if( buf && buf->is_interactive_sizing && interactive_resize_callback &&
++				!interactive_resize_callback_running && now - buf->last_interactive_resize >= 16 ) {
++				buf->last_interactive_resize = now;
++				interactive_resize_callback_running = true;
++				bool isException = false;
++				hl_dyn_call_safe(interactive_resize_callback, NULL, 0, &isException);
++				interactive_resize_callback_running = false;
++				if( isException ) {
++					interactive_resize_callback = NULL;
++					OutputDebugStringA("Boltspark: interactive resize frame callback failed.\n");
++				}
++			}
++		}
++
+ 		break;
+ 	case WM_CHAR:
+ 		e = addEvent(wnd,TextInput);
+@@ -978,6 +1007,14 @@ HL_PRIM void HL_NAME(win_set_icon)(HWND wnd, dx_icon icon) {
+ 	SendMessage(wnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
+ }
+ 
++HL_PRIM void HL_NAME(win_set_interactive_resize_callback)( vclosure *callback ) {
++	if( !interactive_resize_callback_rooted ) {
++		hl_add_root(&interactive_resize_callback);
++		interactive_resize_callback_rooted = true;
++	}
++	interactive_resize_callback = callback;
++}
++
+ #define TWIN _ABSTRACT(dx_window)
+ DEFINE_PRIM(TWIN, win_create_ex, _I32 _I32 _I32 _I32 _I32);
+ DEFINE_PRIM(TWIN, win_create, _I32 _I32);
+@@ -1011,6 +1048,7 @@ DEFINE_PRIM(_DYN, win_get_current_display_setting, _BYTES _BOOL);
+ DEFINE_PRIM(_I32, win_change_display_setting, _BYTES _DYN);
+ DEFINE_PRIM(_ARR, win_get_monitors, _NO_ARG);
+ DEFINE_PRIM(_BYTES, win_get_monitor_from_window, TWIN);
++DEFINE_PRIM(_VOID, win_set_interactive_resize_callback, _FUN(_VOID,_NO_ARG));
+ DEFINE_PRIM(_VOID, win_set_icon, TWIN TICON);
+ DEFINE_PRIM(_VOID, win_set_dark_mode, TWIN _BOOL);
+ DEFINE_PRIM(_F64, win_get_scale_factor_for_window, TWIN);

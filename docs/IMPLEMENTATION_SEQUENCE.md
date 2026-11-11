@@ -41,7 +41,8 @@
 
 **Exit criteria**
 - Both scenes render in the same process and the 2D overlay appears above the 3D content.
-- Resize repeatedly (small, large, maximized, restore) without stale geometry or crash.
+- [x] Drag-resize the native window while confirming rendering and layout continue updating.
+- [ ] Test small, large, maximized, and restored sizes without stale geometry or crashes.
 - No warnings/errors from the DirectX runtime during this smoke test.
 
 ## Gate 3 — Input and UI event flow

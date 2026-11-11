@@ -156,6 +156,7 @@ function Test-Environment {
     $requiredFiles = @(
         @{ Path = (Join-Path $hashLinkDir 'dx12.hdll'); Message = 'HashLink must include dx12.hdll.' },
         @{ Path = (Join-Path $hashLinkDir 'directx.hdll'); Message = 'HashLink must include directx.hdll.' },
+        @{ Path = (Join-Path $hashLinkDir 'directx.lib'); Message = 'HashLink must include directx.lib for native linking.' },
         @{ Path = (Join-Path $hashLinkDir 'libhl.dll'); Message = 'HashLink must include libhl.dll.' },
         @{ Path = (Join-Path $hashLinkDir 'libhl.lib'); Message = 'HashLink must include libhl.lib for native linking.' },
         @{ Path = (Join-Path $hashLinkDir 'dxcompiler.dll'); Message = 'HashLink must include dxcompiler.dll.' },
@@ -206,9 +207,11 @@ function Build-NativeRelease {
     if ($vsMajor -ge 18) {
         $vsTemplate = 'vs2026'
         $platformToolset = 'v145'
+        $cmakeGenerator = 'Visual Studio 18 2026'
     } elseif ($vsMajor -eq 17) {
         $vsTemplate = 'vs2022'
         $platformToolset = 'v143'
+        $cmakeGenerator = 'Visual Studio 17 2022'
     } else {
         throw "Unsupported Visual Studio version '$vsVersion'. Install Visual Studio 2022 or newer."
     }
@@ -217,6 +220,95 @@ function Build-NativeRelease {
     if (-not (Test-Path $msbuild)) {
         throw "MSBuild was not found at $msbuild. Install the Visual Studio C++ workload."
     }
+
+    $hashLinkSource = Join-Path $env:HAXELIB_PATH 'hashlink\git'
+    if (-not (Test-Path (Join-Path $hashLinkSource 'libs\directx\window.c'))) {
+        throw "HashLink native source was not found at $hashLinkSource. Run .\tools\build.ps1 -InstallDependencies."
+    }
+
+    $resizePatch = Join-Path $repoRoot 'tools\patches\hashlink-directx-live-resize.patch'
+    if (-not (Test-Path $resizePatch)) {
+        throw "Interactive resize patch was not found: $resizePatch"
+    }
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & git -C $hashLinkSource apply --check $resizePatch 2>&1
+        $patchCheckExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($patchCheckExitCode -eq 0) {
+        & git -C $hashLinkSource apply $resizePatch
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not apply the interactive resize patch to HashLink.'
+        }
+    } else {
+        try {
+            $ErrorActionPreference = 'Continue'
+            $null = & git -C $hashLinkSource apply --reverse --check $resizePatch 2>&1
+            $reversePatchCheckExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($reversePatchCheckExitCode -ne 0) {
+            throw 'HashLink source differs from the expected version; the interactive resize patch cannot be applied.'
+        }
+        Write-Host 'Interactive resize patch is already applied.' -ForegroundColor DarkGray
+    }
+
+    $cmakeExe = Join-Path $vsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+    if (-not (Test-Path $cmakeExe)) {
+        $cmakeCommand = Get-Command cmake -ErrorAction SilentlyContinue
+        if ($null -ne $cmakeCommand) {
+            $cmakeExe = $cmakeCommand.Source
+        } else {
+            throw 'CMake is required to rebuild the patched DirectX module. Install the C++ CMake tools for Visual Studio.'
+        }
+    }
+
+    $nativeModuleBuild = Join-Path $repoRoot 'bin\native-modules'
+    $cmakeArgs = @(
+        '-S', $hashLinkSource,
+        '-B', $nativeModuleBuild,
+        '-G', $cmakeGenerator,
+        '-A', 'x64',
+        '-DBUILD_SHARED_LIBS=ON',
+        '-DWITH_VM=OFF',
+        '-DWITH_DX12=OFF',
+        '-DWITH_FMT=OFF',
+        '-DWITH_OPENAL=OFF',
+        '-DWITH_SDL=OFF',
+        '-DWITH_SQLITE=OFF',
+        '-DWITH_SSL=OFF',
+        '-DWITH_UI=OFF',
+        '-DWITH_UV=OFF',
+        '-DWITH_VIDEO=OFF',
+        '-DWITH_HEAPS=OFF'
+    )
+    & $cmakeExe @cmakeArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw 'CMake configuration for the patched DirectX module failed.'
+    }
+    & $cmakeExe --build $nativeModuleBuild --config Release --target directx.hdll
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Building the patched DirectX module failed.'
+    }
+    $patchedDirectXModule = Join-Path $nativeModuleBuild 'bin\directx.hdll'
+    $patchedDirectXImportLibrary = Join-Path $nativeModuleBuild 'bin\directx.lib'
+    if (-not (Test-Path $patchedDirectXModule)) {
+        throw "CMake succeeded but the patched module was not created: $patchedDirectXModule"
+    }
+    if (-not (Test-Path $patchedDirectXImportLibrary)) {
+        throw "CMake succeeded but the patched import library was not created: $patchedDirectXImportLibrary"
+    }
+    $directXImportLibrary = Join-Path $hashLinkDir 'directx.lib'
+    $directXImportLibraryBackup = Join-Path $nativeModuleBuild 'directx-original.lib'
+    Copy-Item -LiteralPath $directXImportLibrary -Destination $directXImportLibraryBackup -Force
+    Copy-Item -LiteralPath $patchedDirectXModule -Destination (Join-Path $hashLinkDir 'directx.hdll') -Force
+    Write-Host 'Patched DirectX module built for interactive window resizing.' -ForegroundColor Green
 
     $buildRoot = Join-Path $repoRoot 'bin\native-release'
     $nativeSource = Join-Path $buildRoot 'Boltspark.c'
@@ -283,11 +375,17 @@ function Build-NativeRelease {
         throw 'Haxe produced no native runtime module list.'
     }
 
-    & $msbuild $nativeSolution '-t:Boltspark' '-nologo' '-verbosity:minimal' `
-        '-property:Configuration=Release' '-property:Platform=x64' `
-        "-property:PlatformToolset=$platformToolset"
-    if ($LASTEXITCODE -ne 0) {
-        throw "MSBuild failed with exit code $LASTEXITCODE."
+    try {
+        Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
+        & $msbuild $nativeSolution '-t:Boltspark' '-nologo' '-verbosity:minimal' `
+            '-property:Configuration=Release' '-property:Platform=x64' `
+            "-property:PlatformToolset=$platformToolset"
+        if ($LASTEXITCODE -ne 0) {
+            throw "MSBuild failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
     }
 
     $nativeExe = Join-Path $buildRoot 'x64\Release\Boltspark.exe'

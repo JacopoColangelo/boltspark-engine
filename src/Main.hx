@@ -15,7 +15,20 @@ class Main extends hxd.App {
     var nativeWindow:hxd.Window;
     var spinSpeed:Float = 0.35;
 
+    @:hlNative("directx", "win_set_interactive_resize_callback")
+    static function setInteractiveResizeCallback(callback:Void->Void):Void return;
+
+    static function interactiveResizeFrame():Void {
+        try {
+            @:privateAccess hxd.System.mainLoop();
+        } catch (error:Dynamic) {
+            Sys.println('[resize] frame failed: ${Std.string(error)}');
+            setInteractiveResizeCallback(null);
+        }
+    }
+
     override function init():Void {
+        setInteractiveResizeCallback(interactiveResizeFrame);
         nativeWindow = hxd.Window.getInstance();
         nativeWindow.title = "Boltspark Engine";
         nativeWindow.vsync = true;
