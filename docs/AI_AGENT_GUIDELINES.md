@@ -37,6 +37,6 @@ Rules for AI agents (and humans) working in this repository. Read this before ma
 ## Verification workflow
 
 14. Before each runtime test, kill lingering `hl.exe` processes (an exception dialog from a previous run can block the test).
-15. Build with `tools/build-windows.ps1`, run with `tools/run-windows.ps1`. For screenshots of the native window use `PrintWindow` (screen-copy grabs the wrong monitor on multi-monitor setups).
-16. Run `tools/check-windows.ps1` before diagnosing "environment" issues — it validates OS, pins, native modules, and build config in one pass.
+15. Build with `tools/build.ps1`, run with `tools/build.ps1 -Run`. For screenshots of the native window use `PrintWindow` (screen-copy grabs the wrong monitor on multi-monitor setups).
+16. Run `tools/build.ps1 -Check` before diagnosing "environment" issues — it validates OS, pins, native modules, and build config in one pass. Install third-party build dependencies only when required with `tools/build.ps1 -InstallDependencies`.
 17. Keep the DX12/CArray regression repro (`tests/repro/DxCArrayRepro.hx`) compiling and passing whenever toolchain changes are ever approved.

@@ -34,9 +34,9 @@ Environment: user-level env vars point at the project toolchain (`HAXEPATH`, `HA
 - Editor shell: top bar, hierarchy (clickable `sampleCube` item), **transparent 3D viewport** (starter bug fixed: it used to fill the whole window with an opaque background, hiding `s3d`), inspector with editable spin-speed stepper + 4 color swatches, timestamped editor console, status bar with live input diagnostics. Resize-aware layout.
 - Command flow: widgets → shell callbacks → `Main` → engine objects (no direct widget→engine mutation).
 
-### Tools (all rewritten for the project-local toolchain)
-- `tools/check-windows.ps1`: verifies OS, pinned compiler, HashLink 1.16.0, native modules + hashes, haxelib packages, and build-config rules. **Removed the incorrect Agility SDK hard-requirement** (the official HashLink 1.16.0 binary is a standard DX12 build; verified from its PE exports and by runtime evidence). Verified passing.
-- `tools/build-windows.ps1`, `tools/run-windows.ps1`, `tools/install-dependencies.ps1`: use `toolchain/*` paths with per-session env; verified (build exit 0).
+### Build tools
+- The initial M0 scripts were consolidated into `tools/build.ps1`. It supports environment validation (`-Check`), explicit dependency installation (`-InstallDependencies`), development/release builds (default), and running the development build (`-Run`).
+- The environment check verifies the OS, pinned compiler, HashLink 1.16.0, native modules + hashes, Haxelib packages, and build configuration. The incorrect Agility SDK hard-requirement was removed: the official HashLink 1.16.0 binary is a standard DX12 build, verified by runtime evidence.
 
 ### Tests / docs
 - `tests/native-foundation-acceptance.md`: executed checklist with results and evidence links.
@@ -69,13 +69,13 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 | DX12 driver positively identified | `bin/runlog.txt`: `[M0] renderer driver = h3d.impl.DX12Driver` |
 | Native window + chrome + cube | `bin/m0_window.png` (1440x900) |
 | Input (clicks, stepper, swatches, focus, resize) | `bin/m0_input_test.png` (1296x900 after live resize; console shows one log per click, exact 0.25 stepper increments, swatch color change applied to cube, focus 4/4) |
-| Environment check | `tools/check-windows.ps1` exit 0 with module hashes |
-| Build | `tools/build-windows.ps1` exit 0 (verified twice, no dependency changes) |
+| Environment check | `tools/build.ps1 -Check` exit 0 |
+| Build | `tools/build.ps1` creates the development build and `release\Boltspark.exe` |
 | Clean shutdown | run exit code 0 on window close |
 
 ## 6. Deviations from the plan
 
-1. **Compiler pin deviation (user-ratified):** the plan specified "Haxe 4.3.x". Proven impossible for DX12 with Heaps 2.1.0 (section 4); pinned to the dev build instead, with the constraint documented in the toolchain lock and enforced by `tools/check-windows.ps1`.
+1. **Compiler pin deviation (user-ratified):** the plan specified "Haxe 4.3.x". Proven impossible for DX12 with Heaps 2.1.0 (section 4); pinned to the dev build instead, with the constraint documented in the toolchain lock and enforced by `tools/build.ps1 -Check`.
 2. **Agility SDK:** the starter's docs/scripts required it; the official HashLink 1.16.0 binary does not. Requirement removed (was wrong), documented with rationale.
 3. **D3D12 feature level:** recorded from hardware class (12_1) rather than a runtime query; Heaps' DX12Driver exposes no feature-level query at M0. Open item if a later milestone needs it.
 4. `-D hl_ver=1.16.0` added to `compile.hxml` (required by the DX12 driver's `hl.CArray` version guard).

@@ -24,7 +24,7 @@ The Haxe/HashLink toolchain and Haxelib dependencies are project-local. Building
 | `toolchain/hashlink` | Official HashLink **1.16.0** win64 binary (with `directx.hdll`, `dx12.hdll`, `libhl.dll`, `dxcompiler.dll`, `dxil.dll`) |
 | `toolchain/haxelib` | Project-local Haxelib repository (heaps 2.1.0, format 3.8.0, hldx 1.16.0, HashLink/C 1.16.0) |
 | `toolchain/neko` | Neko runtime (needed by `haxelib.exe`) |
-| `WinPixEventRuntime` | Pinned x64 native dependency installed by `tools/install-dependencies.ps1` |
+| `WinPixEventRuntime` | Pinned x64 native dependency installed by `tools/build.ps1 -InstallDependencies` |
 
 Full version lock, hashes, and the reasoning behind the compiler pin: [`docs/TOOLCHAIN_VERSIONS.md`](docs/TOOLCHAIN_VERSIONS.md).
 
@@ -35,13 +35,13 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 ## Build and run (Windows PowerShell)
 
 ```powershell
-.\tools\install-dependencies.ps1 # install pinned Haxe/C and PIX runtime dependencies
-.\tools\check-windows.ps1        # verify OS + project toolchain + build config
-.\tools\build-windows.ps1        # build bin/boltspark.hl and release\Boltspark.exe
-.\tools\run-windows.ps1          # launch with the project-local HashLink runtime
+.\tools\build.ps1                      # build bin\boltspark.hl and release\Boltspark.exe
+.\tools\build.ps1 -InstallDependencies # install missing pinned dependencies (optional)
+.\tools\build.ps1 -Check              # validate the Windows build environment
+.\tools\build.ps1 -Run                # run the development HashLink build
 ```
 
-The scripts set the Haxe/HashLink environment per-session and prefer the project-local paths. Native release builds also require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK. The generated `release\` folder contains the executable and its required runtime files.
+The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library and PIX runtime only when requested. Native release builds also require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK. The generated `release\` folder contains the executable and its required runtime files.
 
 ## Documentation
 
@@ -69,9 +69,5 @@ tests/
   native-foundation-acceptance.md
   repro/DxCArrayRepro.hx      — isolation repro for the DX12/CArray root cause
 tools/
-  check-windows.ps1           — environment check (no Agility SDK requirement)
-  build-windows.ps1           — compile
-  build-release-windows.ps1   — compile and package the native executable
-  run-windows.ps1             — launch
-  install-dependencies.ps1    — install pinned Haxelib packages into toolchain/haxelib
+  build.ps1                   — install dependencies, check, build, and run
 ```

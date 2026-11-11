@@ -57,7 +57,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 2. **Command flow, not direct mutation.** Widgets call shell callbacks; `Main` maps commands to engine objects (`sampleCube.material.color`, spin speed). Gate 4 will formalize this into an editor command queue.
 3. **Resize-aware, allocation-conscious.** Static chrome geometry is rebuilt only when the OS window size changes; per-frame work is limited to state updates and tiny rotations.
 4. **Positive driver identification.** The app logs the driver class at startup; acceptance requires this line rather than inferring DX12 from the compile flag.
-5. **Toolchain as a locked set.** Compiler/runtime/bindings are pinned together (see `docs/TOOLCHAIN_VERSIONS.md`); `tools/check-windows.ps1` enforces the pins.
+5. **Toolchain as a locked set.** Compiler/runtime/bindings are pinned together (see `docs/TOOLCHAIN_VERSIONS.md`); `tools/build.ps1 -Check` enforces the pins.
 
 ## Deliberately out of scope at M0
 

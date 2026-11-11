@@ -6,15 +6,15 @@ Evidence files are under `bin/` unless noted otherwise.
 ## Build/runtime
 
 - [x] Windows 11 x64 machine and GPU/driver recorded (`docs/TOOLCHAIN_VERSIONS.md`).
-- [x] Haxe compilation succeeds with the pinned toolchain using `compile.hxml` (verified twice without dependency changes; `tools\build-windows.ps1` exit 0).
+- [x] Haxe compilation succeeds with the pinned toolchain using `compile.hxml` (`tools\build.ps1`).
 - [x] Native release build links HashLink/C into `release\Boltspark.exe` and stages the required runtime modules beside it.
 - [x] `compile.hxml` selects `-lib hldx`, explicitly defines `-D dx12`, and pins `-D hl_ver=1.16.0`.
 - [x] HashLink VM starts the compiled `.hl` file (`toolchain/hashlink/hl.exe bin/boltspark.hl`).
 - [x] HashLink native module `directx.hdll` (window/input/event services) is present and loads at runtime (window opens, input works).
 - [x] HashLink native module `dx12.hdll` (Direct3D 12 rendering driver) is present and loads at runtime (rendering succeeds; driver positively identified as `h3d.impl.DX12Driver`).
-- [x] **Agility SDK: not required.** The official HashLink 1.16.0 binary is a standard DX12 build; no `D3D12/` folder or Agility DLLs are needed. (The starter's original Agility hard-requirement was incorrect and was removed from `tools/check-windows.ps1`.)
+- [x] **Agility SDK: not required.** The official HashLink 1.16.0 binary is a standard DX12 build; no `D3D12/` folder or Agility DLLs are needed.
 - [x] Process opens a normal native Windows desktop window (`bin/m0_window.png` — title "Boltspark Engine").
-- [x] No Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, browser, Node, SDL, or OpenGL fallback is launched/used: the only modules loaded are HashLink runtime + `dx12.hdll`/`directx.hdll`/`heaps.hdll`; `hlsdl`/`sdl.hdll` is never referenced by the build (`compile.hxml` checked by `tools/check-windows.ps1`).
+- [x] No Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, browser, Node, SDL, or OpenGL fallback is launched/used: the only modules loaded are HashLink runtime + `dx12.hdll`/`directx.hdll`/`heaps.hdll`; `hlsdl`/`sdl.hdll` is never referenced by the build (`compile.hxml` checked by `tools/build.ps1 -Check`).
 - [x] Window closes cleanly (run exits with code 0 on close).
 
 ## Rendering
@@ -41,7 +41,7 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] Record HashLink distribution source and hashes of native modules (`docs/TOOLCHAIN_VERSIONS.md`).
 - [x] Agility SDK: n/a — not required by the official HashLink 1.16.0 binary (documented, with rationale).
 - [x] Record GPU model, driver version (`docs/TOOLCHAIN_VERSIONS.md`). D3D12 feature level recorded from hardware class (12_1); Heaps DX12Driver does not expose a device feature-level query at M0 — direct runtime feature-level read is deferred to a later milestone if needed.
-- [x] Confirm `compile.hxml` selects `hldx` + `-D dx12` and does not reference `hlsdl` (enforced by `tools/check-windows.ps1`).
+- [x] Confirm `compile.hxml` selects `hldx` + `-D dx12` and does not reference `hlsdl` (enforced by `tools/build.ps1 -Check`).
 - [x] Root-cause diagnosis for the initial DX12 startup failure documented with an isolated repro (`tests/repro/DxCArrayRepro.hx` + analysis in `docs/M0_IMPLEMENTATION_REPORT.md`).
 
 ## Performance baseline

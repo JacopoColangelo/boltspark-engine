@@ -1,0 +1,390 @@
+param(
+    [switch]$InstallDependencies,
+    [switch]$Check,
+    [switch]$Run
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$toolchain = Join-Path $repoRoot 'toolchain'
+$haxeDevDir = Join-Path $toolchain 'haxe-dev'
+$hashLinkDir = Join-Path $toolchain 'hashlink'
+$nekoDir = Join-Path $toolchain 'neko'
+$haxeExe = Join-Path $haxeDevDir 'haxe.exe'
+$haxelibExe = Join-Path $haxeDevDir 'haxelib.exe'
+$hlExe = Join-Path $hashLinkDir 'hl.exe'
+$pixVersion = '1.0.240308001'
+$pixPackageHash = '726ACC93D6968E2146261A1E415521747D50AD69894C2B42B5D0D4C29FD66EC4'
+$pixRuntimeHash = '81ADCFD8253C3489BE720DA7E30F16004DC9A1F02A8B418C6C3AEF4993032E6D'
+
+$actionCount = 0
+foreach ($requestedAction in @($InstallDependencies, $Check, $Run)) {
+    if ($requestedAction) { $actionCount++ }
+}
+if ($actionCount -gt 1) {
+    throw 'Choose only one of -InstallDependencies, -Check, or -Run.'
+}
+
+$env:HAXE_STD_PATH = Join-Path $haxeDevDir 'std'
+$env:HAXELIB_PATH = Join-Path $toolchain 'haxelib'
+$env:NEKOPATH = $nekoDir
+$env:HASHLINK = $hashLinkDir
+$env:Path = "$haxeDevDir;$nekoDir;$hashLinkDir;$env:Path"
+
+function Install-Dependencies {
+    if (-not (Test-Path $haxeExe)) {
+        throw "Project Haxe compiler not found at $haxeExe. Restore the pinned toolchain first."
+    }
+
+    $haxelibDir = $env:HAXELIB_PATH
+    Write-Host 'Installing pinned project-local Haxe dependencies...' -ForegroundColor Cyan
+    if (-not (Test-Path $haxelibDir)) {
+        & $haxelibExe setup $haxelibDir
+        if ($LASTEXITCODE -ne 0) { throw 'haxelib setup failed.' }
+    }
+    & $haxelibExe install heaps 2.1.0
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to install Heaps 2.1.0.' }
+    & $haxelibExe install format
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to install format.' }
+    & $haxelibExe install hldx 1.16.0
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to install hldx 1.16.0.' }
+
+    $hashlinkPath = (cmd /c "`"$haxelibExe`" path hashlink 2>nul") -join ''
+    if ($LASTEXITCODE -eq 0) {
+        if ($hashlinkPath -notmatch '-D hashlink=1\.16\.0') {
+            throw "Expected HashLink/C haxelib 1.16.0, found '$hashlinkPath'. Remove the incompatible local package before continuing."
+        }
+    } else {
+        & $haxelibExe git hashlink https://github.com/HaxeFoundation/hashlink.git 1.16 other/haxelib/
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to install the HashLink 1.16.0 Haxe/C support library.' }
+    }
+
+    $pixRuntime = Join-Path $hashLinkDir 'WinPixEventRuntime.dll'
+    $pixLicense = Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt'
+    $refreshPixRuntime = $true
+    if (Test-Path $pixRuntime) {
+        $refreshPixRuntime = (Get-FileHash $pixRuntime -Algorithm SHA256).Hash -ne $pixRuntimeHash
+    }
+
+    if ($refreshPixRuntime -or -not (Test-Path $pixLicense)) {
+        $tempRoot = Join-Path $env:TEMP ('boltspark-winpix-' + [guid]::NewGuid().ToString('N'))
+        $packageFile = Join-Path $tempRoot 'WinPixEventRuntime.zip'
+        $packageContents = Join-Path $tempRoot 'package'
+        try {
+            New-Item -ItemType Directory -Force $tempRoot | Out-Null
+            $packageUrl = "https://api.nuget.org/v3-flatcontainer/winpixeventruntime/$pixVersion/winpixeventruntime.$pixVersion.nupkg"
+            Invoke-WebRequest -Uri $packageUrl -OutFile $packageFile
+            if ((Get-FileHash $packageFile -Algorithm SHA256).Hash -ne $pixPackageHash) {
+                throw "Downloaded PIX package $pixVersion failed SHA256 verification."
+            }
+            Expand-Archive -LiteralPath $packageFile -DestinationPath $packageContents
+
+            $sourceRuntime = Join-Path $packageContents 'bin\x64\WinPixEventRuntime.dll'
+            $sourceLicense = Join-Path $packageContents 'license.txt'
+            if (-not (Test-Path $sourceRuntime) -or -not (Test-Path $sourceLicense)) {
+                throw "PIX package $pixVersion is missing its x64 runtime or license file."
+            }
+            if ((Get-FileHash $sourceRuntime -Algorithm SHA256).Hash -ne $pixRuntimeHash) {
+                throw "PIX runtime $pixVersion failed SHA256 verification."
+            }
+
+            New-Item -ItemType Directory -Force $hashLinkDir | Out-Null
+            Copy-Item -LiteralPath $sourceRuntime -Destination $pixRuntime -Force
+            Copy-Item -LiteralPath $sourceLicense -Destination $pixLicense -Force
+        }
+        finally {
+            if (Test-Path $tempRoot) {
+                Remove-Item -LiteralPath $tempRoot -Recurse -Force
+            }
+        }
+    }
+
+    Write-Host "Dependencies ready: Heaps 2.1.0, format, hldx 1.16.0, HashLink/C 1.16.0, PIX $pixVersion." -ForegroundColor Green
+}
+
+function Require-File([string]$Path, [string]$Message) {
+    if (-not (Test-Path $Path)) { throw "Missing file: $Path`n$Message" }
+    return (Resolve-Path $Path).Path
+}
+
+function Test-Environment {
+    Write-Host 'Boltspark Windows 11 / DirectX 12 environment check' -ForegroundColor Cyan
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        throw 'This build configuration targets Windows 11 x64.'
+    }
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        throw 'Boltspark foundation currently targets Windows x64 only.'
+    }
+    $os = Get-CimInstance Win32_OperatingSystem
+    if ([int]$os.BuildNumber -lt 22000) {
+        throw "Windows 11 is required. Detected build $($os.BuildNumber)."
+    }
+    Write-Host "OS: $($os.Caption) build $($os.BuildNumber) x64"
+
+    $compiler = Require-File $haxeExe `
+        'Restore the pinned Haxe dev compiler (2025-10-23, dcda605) into toolchain/haxe-dev.'
+    $runtime = Require-File $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
+    Require-File $haxelibExe 'The pinned Haxe distribution must include haxelib.exe.' | Out-Null
+
+    $haxeVersion = (& $compiler --version).Trim()
+    $hlVersion = (& $runtime --version).Trim()
+    Write-Host "Haxe version: $haxeVersion"
+    Write-Host "HashLink version: $hlVersion"
+    if ($haxeVersion -notmatch '^5\.0\.0-preview\.1\+dcda605') {
+        throw "Haxe 5.0.0-preview.1+dcda605 is pinned. Found '$haxeVersion'."
+    }
+    if ($hlVersion -ne '1.16.0') {
+        throw "HashLink 1.16.0 is pinned. Found '$hlVersion' at $runtime."
+    }
+
+    foreach ($library in @('heaps', 'format', 'hldx', 'hashlink')) {
+        cmd /c "`"$haxelibExe`" path $library 2>nul" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Haxelib package '$library' is missing. Run .\tools\build.ps1 -InstallDependencies."
+        }
+        Write-Host "Haxelib package OK: $library"
+    }
+    $hldxVersion = (cmd /c "`"$haxelibExe`" list hldx 2>nul") -join ''
+    if ($hldxVersion -notmatch '1\.16\.0') {
+        throw "hldx 1.16.0 is pinned. Found '$hldxVersion'."
+    }
+    $hashlinkHaxelib = (cmd /c "`"$haxelibExe`" path hashlink 2>nul") -join ''
+    if ($LASTEXITCODE -ne 0 -or $hashlinkHaxelib -notmatch '-D hashlink=1\.16\.0') {
+        throw "HashLink/C support library 1.16.0 is required. Found '$hashlinkHaxelib'."
+    }
+
+    $requiredFiles = @(
+        @{ Path = (Join-Path $hashLinkDir 'dx12.hdll'); Message = 'HashLink must include dx12.hdll.' },
+        @{ Path = (Join-Path $hashLinkDir 'directx.hdll'); Message = 'HashLink must include directx.hdll.' },
+        @{ Path = (Join-Path $hashLinkDir 'libhl.dll'); Message = 'HashLink must include libhl.dll.' },
+        @{ Path = (Join-Path $hashLinkDir 'libhl.lib'); Message = 'HashLink must include libhl.lib for native linking.' },
+        @{ Path = (Join-Path $hashLinkDir 'dxcompiler.dll'); Message = 'HashLink must include dxcompiler.dll.' },
+        @{ Path = (Join-Path $hashLinkDir 'dxil.dll'); Message = 'HashLink must include dxil.dll.' },
+        @{ Path = (Join-Path $hashLinkDir 'WinPixEventRuntime.dll'); Message = 'Run .\tools\build.ps1 -InstallDependencies to install the pinned PIX runtime.' }
+    )
+    foreach ($required in $requiredFiles) {
+        Require-File $required.Path $required.Message | Out-Null
+    }
+    $actualPixHash = (Get-FileHash (Join-Path $hashLinkDir 'WinPixEventRuntime.dll') -Algorithm SHA256).Hash
+    if ($actualPixHash -ne $pixRuntimeHash) {
+        throw "Unexpected WinPixEventRuntime.dll hash: $actualPixHash. Run .\tools\build.ps1 -InstallDependencies to restore it."
+    }
+
+    $buildConfig = Get-Content (Join-Path $repoRoot 'compile.hxml') -Raw
+    if ($buildConfig -notmatch '(?m)^\s*-lib\s+hldx\s*$') {
+        throw 'compile.hxml must select -lib hldx for the Windows DirectX target.'
+    }
+    if ($buildConfig -notmatch '(?m)^\s*-D\s+dx12\s*$') {
+        throw 'compile.hxml must contain -D dx12.'
+    }
+    if ($buildConfig -notmatch '(?m)^\s*-D\s+hl_ver=1\.16\.0\s*$') {
+        throw 'compile.hxml must define -D hl_ver=1.16.0.'
+    }
+    if ($buildConfig -match 'hlsdl|sdl|opengl') {
+        throw 'compile.hxml must not select SDL/OpenGL for the Windows DirectX 12 target.'
+    }
+
+    Write-Host 'Environment check passed.' -ForegroundColor Green
+    Write-Host "Toolchain: Haxe $haxeVersion | HashLink $hlVersion | Heaps 2.1.0 | hldx 1.16.0 | HashLink/C 1.16.0" -ForegroundColor Green
+}
+
+function Build-NativeRelease {
+    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $vswhere = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) {
+        throw 'Visual Studio 2022 or newer with the Desktop C++ workload is required for native releases.'
+    }
+
+    $vsRequirements = @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64')
+    $vsPath = (& $vswhere @vsRequirements '-property' 'installationPath' | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsPath)) {
+        throw 'Could not find Visual Studio with the x64 C++ toolset. Install the Desktop C++ workload.'
+    }
+    $vsPath = $vsPath.Trim()
+    $vsVersion = (& $vswhere @vsRequirements '-property' 'installationVersion' | Select-Object -First 1).Trim()
+    $vsMajor = [int]$vsVersion.Split('.')[0]
+    if ($vsMajor -ge 18) {
+        $vsTemplate = 'vs2026'
+        $platformToolset = 'v145'
+    } elseif ($vsMajor -eq 17) {
+        $vsTemplate = 'vs2022'
+        $platformToolset = 'v143'
+    } else {
+        throw "Unsupported Visual Studio version '$vsVersion'. Install Visual Studio 2022 or newer."
+    }
+
+    $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
+    if (-not (Test-Path $msbuild)) {
+        throw "MSBuild was not found at $msbuild. Install the Visual Studio C++ workload."
+    }
+
+    $buildRoot = Join-Path $repoRoot 'bin\native-release'
+    $nativeSource = Join-Path $buildRoot 'Boltspark.c'
+    $nativeSolution = Join-Path $buildRoot 'Boltspark.sln'
+    $nativeProject = Join-Path $buildRoot 'Boltspark.vcxproj'
+    $nativeConfigPath = Join-Path $buildRoot 'hlc.json'
+    New-Item -ItemType Directory -Force $buildRoot | Out-Null
+
+    $compileArgs = @(
+        '-cp', 'src',
+        '-lib', 'heaps',
+        '-lib', 'format',
+        '-lib', 'hldx',
+        '-lib', 'hashlink',
+        '-D', 'dx12',
+        '-D', 'hl_ver=1.16.0',
+        '-D', 'windowSize=1440x900',
+        '-D', "hlgen.makefile=$vsTemplate",
+        '-hl', $nativeSource,
+        '-main', 'Main'
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $haxeOutput = & $haxeExe @compileArgs 2>&1
+        $haxeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    $haxeOutput |
+        Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
+        ForEach-Object { Write-Host $_ }
+
+    foreach ($generatedFile in @($nativeSource, $nativeSolution, $nativeProject, $nativeConfigPath)) {
+        if (-not (Test-Path $generatedFile)) {
+            throw "Haxe did not generate the expected native build file: $generatedFile"
+        }
+    }
+    $haxeOutputText = ($haxeOutput | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+            [string]$_.TargetObject
+        } else {
+            [string]$_
+        }
+    }) -join "`n"
+    $expectedMsbuildLookupFailure = $haxeOutputText -match
+        "Failed to find a valid MSbuild installation for template $vsTemplate"
+    if ($haxeExitCode -ne 0 -and -not $expectedMsbuildLookupFailure) {
+        throw "Haxe native code generation failed with exit code $haxeExitCode.`n$haxeOutputText"
+    }
+    if ($expectedMsbuildLookupFailure) {
+        Write-Warning 'HashLink generated the C source and project, but its helper could not locate MSBuild. Building the generated project directly.'
+    }
+
+    $nativeConfig = Get-Content $nativeConfigPath -Raw | ConvertFrom-Json
+    $nativeModules = @(
+        $nativeConfig.libs |
+            Where-Object { $_ -ne 'std' } |
+            Select-Object -Unique
+    )
+    if ($nativeModules.Count -eq 0) {
+        throw 'Haxe produced no native runtime module list.'
+    }
+
+    & $msbuild $nativeSolution '-t:Boltspark' '-nologo' '-verbosity:minimal' `
+        '-property:Configuration=Release' '-property:Platform=x64' `
+        "-property:PlatformToolset=$platformToolset"
+    if ($LASTEXITCODE -ne 0) {
+        throw "MSBuild failed with exit code $LASTEXITCODE."
+    }
+
+    $nativeExe = Join-Path $buildRoot 'x64\Release\Boltspark.exe'
+    if (-not (Test-Path $nativeExe)) {
+        throw "MSBuild succeeded but the expected executable was not created: $nativeExe"
+    }
+
+    $stagingDir = Join-Path $buildRoot 'package'
+    New-Item -ItemType Directory -Force $stagingDir | Out-Null
+    Copy-Item -LiteralPath $nativeExe -Destination (Join-Path $stagingDir 'Boltspark.exe') -Force
+
+    $runtimeFiles = @(
+        @{ Source = (Join-Path $hashLinkDir 'libhl.dll'); Name = 'libhl.dll' },
+        @{ Source = (Join-Path $hashLinkDir 'dxcompiler.dll'); Name = 'dxcompiler.dll' },
+        @{ Source = (Join-Path $hashLinkDir 'dxil.dll'); Name = 'dxil.dll' },
+        @{ Source = (Join-Path $hashLinkDir 'vcruntime140.dll'); Name = 'vcruntime140.dll' },
+        @{ Source = (Join-Path $nekoDir 'vcruntime140_1.dll'); Name = 'vcruntime140_1.dll' },
+        @{ Source = (Join-Path $nekoDir 'msvcp140.dll'); Name = 'msvcp140.dll' },
+        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.dll'); Name = 'WinPixEventRuntime.dll' },
+        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt'); Name = 'WinPixEventRuntime-LICENSE.txt' }
+    )
+    foreach ($runtimeFile in $runtimeFiles) {
+        if (-not (Test-Path $runtimeFile.Source)) {
+            throw "Required runtime file not found: $($runtimeFile.Source)"
+        }
+        Copy-Item -LiteralPath $runtimeFile.Source -Destination (Join-Path $stagingDir $runtimeFile.Name) -Force
+    }
+
+    foreach ($module in $nativeModules) {
+        $moduleFile = "$module.hdll"
+        $modulePath = Join-Path $hashLinkDir $moduleFile
+        if (-not (Test-Path $modulePath)) {
+            throw "Required HashLink module not found: $modulePath"
+        }
+        Copy-Item -LiteralPath $modulePath -Destination (Join-Path $stagingDir $moduleFile) -Force
+    }
+
+    $releaseDir = Join-Path $repoRoot 'release'
+    New-Item -ItemType Directory -Force $releaseDir | Out-Null
+    $replaceNames = @(
+        'Boltspark.exe',
+        'libhl.dll',
+        'dxcompiler.dll',
+        'dxil.dll',
+        'vcruntime140.dll',
+        'vcruntime140_1.dll',
+        'msvcp140.dll',
+        'WinPixEventRuntime.dll',
+        'WinPixEventRuntime-LICENSE.txt'
+    )
+    $replaceNames += Get-ChildItem $hashLinkDir -Filter '*.hdll' -File | Select-Object -ExpandProperty Name
+    foreach ($name in ($replaceNames | Select-Object -Unique)) {
+        $oldFile = Join-Path $releaseDir $name
+        if (Test-Path $oldFile) {
+            Remove-Item -LiteralPath $oldFile -Force
+        }
+    }
+    Copy-Item -Path (Join-Path $stagingDir '*') -Destination $releaseDir -Force
+    Write-Host 'Native release built: release\Boltspark.exe' -ForegroundColor Green
+}
+
+if ($InstallDependencies) {
+    Install-Dependencies
+    return
+}
+
+if ($Run) {
+    $runtime = Require-File $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
+    $bytecode = Require-File (Join-Path $repoRoot 'bin\boltspark.hl') `
+        'Build output not found (bin\boltspark.hl). Run .\tools\build.ps1 first.'
+    Push-Location $repoRoot
+    try {
+        & $runtime $bytecode
+        if ($LASTEXITCODE -ne 0) { throw "Boltspark exited with code $LASTEXITCODE." }
+    }
+    finally {
+        Pop-Location
+    }
+    return
+}
+
+Push-Location $repoRoot
+try {
+    Test-Environment
+    if ($Check) { return }
+
+    New-Item -ItemType Directory -Force (Join-Path $repoRoot 'bin') | Out-Null
+    & $haxeExe (Join-Path $repoRoot 'compile.hxml')
+    if ($LASTEXITCODE -ne 0) { throw "Haxe compilation failed with exit code $LASTEXITCODE." }
+    if (-not (Test-Path (Join-Path $repoRoot 'bin\boltspark.hl'))) {
+        throw 'Expected output bin\boltspark.hl was not created.'
+    }
+    Write-Host 'Development build succeeded: bin\boltspark.hl' -ForegroundColor Green
+    Build-NativeRelease
+    Write-Host 'Release executable: release\Boltspark.exe' -ForegroundColor Green
+    Write-Host 'Launch the development build with .\tools\build.ps1 -Run.' -ForegroundColor Green
+}
+finally {
+    Pop-Location
+}

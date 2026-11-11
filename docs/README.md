@@ -61,28 +61,25 @@ The pinned Haxe/HashLink toolchain ships under `toolchain/`. Native release buil
 6. No Agility SDK required (see the section above).
 7. Pinned Microsoft WinPixEventRuntime **1.0.240308001**, installed by the dependency script for native linking.
 
-### Install Haxe libraries (PowerShell)
+### Install dependencies (PowerShell)
 
-Run from the project root to install the native build dependencies and verify the project-local Haxelib packages:
+Run from the project root to install the pinned Haxe/C library and PIX runtime:
 
 ```powershell
-.\tools\install-dependencies.ps1
+.\tools\build.ps1 -InstallDependencies
 ```
 
-`tools/check-windows.ps1` verifies the whole set (OS, compiler pin, HashLink modules, build config) before any build.
+Use `.\tools\build.ps1 -Check` to verify the whole set (OS, compiler pin, HashLink modules, build config) before building.
 
 ## Build and run (Windows PowerShell)
 
 From the repository root:
 
 ```powershell
-.\tools\install-dependencies.ps1
-.\tools\check-windows.ps1
-.\tools\build-windows.ps1
-.\tools\run-windows.ps1
+.\tools\build.ps1
 ```
 
-`build-windows.ps1` produces both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files). `run-windows.ps1` launches the bytecode build; launch the native release directly from `release\Boltspark.exe`.
+The default action builds both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files). Use `.\tools\build.ps1 -Run` to launch the bytecode build; launch the native release directly from `release\Boltspark.exe`.
 
 The scripts prefer the project-local toolchain (`toolchain/haxe-dev`, `toolchain/hashlink`, `toolchain/haxelib`) and set the required environment (`HAXE_STD_PATH`, `HAXELIB_PATH`, `NEKOPATH`) per session.
 
@@ -100,7 +97,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Haxe compilation failed.' }
 hl bin/boltspark.hl
 ```
 
-The output is HashLink bytecode (`bin/boltspark.hl`), not a standalone Windows executable yet. Packaging and native C compilation are explicitly out of scope for this first editor foundation gate.
+The development output is HashLink bytecode (`bin/boltspark.hl`); the native Windows release is packaged separately in `release\Boltspark.exe`.
 
 ## What you should see
 
@@ -112,7 +109,7 @@ The output is HashLink bytecode (`bin/boltspark.hl`), not a standalone Windows e
 
 ## Windows native release
 
-Run `.\tools\install-dependencies.ps1` once to install the HashLink/C support library and pinned PIX runtime. Then `.\tools\build-windows.ps1` builds the development bytecode and compiles the native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules and required DLLs alongside the executable. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
+Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C support library and pinned PIX runtime. Then `.\tools\build.ps1` builds the development bytecode and compiles the native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules and required DLLs alongside the executable. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
 
 ## Important scope boundary
 
