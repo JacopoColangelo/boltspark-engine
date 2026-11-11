@@ -1,0 +1,83 @@
+package boltspark.ui.layout;
+
+import boltspark.ui.Theme;
+
+typedef DockLayoutGeometry = {
+    final leftPanel:LayoutRect;
+    final leftSplitter:LayoutRect;
+    final viewport:LayoutRect;
+    final consoleSplitter:LayoutRect;
+    final console:LayoutRect;
+    final rightSplitter:LayoutRect;
+    final rightPanel:LayoutRect;
+}
+
+class DockLayout {
+    public var leftPanelWidth:Float;
+    public var rightPanelWidth:Float;
+    public var consoleHeight:Float;
+
+    public function new(
+        leftPanelWidth:Float = Theme.LEFT_PANEL_WIDTH,
+        rightPanelWidth:Float = Theme.RIGHT_PANEL_WIDTH,
+        consoleHeight:Float = Theme.CONSOLE_HEIGHT
+    ) {
+        this.leftPanelWidth = leftPanelWidth;
+        this.rightPanelWidth = rightPanelWidth;
+        this.consoleHeight = consoleHeight;
+    }
+
+    public function calculate(width:Float, height:Float):DockLayoutGeometry {
+        var bodyTop = Theme.TOP_BAR_HEIGHT;
+        var bodyHeight = Math.max(0, height - Theme.TOP_BAR_HEIGHT - Theme.STATUS_BAR_HEIGHT);
+        var splitterSize = Theme.SPLITTER_SIZE;
+        var panelSpace = Math.max(0, width - splitterSize * 2);
+
+        var leftWidth:Float;
+        var rightWidth:Float;
+        var viewportWidth:Float;
+        if (panelSpace >= Theme.MIN_LEFT_PANEL_WIDTH + Theme.MIN_CENTER_PANEL_WIDTH + Theme.RIGHT_PANEL_WIDTH) {
+            var maxLeft = panelSpace - Theme.MIN_CENTER_PANEL_WIDTH - Theme.RIGHT_PANEL_WIDTH;
+            leftPanelWidth = clamp(leftPanelWidth, Theme.MIN_LEFT_PANEL_WIDTH, maxLeft);
+            var maxRight = panelSpace - leftPanelWidth - Theme.MIN_CENTER_PANEL_WIDTH;
+            rightPanelWidth = clamp(rightPanelWidth, Theme.RIGHT_PANEL_WIDTH, maxRight);
+            leftWidth = leftPanelWidth;
+            rightWidth = rightPanelWidth;
+            viewportWidth = panelSpace - leftWidth - rightWidth;
+        } else {
+            leftWidth = panelSpace * 0.3;
+            rightWidth = panelSpace * 0.35;
+            viewportWidth = Math.max(0, panelSpace - leftWidth - rightWidth);
+        }
+
+        var viewportX = leftWidth + splitterSize;
+        var rightX = width - rightWidth;
+        var consoleHeight:Float;
+        var viewportHeight:Float;
+        if (bodyHeight >= 168 + splitterSize + 96) {
+            this.consoleHeight = clamp(this.consoleHeight, 96, bodyHeight - 168 - splitterSize);
+            consoleHeight = this.consoleHeight;
+            viewportHeight = bodyHeight - consoleHeight - splitterSize;
+        } else {
+            consoleHeight = bodyHeight * 0.4;
+            viewportHeight = Math.max(0, bodyHeight - consoleHeight - splitterSize);
+        }
+        var consoleY = bodyTop + viewportHeight + splitterSize;
+
+        return {
+            leftPanel: new LayoutRect(0, bodyTop, leftWidth, bodyHeight),
+            leftSplitter: new LayoutRect(leftWidth, bodyTop, splitterSize, bodyHeight),
+            viewport: new LayoutRect(viewportX, bodyTop, viewportWidth, viewportHeight),
+            consoleSplitter: new LayoutRect(viewportX, bodyTop + viewportHeight, viewportWidth, splitterSize),
+            console: new LayoutRect(viewportX, consoleY, viewportWidth, consoleHeight),
+            rightSplitter: new LayoutRect(rightX - splitterSize, bodyTop, splitterSize, bodyHeight),
+            rightPanel: new LayoutRect(rightX, bodyTop, rightWidth, bodyHeight)
+        };
+    }
+
+    static function clamp(value:Float, min:Float, max:Float):Float {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+}

@@ -14,6 +14,11 @@ class Theme {
     public static inline var CONSOLE_HEIGHT:Int = 148;
     public static inline var LEFT_PANEL_WIDTH:Int = 224;
     public static inline var RIGHT_PANEL_WIDTH:Int = 280;
+    public static inline var SPLITTER_SIZE:Int = 8;
+    public static inline var SPLITTER_VISIBLE_WIDTH:Int = 2;
+    public static inline var SPLITTER_HOVER:Int = 0x58718D;
+    public static inline var MIN_LEFT_PANEL_WIDTH:Int = 216;
+    public static inline var MIN_CENTER_PANEL_WIDTH:Int = 240;
     public static inline var SPACING:Int = 16;
     public static inline var BUTTON_WIDTH:Int = 184;
     public static inline var BUTTON_HEIGHT:Int = 34;
@@ -24,6 +29,8 @@ class Theme {
     public static inline var PANEL:Int = 0x1D232D;
     public static inline var PANEL_EDGE:Int = 0x303A48;
     public static inline var CONSOLE_BG:Int = 0x12151B;
+    public static inline var FIELD_BG:Int = 0x151A22;
+    public static inline var FIELD_FOCUS:Int = 0x202B39;
     public static inline var ACCENT:Int = 0xD97732;
     public static inline var TEXT:Int = 0xE8EDF3;
     public static inline var MUTED:Int = 0x9AA7B7;

@@ -1,18 +1,21 @@
 package boltspark.ui;
 
 import boltspark.ui.widgets.ConsolePanel;
+import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.Stepper;
 import boltspark.ui.widgets.SwatchPicker;
 import boltspark.ui.widgets.UiButton;
+import boltspark.ui.layout.DockLayout;
+import boltspark.ui.layout.DockLayoutStore;
+import boltspark.ui.layout.LayoutRect;
 
 /**
- * Editor chrome: top bar, hierarchy, transparent 3D viewport, inspector,
+ * Editor chrome: top bar, hierarchy, bounded 3D viewport, inspector,
  * console, and status bar.
  *
  * Layout rules:
- *  - The center column (viewport) is intentionally NOT filled by the UI so
- *    the native h3d scene shows through the h2d overlay.
- *  - Static panel geometry is rebuilt only when the OS window resizes.
+ *  - The center column is an interactive, scissored 3D viewport.
+ *  - Panel geometry is rebuilt on window resize and dock splitter movement.
  *  - Widgets issue editor commands through callbacks; they never mutate
  *    engine state directly.
  */
@@ -28,9 +31,15 @@ class EditorShell {
     final inspectorTitle:h2d.Text;
     final statusText:h2d.Text;
     final inputStatus:h2d.Text;
+    final leftSplitter:DockSplitter;
+    final rightSplitter:DockSplitter;
+    final consoleSplitter:DockSplitter;
+    final dockLayout:DockLayout;
+    final layoutStore:DockLayoutStore;
 
     // Widgets.
     final testButton:UiButton;
+    final viewportHit:h2d.Interactive;
     final hierarchyItemBg:h2d.Interactive;
     final hierarchyItem:h2d.Text;
     final spinRow:Stepper;
@@ -43,16 +52,42 @@ class EditorShell {
     public var onTestAction:Null<Void->Void>;
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
+    public var onViewportClick:Null<Float->Float->Void>;
+    public var viewportRect(default, null):LayoutRect;
 
     var lastWidth:Int = -1;
     var lastHeight:Int = -1;
     var selected:Bool = false;
-
     public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter) {
         this.ctx = ctx;
         this.input = input;
         this.root = new h2d.Object(parent);
         chrome = new h2d.Graphics(root);
+
+        viewportHit = new h2d.Interactive(1, 1, root);
+        viewportHit.backgroundColor = 0;
+        viewportHit.onClick = function(event) {
+            if (onViewportClick != null) onViewportClick(event.relX, event.relY);
+        };
+
+        leftSplitter = new DockSplitter(ctx, true, root);
+        leftSplitter.onDrag = function(delta) {
+            dockLayout.leftPanelWidth += delta;
+            resize();
+        };
+        leftSplitter.onDragEnd = saveLayout;
+        rightSplitter = new DockSplitter(ctx, true, root);
+        rightSplitter.onDrag = function(delta) {
+            dockLayout.rightPanelWidth -= delta;
+            resize();
+        };
+        rightSplitter.onDragEnd = saveLayout;
+        consoleSplitter = new DockSplitter(ctx, false, root);
+        consoleSplitter.onDrag = function(delta) {
+            dockLayout.consoleHeight -= delta;
+            resize();
+        };
+        consoleSplitter.onDragEnd = saveLayout;
 
         appTitle = new h2d.Text(ctx.font, root);
         appTitle.text = "BOLTSPARK";
@@ -70,10 +105,8 @@ class EditorShell {
         hierarchyItemBg.cursor = hxd.Cursor.Button;
         hierarchyItemBg.backgroundColor = 0;
         hierarchyItemBg.onClick = function(_) {
-            selected = !selected;
-            hierarchyItemBg.backgroundColor = selected ? Theme.BUTTON_ACTIVE : 0;
-            hierarchyItem.textColor = selected ? Theme.ACCENT : Theme.TEXT;
-            log("hierarchy: sampleCube " + (selected ? "selected" : "deselected"));
+            setSampleCubeSelected(true);
+            log("hierarchy: sampleCube selected");
         };
 
         hierarchyItem = new h2d.Text(ctx.font, root);
@@ -96,6 +129,7 @@ class EditorShell {
         spinRow.onValueChanged = function(v:Float) {
             if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         };
+        spinRow.onEditRejected = function(message:String) log("inspector: " + message);
 
         colorLabel = new h2d.Text(ctx.font, root);
         colorLabel.text = "Base color";
@@ -123,6 +157,11 @@ class EditorShell {
         inputStatus.textColor = Theme.MUTED;
         input.bindReport(inputStatus);
 
+        dockLayout = new DockLayout();
+        layoutStore = new DockLayoutStore();
+        var layoutError = layoutStore.load(dockLayout);
+        if (layoutError != null) log("layout: " + layoutError);
+
         resize();
     }
 
@@ -131,7 +170,7 @@ class EditorShell {
         console.log(line);
     }
 
-    /** Called once per app frame; re-layout only on native window resize. */
+    /** Called once per app frame; re-layout when the native window is resized. */
     public function update(dt:Float):Void {
         if (ctx.width != lastWidth || ctx.height != lastHeight) {
             resize();
@@ -143,44 +182,72 @@ class EditorShell {
         var width = ctx.width;
         var height = ctx.height;
         var bodyTop = Theme.TOP_BAR_HEIGHT;
-        var bodyHeight = height - Theme.TOP_BAR_HEIGHT - Theme.STATUS_BAR_HEIGHT;
-        var viewportX = Theme.LEFT_PANEL_WIDTH;
-        var viewportW = width - Theme.LEFT_PANEL_WIDTH - Theme.RIGHT_PANEL_WIDTH;
-        var consoleH = Theme.CONSOLE_HEIGHT;
-        var viewportH = bodyHeight - consoleH;
-        var rightX = width - Theme.RIGHT_PANEL_WIDTH;
+        var splitterSize = Theme.SPLITTER_SIZE;
+        var geometry = dockLayout.calculate(width, height);
+        viewportRect = geometry.viewport;
+        var leftWidth = geometry.leftPanel.width;
+        var rightX = geometry.rightPanel.x;
+        var consoleH = geometry.console.height;
+        var consoleY = geometry.console.y;
 
         lastWidth = width;
         lastHeight = height;
 
         chrome.clear();
 
-        // NOTE: no full-window background fill — the viewport area stays
-        // transparent so the native h3d scene renders through the overlay.
+        // The viewport stays unfilled so the scissored 3D scene remains visible.
 
         chrome.beginFill(Theme.TOP_BAR);
         chrome.drawRect(0, 0, width, Theme.TOP_BAR_HEIGHT);
         chrome.endFill();
 
         chrome.beginFill(Theme.PANEL);
-        chrome.drawRect(0, bodyTop, Theme.LEFT_PANEL_WIDTH, bodyHeight);
-        chrome.drawRect(rightX, bodyTop, Theme.RIGHT_PANEL_WIDTH, bodyHeight);
-        chrome.drawRect(viewportX, bodyTop + viewportH, viewportW, consoleH);
+        chrome.drawRect(
+            geometry.leftPanel.x, geometry.leftPanel.y,
+            geometry.leftPanel.width, geometry.leftPanel.height);
+        chrome.drawRect(
+            geometry.rightPanel.x, geometry.rightPanel.y,
+            geometry.rightPanel.width, geometry.rightPanel.height);
+        chrome.drawRect(
+            geometry.console.x, geometry.console.y,
+            geometry.console.width, geometry.console.height);
         chrome.drawRect(0, height - Theme.STATUS_BAR_HEIGHT, width, Theme.STATUS_BAR_HEIGHT);
         chrome.endFill();
 
         chrome.lineStyle(1, Theme.PANEL_EDGE, 1);
-        chrome.moveTo(Theme.LEFT_PANEL_WIDTH, bodyTop);
-        chrome.lineTo(Theme.LEFT_PANEL_WIDTH, height - Theme.STATUS_BAR_HEIGHT);
-        chrome.moveTo(rightX, bodyTop);
-        chrome.lineTo(rightX, height - Theme.STATUS_BAR_HEIGHT);
+        chrome.moveTo(geometry.leftSplitter.x + splitterSize / 2, geometry.leftSplitter.y);
+        chrome.lineTo(
+            geometry.leftSplitter.x + splitterSize / 2,
+            height - Theme.STATUS_BAR_HEIGHT);
+        chrome.moveTo(geometry.rightSplitter.x + splitterSize / 2, geometry.rightSplitter.y);
+        chrome.lineTo(
+            geometry.rightSplitter.x + splitterSize / 2,
+            height - Theme.STATUS_BAR_HEIGHT);
         chrome.moveTo(0, bodyTop);
         chrome.lineTo(width, bodyTop);
-        chrome.moveTo(viewportX, bodyTop + viewportH);
-        chrome.lineTo(width - Theme.RIGHT_PANEL_WIDTH, bodyTop + viewportH);
+        chrome.moveTo(
+            geometry.consoleSplitter.x,
+            geometry.consoleSplitter.y + splitterSize / 2);
+        chrome.lineTo(
+            geometry.consoleSplitter.x + geometry.consoleSplitter.width,
+            geometry.consoleSplitter.y + splitterSize / 2);
         chrome.moveTo(0, height - Theme.STATUS_BAR_HEIGHT);
         chrome.lineTo(width, height - Theme.STATUS_BAR_HEIGHT);
         chrome.lineStyle();
+
+        leftSplitter.setBounds(
+            geometry.leftSplitter.x, geometry.leftSplitter.y,
+            geometry.leftSplitter.width, geometry.leftSplitter.height);
+        rightSplitter.setBounds(
+            geometry.rightSplitter.x, geometry.rightSplitter.y,
+            geometry.rightSplitter.width, geometry.rightSplitter.height);
+        consoleSplitter.setBounds(
+            geometry.consoleSplitter.x, geometry.consoleSplitter.y,
+            geometry.consoleSplitter.width, geometry.consoleSplitter.height);
+        viewportHit.x = geometry.viewport.x;
+        viewportHit.y = geometry.viewport.y;
+        viewportHit.width = Math.max(0, geometry.viewport.width);
+        viewportHit.height = Math.max(0, geometry.viewport.height);
 
         appTitle.x = 16;
         appTitle.y = 15;
@@ -188,6 +255,7 @@ class EditorShell {
         hierarchyTitle.x = 16;
         hierarchyTitle.y = bodyTop + 16;
 
+        hierarchyItemBg.width = Math.max(0, leftWidth - 24);
         hierarchyItemBg.x = 12;
         hierarchyItemBg.y = bodyTop + 46;
 
@@ -213,14 +281,25 @@ class EditorShell {
         colorRow.x = rightX + 16;
         colorRow.y = bodyTop + 148;
 
-        console.x = viewportX + 8;
-        console.y = bodyTop + viewportH + 8;
-        console.layout(viewportW - 16, consoleH - 16);
+        console.x = geometry.console.x + 8;
+        console.y = consoleY + 8;
+        console.layout(geometry.console.width - 16, consoleH - 16);
 
         statusText.x = 12;
         statusText.y = height - Theme.STATUS_BAR_HEIGHT + 5;
 
         inputStatus.x = width - 420;
         inputStatus.y = height - Theme.STATUS_BAR_HEIGHT + 5;
+    }
+
+    function saveLayout():Void {
+        var error = layoutStore.save(dockLayout);
+        if (error != null) log("layout: " + error);
+    }
+
+    public function setSampleCubeSelected(value:Bool):Void {
+        selected = value;
+        hierarchyItemBg.backgroundColor = selected ? Theme.BUTTON_ACTIVE : 0;
+        hierarchyItem.textColor = selected ? Theme.ACCENT : Theme.TEXT;
     }
 }

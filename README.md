@@ -6,7 +6,10 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 
 - A native Windows 11 x64 desktop window ("Boltspark Engine") booted by the HashLink VM, rendering through the **DirectX 12** Heaps driver (positively identified at runtime as `h3d.impl.DX12Driver`).
 - A rotating 3D mesh in `s3d` behind a native `h2d` editor chrome overlay.
-- The first BoltUI framework slice: top bar, hierarchy, transparent 3D viewport, inspector with an editable spin-speed stepper and color swatches, an editor console, a status bar with a central input adapter (keyboard/focus/pointer diagnostics), and resize-aware layout.
+- A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
+- The first BoltUI framework slice: top bar, hierarchy, bounded 3D viewport, inspector with an editable spin-speed stepper and color swatches, an editor console, a status bar with a central input adapter (keyboard/focus/pointer diagnostics), and resize-aware layout.
+- The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
+- Inspector numeric fields support keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
 - Editor commands flow UI → command → engine object (widgets never mutate engine state directly).
 
 ## Hard platform policy
@@ -60,6 +63,7 @@ src/
   Main.hx                     — entry point (hxd.App), wires editor commands to engine objects
   boltspark/ui/
     BoltUI.hx                 — facade: theme + input adapter + editor shell
+    layout/                   — reusable dock geometry and local layout persistence
     Theme.hx                  — color/size tokens
     UiContext.hx              — shared window/font state handed to widgets
     InputAdapter.hx           — central keyboard/focus/pointer reporting

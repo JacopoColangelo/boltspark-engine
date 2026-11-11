@@ -74,13 +74,14 @@ Implement in this order:
 
 ## Gate 5 — Viewport embedding decision
 
-Prototype bounded 3D rendering and picking before adding more editor systems.
+The prototype clips `s3d` to the computed viewport rectangle with Heaps `Engine.setRenderZone`, then resets the render zone before drawing H2D chrome. The camera projection is centered on the viewport, and viewport-local clicks are converted to window coordinates before unprojection into collider rays.
 
 **Exit criteria**
-- 3D view is clipped to a viewport rectangle.
-- Picking rays correspond to viewport-local coordinates.
-- Resize and DPI scale update the viewport and its render target safely.
-- Device-loss/reset has a documented recovery strategy.
+- [x] 3D content is clipped to the viewport rectangle rather than hidden only by opaque panels.
+- [x] Picking rays use viewport-local coordinates and synchronize hierarchy selection.
+- [x] Native DX12 smoke tests confirm viewport clipping, cube selection, empty-space deselection, and camera/picking alignment after a 1440x900 to 1280x800 window resize.
+- [ ] Dock-splitter resize and high-DPI behavior are validated on a Windows target.
+- [ ] Device-loss/reset runtime validation remains pending.
 
 ## DX12-specific validation
 

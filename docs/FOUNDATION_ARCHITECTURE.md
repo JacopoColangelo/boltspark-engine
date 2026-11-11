@@ -121,14 +121,9 @@ The API should not expose H2D implementation classes to editor tools. Keep the r
 
 ## 5. Rendering order and viewport strategy
 
-For the first slice, render the full 3D scene through `s3d` and draw editor chrome over it through `s2d`.
+The editor clips `s3d` rendering to the computed viewport rectangle with Heaps' `Engine.setRenderZone`, then resets the render zone before drawing H2D chrome. The camera projection is centered on that rectangle; viewport-local clicks are converted to window coordinates and unprojected into collider rays. This path keeps the proven DX12 scene renderer and avoids introducing a separate render-target lifecycle.
 
-For a real editor layout, the 3D viewport must become a bounded region rather than a fullscreen background. Do not hack the viewport by layering opaque panels forever. Prototype one of these Heaps-compatible approaches after the foundation passes:
-
-1. A 3D scene output target rendered to a texture, then displayed in a clipped H2D viewport region.
-2. A supported sub-scene/scene-position path if it satisfies clipping, picking, resize, and DPI requirements.
-
-The choice must be tested for GPU resource lifecycle, picking-coordinate conversion, high-DPI behavior, and render-target resize. Record findings before implementing docking.
+The scissored viewport, coordinate conversion, resize, and selection path are implemented. Validate high-DPI scaling, repeated window/dock resizing, and actual device-loss recovery on a Windows target before declaring Gate 5 complete.
 
 ## 6. Input model
 

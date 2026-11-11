@@ -13,8 +13,6 @@ class Main extends hxd.App {
     var boltUI:BoltUI;
     var sampleCube:h3d.scene.Mesh;
     var nativeWindow:hxd.Window;
-    var lastWindowWidth:Int = -1;
-    var lastWindowHeight:Int = -1;
     var spinSpeed:Float = 0.35;
 
     override function init():Void {
@@ -37,13 +35,11 @@ class Main extends hxd.App {
         sampleCube.material.color.setColor(boltspark.ui.Theme.CUBE_ORANGE);
 
         s3d.camera.pos.set(5, 5, 5);
-        s3d.camera.setFovX(70, nativeWindow.width / Math.max(1, nativeWindow.height));
-        lastWindowWidth = nativeWindow.width;
-        lastWindowHeight = nativeWindow.height;
 
         // BoltUI is a native H2D overlay rendered by Heaps. It is not HTML,
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
         boltUI = new BoltUI(s2d, nativeWindow);
+        boltUI.onViewportClick = onViewportClick;
         boltUI.log('renderer driver: ${driverName}');
         boltUI.log("editor shell ready — hierarchy, inspector, console live");
 
@@ -65,15 +61,46 @@ class Main extends hxd.App {
     override function update(dt:Float):Void {
         boltUI.update(dt);
 
-        if (nativeWindow.width != lastWindowWidth || nativeWindow.height != lastWindowHeight) {
-            lastWindowWidth = nativeWindow.width;
-            lastWindowHeight = nativeWindow.height;
-            s3d.camera.setFovX(70, nativeWindow.width / Math.max(1, nativeWindow.height));
-        }
-
         // Visible motion confirms the 3D update path is alive; the editor
         // controls the rate through the inspector stepper.
         sampleCube.rotate(0.0, 0.0, dt * spinSpeed);
+    }
+
+    override function render(engine:h3d.Engine):Void {
+        var viewport = boltUI.getViewportRect();
+        var scaleX = engine.width / Math.max(1, nativeWindow.width);
+        var scaleY = engine.height / Math.max(1, nativeWindow.height);
+        var x = Std.int(Math.round(viewport.x * scaleX));
+        var y = Std.int(Math.round(viewport.y * scaleY));
+        var width = Std.int(Math.max(0, Math.round(viewport.width * scaleX)));
+        var height = Std.int(Math.max(0, Math.round(viewport.height * scaleY)));
+        if (width > 0 && height > 0) {
+            var centerX = x + width * 0.5;
+            var centerY = y + height * 0.5;
+            s3d.camera.setFovX(70, engine.width / engine.height);
+            s3d.camera.viewX = centerX * 2 / engine.width - 1;
+            s3d.camera.viewY = 1 - centerY * 2 / engine.height;
+            engine.setRenderZone(x, y, width, height);
+            s3d.render(engine);
+            engine.setRenderZone();
+        }
+        s2d.render(engine);
+    }
+
+    function onViewportClick(x:Float, y:Float):Void {
+        var viewport = boltUI.getViewportRect();
+        var engine = h3d.Engine.getCurrent();
+        var scaleX = engine.width / Math.max(1, nativeWindow.width);
+        var scaleY = engine.height / Math.max(1, nativeWindow.height);
+        var ray = s3d.camera.rayFromScreen(
+            (viewport.x + x) * scaleX,
+            (viewport.y + y) * scaleY,
+            engine.width,
+            engine.height);
+        var collider = sampleCube.getCollider();
+        var hit = collider != null && collider.rayIntersection(ray, true) >= 0;
+        boltUI.setSampleCubeSelected(hit);
+        boltUI.log(hit ? "viewport: selected sampleCube" : "viewport: no object at pointer");
     }
 
     static function main():Void {

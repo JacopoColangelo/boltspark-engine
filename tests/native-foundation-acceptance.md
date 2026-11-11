@@ -22,7 +22,12 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] DX12 driver is positively identified in runtime diagnostics, not only inferred from the compile flag: `[M0] renderer driver = h3d.impl.DX12Driver` (`bin/runlog.txt`).
 - [x] 3D cube appears in the 3D scene using the Heaps DX12 driver (`bin/m0_window.png`, `bin/m0_input_test.png`).
 - [x] Cube visibly rotates without application logic errors (rotation rate editable live from the inspector stepper).
-- [x] H2D editor chrome appears over the 3D scene (top bar, hierarchy, inspector, console, status bar; viewport area left transparent for the 3D scene).
+- [x] H2D editor chrome appears over the bounded 3D viewport (top bar, hierarchy, inspector, console, status bar).
+- [x] 3D content is clipped to the viewport rectangle by the render zone, aligned with the editor panels.
+- [x] Clicking the sample cube selects it from the viewport; clicking empty viewport space clears hierarchy selection.
+- [x] Native window resize (1440x900 to 1280x800) updates viewport framing and picking coordinates without stale content or crashes.
+- [ ] Dock-splitter resize is validated against viewport framing and picking coordinates.
+- [ ] High-DPI scaling and device-loss/reset recovery are validated on a Windows target.
 - [x] Text is legible at baseline window size (1440x900 default; verified at 1296x900 after resize).
 - [x] Resize behavior: chrome redraws to the new client size (`bin/m0_input_test.png` was captured at a resized 1296x900 window with correct layout). Maximize/restore re-uses the same `resize()` path.
 - [x] No Direct3D 12 device/runtime errors during the test (no exception dialogs, clean run log).

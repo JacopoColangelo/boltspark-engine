@@ -1,5 +1,7 @@
 package boltspark.ui;
 
+import boltspark.ui.layout.LayoutRect;
+
 /**
  * BoltUI foundation facade.
  *
@@ -25,6 +27,7 @@ class BoltUI {
     public var onTestAction:Null<Void->Void>;
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
+    public var onViewportClick:Null<Float->Float->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window) {
         ctx = new UiContext(window, hxd.res.DefaultFont.get());
@@ -33,6 +36,7 @@ class BoltUI {
         shell.onTestAction = function() if (onTestAction != null) onTestAction();
         shell.onSpinSpeedChanged = function(v) if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         shell.onColorChanged = function(c) if (onColorChanged != null) onColorChanged(c);
+        shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
     }
 
     /** Editor console access. */
@@ -48,5 +52,13 @@ class BoltUI {
     /** Rebuild static 2D chrome in response to a native window resize. */
     public function resize():Void {
         shell.resize();
+    }
+
+    public function getViewportRect():LayoutRect {
+        return shell.viewportRect;
+    }
+
+    public function setSampleCubeSelected(selected:Bool):Void {
+        shell.setSampleCubeSelected(selected);
     }
 }
