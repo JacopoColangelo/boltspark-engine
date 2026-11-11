@@ -10,7 +10,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - A compact native BoltUI editor shell with embedded anti-aliased Inter/JetBrains Mono atlases, crisp vector surfaces, procedural icons, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
-- Inspector numeric fields support keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
+- Inspector numeric fields support compact up/down stepping, horizontal drag scrubbing, and keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
 - Editor commands flow UI → command → engine object (widgets never mutate engine state directly).
 
 ## Hard platform policy

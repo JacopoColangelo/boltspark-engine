@@ -53,10 +53,22 @@ class UiContext {
 
     public function restoreArrowCursor():Void {
         #if hldx
+        // Keep Heaps' cursor cache and the native DirectX cursor synchronized.
+        // Resize callbacks set a dx.Cursor directly, so either operation alone
+        // can leave the other layer believing a stale cursor is active.
+        hxd.System.setCursor(hxd.Cursor.Default);
         arrowCursor.set();
         #else
         hxd.System.setCursor(hxd.Cursor.Default);
         #end
+    }
+
+    /** Force an I-beam after a callback cursor (for example numeric scrubbing). */
+    public function showTextInputCursor():Void {
+        // Transition through Default so Heaps cannot skip the native update
+        // because its cached cursor was already TextInput.
+        hxd.System.setCursor(hxd.Cursor.Default);
+        hxd.System.setCursor(hxd.Cursor.TextInput);
     }
 
     inline function get_width():Int return window.width;

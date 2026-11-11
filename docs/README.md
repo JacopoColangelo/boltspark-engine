@@ -104,7 +104,7 @@ The development output is HashLink bytecode (`bin/boltspark.hl`); the native Win
 - A native Windows window titled `Boltspark Engine`.
 - A 3D cube rotating in the transparent center viewport using the DX12 driver (runtime log prints `[M0] renderer driver = h3d.impl.DX12Driver`).
 - Editor chrome drawn with H2D: top bar (`BOLTSPARK`), left hierarchy (`sampleCube` + `Test native input`), right inspector (`Spin speed (rad/s)` stepper and `Base color` swatches), an editor console below the viewport, and a bottom status bar with central input diagnostics.
-- Clicking `Test native input` (or the swatches / stepper) logs `command: ...` lines into the console; swatches change the cube color live; the stepper changes the spin rate live.
+- Clicking `Test native input` (or the swatches / numeric property arrows) logs `command: ...` lines into the console; swatches change the cube color live; arrow stepping and horizontal value scrubbing change the spin rate live.
 - Resizing the OS window redraws the editor chrome to the new dimensions.
 
 ## Windows native release

@@ -9,6 +9,7 @@ class HierarchyRow extends h2d.Object {
     public var objectId:Int;
     public var onWheel:Null<Float->Void>;
     public var onSelect:Null<Int->Bool->Bool->Void>;
+    public var onContextMenu:Null<Void->Void>;
 
     final surface:UiSurface;
     final background:h2d.Interactive;
@@ -28,8 +29,9 @@ class HierarchyRow extends h2d.Object {
         surface = new UiSurface(ctx, this);
         surface.visible = false;
         background = new h2d.Interactive(1, 22, this);
-        background.cursor = hxd.Cursor.Button;
+        background.cursor = hxd.Cursor.Default;
         background.backgroundColor = 0;
+        background.enableRightButton = true;
         background.onOver = function(_) {
             hovered = true;
             updateStyle();
@@ -38,8 +40,11 @@ class HierarchyRow extends h2d.Object {
             hovered = false;
             updateStyle();
         };
-        background.onClick = function(_) {
-            if (onSelect != null) {
+        background.onClick = function(event) {
+            if (event.button == 1) {
+                if (onContextMenu != null) onContextMenu();
+                event.propagate = false;
+            } else if (onSelect != null) {
                 onSelect(this.objectId, hxd.Key.isDown(hxd.Key.CTRL),
                     hxd.Key.isDown(hxd.Key.SHIFT));
             }

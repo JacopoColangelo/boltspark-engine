@@ -29,6 +29,7 @@ class EditorShell {
     final input:InputAdapter;
     final root:h2d.Object;
     final chrome:h2d.Graphics;
+    final editorBackgroundHit:h2d.Interactive;
 
     // Title/menu bar and editor toolbar.
     final brandMark:h2d.Graphics;
@@ -36,12 +37,12 @@ class EditorShell {
     final projectTitle:h2d.Text;
     final menuButtons:Array<UiButton> = [];
     final addObjectButton:UiButton;
-    final deleteObjectsButton:UiButton;
     final transformButtons:Array<UiButton> = [];
     final transportButtons:Array<UiButton> = [];
 
     // Hierarchy panel.
     final leftContentMask:h2d.Mask;
+    final hierarchyPanelHit:h2d.Interactive;
     final hierarchyTitleIcon:h2d.Graphics;
     final hierarchyTitle:h2d.Text;
     final hierarchyCount:h2d.Text;
@@ -128,20 +129,37 @@ class EditorShell {
         root = new h2d.Object(parent);
         chrome = new h2d.Graphics(root);
 
+        // Lowest interactive layer: catches otherwise uncovered editor chrome
+        // without taking clicks away from controls created above it.
+        editorBackgroundHit = new h2d.Interactive(1, 1, root);
+        editorBackgroundHit.backgroundColor = 0;
+        editorBackgroundHit.cursor = hxd.Cursor.Default;
+        editorBackgroundHit.onClick = function(event) {
+            if (event.button == 0) closePaletteIfOpen();
+        };
+
         viewportHit = new h2d.Interactive(1, 1, root);
         viewportHit.backgroundColor = 0;
-        viewportHit.enableRightButton = true;
+        viewportHit.cursor = hxd.Cursor.Default;
         viewportHit.onClick = function(event) {
-            if (event.button == 1) {
-                palette.openAt(ctx.window.mouseX, ctx.window.mouseY, viewportRect);
-                event.propagate = false;
-            } else if (onViewportClick != null) {
-                onViewportClick(event.relX, event.relY);
-            }
+            closePaletteIfOpen();
+            if (onViewportClick != null) onViewportClick(event.relX, event.relY);
         };
 
         leftContentMask = new h2d.Mask(0, 0, root);
         rightContentMask = new h2d.Mask(0, 0, root);
+
+        // Backdrop interaction covers otherwise empty hierarchy chrome. All
+        // actual controls and rows are created later and remain above it.
+        hierarchyPanelHit = new h2d.Interactive(1, 1, leftContentMask);
+        hierarchyPanelHit.backgroundColor = 0;
+        hierarchyPanelHit.cursor = hxd.Cursor.Default;
+        hierarchyPanelHit.enableRightButton = true;
+        hierarchyPanelHit.onClick = handleHierarchyBackgroundClick;
+        hierarchyPanelHit.onWheel = function(event) {
+            if (!scrollHierarchy(event.wheelDelta)) return;
+            event.propagate = false;
+        };
 
         // Native title/menu bar.
         brandMark = new h2d.Graphics(root);
@@ -175,11 +193,6 @@ class EditorShell {
                 palette.toggleAt(addObjectButton.x, addObjectButton.y + 31, viewportRect);
             }
         };
-        deleteObjectsButton = new UiButton(ctx, "Delete", 88, 28, root);
-        deleteObjectsButton.setIcon(Trash).setDanger();
-        deleteObjectsButton.visible = false;
-        deleteObjectsButton.onClick = deleteSelection;
-
         var transformKinds:Array<UiIconKind> = [Move, Rotate, Scale];
         var transformNames = ["Move", "Rotate", "Scale"];
         for (index in 0...transformKinds.length) {
@@ -218,29 +231,31 @@ class EditorShell {
         hierarchyAddButton = new UiButton(ctx, "", 24, 24, leftContentMask);
         hierarchyAddButton.setIcon(Add).setQuiet();
         hierarchyAddButton.onClick = function() {
-            if (onCreateObject != null) onCreateObject();
+            if (viewportRect != null) {
+                palette.toggleAt(hierarchyAddButton.x,
+                    hierarchyAddButton.y + Theme.CONTROL_HEIGHT + 3, viewportRect);
+            }
         };
         hierarchySearch = new SearchField(ctx, "Search Entities", 100, 24, leftContentMask);
         hierarchySearch.onChange = function(value) applyHierarchyFilter(value);
 
         hierarchyHit = new h2d.Interactive(1, 1, leftContentMask);
         hierarchyHit.backgroundColor = 0;
+        hierarchyHit.cursor = hxd.Cursor.Default;
         hierarchyHit.enableRightButton = true;
         hierarchyHit.onWheel = function(event) {
             if (!scrollHierarchy(event.wheelDelta)) return;
             event.propagate = false;
         };
         hierarchyHit.onClick = function(event) {
-            if (event.button == 1) {
-                palette.openAt(ctx.window.mouseX, ctx.window.mouseY, viewportRect);
-                event.propagate = false;
-            }
+            handleHierarchyBackgroundClick(event);
         };
         hierarchyScrollBar = new ScrollBar(ctx, leftContentMask);
         hierarchyScrollBar.onChange = function(value) {
             firstVisibleHierarchyRow = Std.int(Math.round(maxFirstVisibleHierarchyRow() * value));
             layoutHierarchyRows();
         };
+        hierarchyScrollBar.onWheel = scrollHierarchy;
 
         // Inspector panel header.
         inspectorTitleIcon = new h2d.Graphics(rightContentMask);
@@ -254,11 +269,23 @@ class EditorShell {
         selectionStatus.lineBreak = false;
 
         inspectorContentMask = new h2d.Mask(0, 0, rightContentMask);
-        inspectorScrollHit = new h2d.Interactive(1, 1, inspectorContentMask);
+        // Keep the wheel catcher outside the scrolling mask. If it is a child
+        // of the mask, scrollY moves the catcher with the properties and leaves
+        // part of the visible panel unable to receive wheel input.
+        inspectorScrollHit = new h2d.Interactive(1, 1, rightContentMask);
         inspectorScrollHit.backgroundColor = 0;
+        // This transparent routing layer must not override the I-beam or other
+        // cursors supplied by the actual property control underneath it.
+        inspectorScrollHit.cursor = null;
+        // The fixed catcher sits above property controls for wheel routing but
+        // lets clicks and focus events continue to the controls underneath.
+        inspectorScrollHit.propagateEvents = true;
         inspectorScrollHit.onWheel = function(event) {
             if (!scrollInspector(event.wheelDelta)) return;
             event.propagate = false;
+        };
+        inspectorScrollHit.onClick = function(event) {
+            if (event.button == 0) closePaletteIfOpen();
         };
 
         objectSection = new InspectorSection(ctx, "Object", inspectorContentMask);
@@ -328,6 +355,7 @@ class EditorShell {
             inspectorScrollValue = value;
             inspectorContentMask.scrollY = maxInspectorScroll() * value;
         };
+        inspectorScrollBar.onWheel = scrollInspector;
 
         // Subtle viewport HUD drawn above the scene but below popups.
         viewportHud = new h2d.Object(root);
@@ -356,6 +384,7 @@ class EditorShell {
         viewportHintText.lineBreak = false;
 
         console = new ConsolePanel(ctx, root);
+        console.onBackgroundClick = closePaletteIfOpen;
 
         statusDot = new h2d.Graphics(root);
         statusDot.beginFill(Theme.SUCCESS);
@@ -375,6 +404,7 @@ class EditorShell {
         input.bindReport(inputStatus);
         input.onDeletePressed = function() {
             if (objectNameField.isFocused() || spinRow.isEditing() || hierarchySearch.isFocused()) return;
+            for (field in transformFields) if (field.isEditing()) return;
             deleteSelection();
         };
 
@@ -480,6 +510,8 @@ class EditorShell {
 
         lastWidth = width;
         lastHeight = height;
+        editorBackgroundHit.width = Math.max(0, width);
+        editorBackgroundHit.height = Math.max(0, height);
         leftContentMask.width = Std.int(Math.max(0, leftWidth));
         leftContentMask.height = Std.int(Math.max(0, height - Theme.STATUS_BAR_HEIGHT));
         leftContentMask.visible = leftWidth >= 140;
@@ -614,13 +646,8 @@ class EditorShell {
         var toolbarY = Theme.TITLE_BAR_HEIGHT + 4;
         addObjectButton.x = 8;
         addObjectButton.y = toolbarY;
-        deleteObjectsButton.x = 92;
-        deleteObjectsButton.y = toolbarY;
-        deleteObjectsButton.visible = selectedObjectIds.length > 0;
-        deleteObjectsButton.setText(selectedObjectIds.length > 1
-            ? 'Delete (${selectedObjectIds.length})' : "Delete");
 
-        var toolX = deleteObjectsButton.visible ? 186.0 : 94.0;
+        var toolX = 94.0;
         for (button in transformButtons) {
             button.x = toolX;
             button.y = toolbarY;
@@ -636,6 +663,10 @@ class EditorShell {
     }
 
     function layoutHierarchy(leftWidth:Float, bodyTop:Float):Void {
+        hierarchyPanelHit.x = 0;
+        hierarchyPanelHit.y = bodyTop;
+        hierarchyPanelHit.width = Math.max(0, leftWidth);
+        hierarchyPanelHit.height = Math.max(0, leftContentMask.height - bodyTop);
         hierarchyTitleIcon.x = 8;
         hierarchyTitleIcon.y = bodyTop + 9;
         hierarchyTitle.x = 29;
@@ -681,8 +712,11 @@ class EditorShell {
         inspectorContentMask.width = Std.int(Math.max(0, rightWidth - 7));
         inspectorContentMask.height = Std.int(Math.max(0,
             rightContentMask.height - inspectorContentMask.y - 4));
+        inspectorScrollHit.x = inspectorContentMask.x;
+        inspectorScrollHit.y = inspectorContentMask.y;
         inspectorScrollHit.width = inspectorContentMask.width;
         inspectorScrollHit.height = inspectorContentMask.height;
+        inspectorScrollHit.visible = inspectorContentMask.visible;
         inspectorScrollBar.setBounds(Math.max(0, rightWidth - 6),
             inspectorContentMask.y, 3, inspectorContentMask.height);
         layoutInspectorProperties();
@@ -748,8 +782,10 @@ class EditorShell {
 
     function scrollInspector(delta:Float):Bool {
         if (maxInspectorScroll() <= 0) return false;
+        // HashLink/Windows normalizes a downward wheel step to a positive
+        // delta, so increasing the offset must move toward later properties.
         inspectorScrollValue = Math.max(0, Math.min(1,
-            inspectorScrollValue - delta * 36 / maxInspectorScroll()));
+            inspectorScrollValue + delta * 36 / maxInspectorScroll()));
         inspectorContentMask.scrollY = maxInspectorScroll() * inspectorScrollValue;
         inspectorScrollBar.setMetrics(
             inspectorContentMask.height / Math.max(1, inspectorContentHeight), inspectorScrollValue);
@@ -796,6 +832,7 @@ class EditorShell {
                 row = new HierarchyRow(ctx, entry.id, entry.name, leftContentMask);
                 row.onSelect = selectHierarchyRow;
                 row.onWheel = function(delta) scrollHierarchy(delta);
+                row.onContextMenu = openHierarchyPalette;
                 hierarchyRows.push(row);
             }
         }
@@ -899,9 +936,31 @@ class EditorShell {
     function scrollHierarchy(delta:Float):Bool {
         if (maxFirstVisibleHierarchyRow() <= 0) return false;
         firstVisibleHierarchyRow = Std.int(Math.max(0, Math.min(maxFirstVisibleHierarchyRow(),
-            firstVisibleHierarchyRow - delta * 3)));
+            firstVisibleHierarchyRow + delta * 3)));
         layoutHierarchyRows();
         return true;
+    }
+
+    function openHierarchyPalette():Void {
+        if (viewportRect != null) {
+            palette.openAt(ctx.window.mouseX, ctx.window.mouseY, viewportRect);
+        }
+    }
+
+    function handleHierarchyBackgroundClick(event:hxd.Event):Void {
+        if (event.button == 1) {
+            openHierarchyPalette();
+        } else if (event.button == 0) {
+            closePaletteIfOpen();
+            input.clearFocus();
+            selectionAnchorIndex = -1;
+            if (onObjectsSelected != null) onObjectsSelected([], -1);
+        } else return;
+        event.propagate = false;
+    }
+
+    function closePaletteIfOpen():Void {
+        if (palette.visible) palette.close();
     }
 
     function deleteSelection():Void {

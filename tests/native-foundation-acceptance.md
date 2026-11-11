@@ -40,19 +40,29 @@ Evidence files are under `bin/` unless noted otherwise.
 
 ## Input
 
-- [x] Toolbar object creation and hierarchy context-menu entry both open the game-object palette.
-- [x] The restyled Add control opens the square-edged game-object palette and preserves its click target (`bin/ui-compact-palette.png`).
-- [x] Clicking the palette Cube creates a hierarchy object; dragging Cube into the viewport creates and selects it.
+- [x] Toolbar Add, the hierarchy `+`, and hierarchy right-click all open the same compact game-object palette (`bin/compact-add-toolbar.png`, `bin/compact-add-hierarchy-button.png`, `bin/context-hierarchy-compact.png`).
+- [x] Right-click creation is scoped to hierarchy rows and empty hierarchy space; right-clicking the viewport does not open the palette (`bin/context-hierarchy-empty-compact.png`, `bin/context-viewport-no-menu.png`).
+- [x] An open right-click Add Object palette closes when empty viewport, hierarchy, inspector, or console space is left-clicked (`bin/palette-dismiss-open.png`, `bin/palette-dismiss-viewport.png`, `bin/palette-dismiss-inspector-selected-open.png`, `bin/palette-dismiss-inspector-selected.png`, `bin/palette-dismiss-console.png`, `bin/palette-dismiss-hierarchy.png`).
+- [x] The compact palette uses a 28px single-line Cube entry and preserves its click-to-create target (`bin/compact-add-created-cube.png`).
+- [x] Clicking the compact Cube row creates a hierarchy object; dragging it into the viewport shows a compact preview, creates, and selects it (`bin/compact-toolbar-row-click-fixed.png`, `bin/compact-add-drag-preview.png`, `bin/compact-add-drag-created.png`).
+- [x] Selected objects no longer add a redundant Delete toolbar button; the Delete key still removes the selection (`bin/ui-no-delete-button.png`, `bin/delete-key-object-removed.png`).
 - [x] Ctrl-click selects multiple hierarchy objects; Delete removes all selected objects and clears the inspector selection.
 - [x] A long hierarchy shows a scrollbar without listing editor/debug controls among scene objects.
-- [ ] Hierarchy wheel/thumb scrolling is validated with a long list.
+- [x] Hierarchy wheel scrolling is direction-correct with a long list (`bin/wheel-hierarchy-top.png`, `bin/wheel-hierarchy-after-down.png`).
+- [x] Hierarchy scrollbar thumb dragging is direction-correct with a long list (`bin/thumb-hierarchy-before.png`, `bin/thumb-hierarchy-after-up.png`).
 - [x] Console scrollbar appears after enough log entries and its thumb reaches earlier log lines.
+- [x] Console wheel-up reaches older entries and wheel-down returns to newer entries (`bin/wheel-console-after-up.png`, `bin/wheel-console-after-down.png`).
 - [x] Clear all removes the console history.
-- [x] Inspector thumb scrolling reveals properties clipped by a short panel.
+- [x] Inspector thumb dragging reveals later properties clipped by a short panel (`bin/thumb-inspector-before.png`, `bin/thumb-inspector-after-down.png`).
+- [x] Inspector wheel scrolling is direction-correct over property values, while a value owns keyboard focus, and directly over the scrollbar (`bin/wheel-property-after-down.png`, `bin/wheel-property-focused-after-down.png`, `bin/wheel-scrollbar-after-down.png`).
 - [x] Shift-click selects a contiguous range in the hierarchy.
-- [ ] Delete suppression while editing an inspector text field is validated.
-- [x] Repeated clicks remain responsive (multiple stepper clicks in a row registered in exact 0.25 increments).
+- [x] Left-clicking empty hierarchy list space or uncovered hierarchy header chrome clears keyboard focus and object selection, while rows and Search retain their own behavior (`bin/hierarchy-empty-body-deselect.png`, `bin/hierarchy-empty-header-deselect.png`, `bin/hierarchy-search-preserves-selection.png`).
+- [x] Delete is suppressed as an object command while editing inspector text or transform values (`bin/delete-key-edit-safe.png`).
+- [x] Numeric properties use compact up/down arrows instead of separate +/- buttons; arrow clicks apply the configured step (`bin/numeric-drag-fields.png`, `bin/numeric-spin-arrow-up.png`).
+- [x] Horizontal click-drag scrubbing changes bounded spin values in both directions and transform-axis values in 0.1 steps, with each change flowing through editor commands (`bin/numeric-spin-scrub-right.png`, `bin/numeric-spin-scrub-left.png`, `bin/numeric-axis-scrub-right.png`).
+- [x] Clicking a numeric value without dragging focuses and selects its text for direct keyboard editing (`bin/numeric-click-edit-focus.png`).
 - [x] Focus loss/regain does not leave stuck visual/input state (input adapter reports focus transitions; button color restored on release-outside).
+- [x] Native cursor policy is stable: ordinary editor controls use Arrow, text values use IBeam, splitters use SizeWE/SizeNS, and the draggable palette item uses SizeAll; numeric scrub regions use SizeWE while hovered but restore Arrow after leaving or releasing a drag outside (`bin/cursor-regression.txt`, `bin/numeric-cursor-dismiss-regression.txt`, captured with Win32 `GetCursorInfo`).
 - [x] Keyboard event reporting flows through the central input adapter (status bar shows `key ... | dN uN mvN focus G/L` live; `boltspark/ui/InputAdapter.hx`).
 
 ## Platform and toolchain

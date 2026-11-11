@@ -32,6 +32,12 @@ class InputAdapter {
         refresh();
     }
 
+    /** Release keyboard focus from the currently active native UI control. */
+    public function clearFocus():Void {
+        var focused = scene.getFocus();
+        if (focused != null) focused.blur();
+    }
+
     /** Compact status line for the editor status bar. */
     public function statusLine():String {
         return 'key ${lastKey} | d${keyDownCount} u${keyUpCount} mv${pointerMoves} '

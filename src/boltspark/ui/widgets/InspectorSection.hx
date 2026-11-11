@@ -41,7 +41,7 @@ class InspectorSection extends h2d.Object {
         content.y = Theme.SECTION_HEADER_HEIGHT;
         hit = new h2d.Interactive(1, Theme.SECTION_HEADER_HEIGHT, this);
         hit.backgroundColor = 0;
-        hit.cursor = hxd.Cursor.Button;
+        hit.cursor = hxd.Cursor.Default;
         hit.onOver = function(_) {
             hovered = true;
             redraw();

@@ -8,6 +8,8 @@ import boltspark.ui.UiSurface;
 class ConsolePanel extends h2d.Object {
     public static inline var MAX_LINES:Int = 500;
 
+    public var onBackgroundClick:Null<Void->Void>;
+
     final background:h2d.Graphics;
     final bodySurface:UiSurface;
     final contentMask:h2d.Mask;
@@ -48,9 +50,13 @@ class ConsolePanel extends h2d.Object {
         contentMask.x = 0;
         scrollHit = new h2d.Interactive(0, 0, contentMask);
         scrollHit.backgroundColor = 0;
+        scrollHit.cursor = hxd.Cursor.Default;
         scrollHit.onWheel = function(event) {
-            if (!scrollLines(Std.int(-event.wheelDelta * 3))) return;
+            if (!scrollLines(Std.int(Math.round(event.wheelDelta * 3)))) return;
             event.propagate = false;
+        };
+        scrollHit.onClick = function(event) {
+            if (event.button == 0 && onBackgroundClick != null) onBackgroundClick();
         };
         text = new h2d.Text(ctx.monoFont, contentMask);
         text.textColor = Theme.TEXT_SECONDARY;
@@ -61,6 +67,9 @@ class ConsolePanel extends h2d.Object {
         scrollBar.onChange = function(value) {
             firstVisibleLine = Std.int(Math.round(maxFirstVisibleLine() * value));
             refresh();
+        };
+        scrollBar.onWheel = function(delta) {
+            return scrollLines(Std.int(Math.round(delta * 3)));
         };
     }
 

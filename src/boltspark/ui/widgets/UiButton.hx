@@ -35,7 +35,9 @@ class UiButton extends h2d.Object {
         surface.setSize(w, h);
         hit = new h2d.Interactive(w, h, this);
         hit.backgroundColor = 0;
-        hit.cursor = hxd.Cursor.Button;
+        // Desktop editor buttons retain the arrow cursor; the pointing hand is
+        // a web convention and becomes visually noisy across dense toolbars.
+        hit.cursor = hxd.Cursor.Default;
         hit.onOver = function(_) {
             hovered = true;
             redraw();

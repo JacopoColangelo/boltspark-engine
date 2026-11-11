@@ -6,6 +6,7 @@ import boltspark.ui.UiSurface;
 
 class ScrollBar extends h2d.Object {
     public var onChange:Null<Float->Void>;
+    public var onWheel:Null<Float->Bool>;
 
     final context:UiContext;
     final trackSurface:UiSurface;
@@ -28,17 +29,18 @@ class ScrollBar extends h2d.Object {
         thumbSurface = new UiSurface(context, this);
         track = new h2d.Interactive(1, 1, this);
         track.backgroundColor = 0;
-        track.cursor = hxd.Cursor.Button;
+        track.cursor = hxd.Cursor.Default;
         track.onClick = function(event) {
             if (thumbHeight >= trackHeight || trackHeight <= 0) return;
             scrollValue = clamp01((event.relY - thumbHeight * 0.5) / (trackHeight - thumbHeight));
             refresh();
             if (onChange != null) onChange(scrollValue);
         };
+        track.onWheel = handleWheel;
 
         thumb = new h2d.Interactive(1, 1, this);
         thumb.backgroundColor = 0;
-        thumb.cursor = hxd.Cursor.Button;
+        thumb.cursor = hxd.Cursor.Default;
         thumb.onOver = function(_) {
             hovered = true;
             refresh();
@@ -48,6 +50,7 @@ class ScrollBar extends h2d.Object {
             refresh();
         };
         thumb.onPush = function(_) beginDrag();
+        thumb.onWheel = handleWheel;
     }
 
     public function setBounds(x:Float, y:Float, width:Float, height:Float):Void {
@@ -91,6 +94,12 @@ class ScrollBar extends h2d.Object {
                     event.propagate = false;
             }
         });
+    }
+
+    function handleWheel(event:hxd.Event):Void {
+        if (onWheel != null && onWheel(event.wheelDelta)) {
+            event.propagate = false;
+        }
     }
 
     function refresh():Void {

@@ -7,8 +7,9 @@ import boltspark.ui.UiSurface;
 import boltspark.ui.layout.LayoutRect;
 
 class GameObjectPalette extends h2d.Object {
-    static inline var WIDTH:Int = 236;
-    static inline var HEIGHT:Int = 108;
+    static inline var WIDTH:Int = 210;
+    static inline var HEIGHT:Int = 64;
+    static inline var ROW_HEIGHT:Int = 28;
 
     public var onCreateCube:Null<Void->Void>;
     public var onDropCube:Null<Float->Float->Void>;
@@ -16,11 +17,9 @@ class GameObjectPalette extends h2d.Object {
     final context:UiContext;
     final background:UiSurface;
     final title:h2d.Text;
-    final subtitle:h2d.Text;
     final cubeSurface:UiSurface;
     final cubeRow:h2d.Interactive;
     final cubeLabel:h2d.Text;
-    final cubeDescription:h2d.Text;
     final cubeIcon:h2d.Graphics;
     final closeButton:UiButton;
     final dragPreviewBackground:UiSurface;
@@ -40,32 +39,26 @@ class GameObjectPalette extends h2d.Object {
         background.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
 
         title = new h2d.Text(context.semiboldFont, this);
-        title.text = "Add object";
+        title.text = "Add Object";
         title.textColor = Theme.TEXT;
         title.lineBreak = false;
-        title.x = 10;
-        title.y = 7;
-        subtitle = new h2d.Text(context.captionFont, this);
-        subtitle.text = "Click to create or drag into the viewport";
-        subtitle.textColor = Theme.MUTED;
-        subtitle.lineBreak = false;
-        subtitle.x = 10;
-        subtitle.y = 24;
+        title.x = 8;
+        title.y = 5;
 
-        closeButton = new UiButton(context, "", 22, 22, this);
+        closeButton = new UiButton(context, "", 20, 20, this);
         closeButton.setIcon(Close).setQuiet();
-        closeButton.x = WIDTH - 27;
-        closeButton.y = 4;
+        closeButton.x = WIDTH - 23;
+        closeButton.y = 3;
         closeButton.onClick = close;
 
         cubeSurface = new UiSurface(context, this);
-        cubeSurface.x = 10;
-        cubeSurface.y = 48;
-        cubeSurface.setSize(WIDTH - 20, 50);
+        cubeSurface.x = 4;
+        cubeSurface.y = 31;
+        cubeSurface.setSize(WIDTH - 8, ROW_HEIGHT);
         cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
-        cubeRow = new h2d.Interactive(WIDTH - 20, 50, this);
-        cubeRow.x = 10;
-        cubeRow.y = 48;
+        cubeRow = new h2d.Interactive(WIDTH - 8, ROW_HEIGHT, this);
+        cubeRow.x = 4;
+        cubeRow.y = 31;
         cubeRow.backgroundColor = 0;
         cubeRow.cursor = hxd.Cursor.Move;
         cubeRow.onOver = function(_) cubeSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
@@ -73,24 +66,18 @@ class GameObjectPalette extends h2d.Object {
         cubeRow.onPush = beginCubeDrag;
 
         cubeIcon = new h2d.Graphics(this);
-        UiIcons.draw(cubeIcon, Cube, 0, 0, 24, Theme.CUBE_ORANGE);
-        cubeIcon.x = 22;
-        cubeIcon.y = 61;
+        UiIcons.draw(cubeIcon, Cube, 0, 0, 14, Theme.CUBE_ORANGE);
+        cubeIcon.x = 11;
+        cubeIcon.y = 38;
         cubeLabel = new h2d.Text(context.semiboldFont, this);
         cubeLabel.text = "Cube";
         cubeLabel.textColor = Theme.TEXT;
         cubeLabel.lineBreak = false;
-        cubeLabel.x = 57;
-        cubeLabel.y = 56;
-        cubeDescription = new h2d.Text(context.captionFont, this);
-        cubeDescription.text = "3D primitive";
-        cubeDescription.textColor = Theme.MUTED;
-        cubeDescription.lineBreak = false;
-        cubeDescription.x = 57;
-        cubeDescription.y = 76;
+        cubeLabel.x = 33;
+        cubeLabel.y = 35;
 
         dragPreviewBackground = new UiSurface(context, parent);
-        dragPreviewBackground.setSize(92, 32);
+        dragPreviewBackground.setSize(78, 26);
         dragPreviewBackground.setStyle(Theme.ACCENT_MUTED, Theme.ACCENT, 0.30);
         dragPreviewBackground.visible = false;
         dragPreviewIcon = new h2d.Graphics(parent);
@@ -111,14 +98,19 @@ class GameObjectPalette extends h2d.Object {
         this.x = Math.max(6, Math.min(Math.max(6, context.width - WIDTH - 6), x));
         this.y = Math.max(Theme.TOP_BAR_HEIGHT + 6,
             Math.min(Math.max(Theme.TOP_BAR_HEIGHT + 6, context.height - HEIGHT - 6), y));
+        cubeRow.cursor = hxd.Cursor.Move;
         visible = true;
     }
 
     public function close():Void {
+        // Clear the special cursor before hiding. Heaps can still process the
+        // release against its previous hover list after this callback.
+        cubeRow.cursor = hxd.Cursor.Default;
         visible = false;
         dragPreviewBackground.visible = false;
         dragPreview.visible = false;
         dragPreviewIcon.visible = false;
+        context.restoreArrowCursor();
     }
 
     function beginCubeDrag(event:hxd.Event):Void {
@@ -137,12 +129,12 @@ class GameObjectPalette extends h2d.Object {
                         dragPreviewBackground.visible = true;
                         dragPreviewIcon.visible = true;
                     }
-                    dragPreviewBackground.x = mouseX + 10;
-                    dragPreviewBackground.y = mouseY + 8;
-                    dragPreviewIcon.x = mouseX + 19;
-                    dragPreviewIcon.y = mouseY + 16;
-                    dragPreview.x = mouseX + 42;
-                    dragPreview.y = mouseY + 13;
+                    dragPreviewBackground.x = mouseX + 8;
+                    dragPreviewBackground.y = mouseY + 6;
+                    dragPreviewIcon.x = mouseX + 15;
+                    dragPreviewIcon.y = mouseY + 12;
+                    dragPreview.x = mouseX + 34;
+                    dragPreview.y = mouseY + 9;
                     captured.propagate = false;
                 case ERelease, EReleaseOutside:
                     var wasDrag = dragPreview.visible;
@@ -166,7 +158,9 @@ class GameObjectPalette extends h2d.Object {
                     captured.propagate = false;
             }
         });
-        event.cancel = true;
+        // Consume the press without cancelling it. Cancellation makes Heaps
+        // continue hit-testing controls underneath the popup; when the compact
+        // menu overlaps hierarchy search, that input can steal this capture.
         event.propagate = false;
     }
 }

@@ -30,7 +30,7 @@ class SwatchPicker extends h2d.Object {
             hovered.push(false);
 
             var hit = new h2d.Interactive(size, size, swatch);
-            hit.cursor = hxd.Cursor.Button;
+            hit.cursor = hxd.Cursor.Default;
             hit.backgroundColor = 0;
             hit.onOver = function(_) {
                 hovered[i] = true;
