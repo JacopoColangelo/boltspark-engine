@@ -36,17 +36,17 @@ class DockLayout {
         var leftWidth:Float;
         var rightWidth:Float;
         var viewportWidth:Float;
-        if (panelSpace >= Theme.MIN_LEFT_PANEL_WIDTH + Theme.MIN_CENTER_PANEL_WIDTH + Theme.RIGHT_PANEL_WIDTH) {
-            var maxLeft = panelSpace - Theme.MIN_CENTER_PANEL_WIDTH - Theme.RIGHT_PANEL_WIDTH;
+        if (panelSpace >= Theme.MIN_LEFT_PANEL_WIDTH + Theme.MIN_CENTER_PANEL_WIDTH + Theme.MIN_RIGHT_PANEL_WIDTH) {
+            var maxLeft = panelSpace - Theme.MIN_CENTER_PANEL_WIDTH - Theme.MIN_RIGHT_PANEL_WIDTH;
             leftPanelWidth = clamp(leftPanelWidth, Theme.MIN_LEFT_PANEL_WIDTH, maxLeft);
             var maxRight = panelSpace - leftPanelWidth - Theme.MIN_CENTER_PANEL_WIDTH;
-            rightPanelWidth = clamp(rightPanelWidth, Theme.RIGHT_PANEL_WIDTH, maxRight);
+            rightPanelWidth = clamp(rightPanelWidth, Theme.MIN_RIGHT_PANEL_WIDTH, maxRight);
             leftWidth = leftPanelWidth;
             rightWidth = rightPanelWidth;
-            viewportWidth = panelSpace - leftWidth - rightWidth;
+            viewportWidth = Math.max(0, panelSpace - leftWidth - rightWidth);
         } else {
-            leftWidth = panelSpace * 0.3;
-            rightWidth = panelSpace * 0.35;
+            leftWidth = Math.min(Theme.MIN_LEFT_PANEL_WIDTH, Math.max(0, panelSpace * 0.3));
+            rightWidth = Math.min(Theme.MIN_RIGHT_PANEL_WIDTH, Math.max(0, panelSpace * 0.35));
             viewportWidth = Math.max(0, panelSpace - leftWidth - rightWidth);
         }
 

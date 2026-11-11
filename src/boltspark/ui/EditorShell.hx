@@ -4,6 +4,7 @@ import boltspark.ui.widgets.ConsolePanel;
 import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.Stepper;
 import boltspark.ui.widgets.SwatchPicker;
+import boltspark.ui.widgets.TextInputField;
 import boltspark.ui.widgets.UiButton;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
@@ -34,6 +35,8 @@ class EditorShell {
     final leftSplitter:DockSplitter;
     final rightSplitter:DockSplitter;
     final consoleSplitter:DockSplitter;
+    final leftContentMask:h2d.Mask;
+    final rightContentMask:h2d.Mask;
     final dockLayout:DockLayout;
     final layoutStore:DockLayoutStore;
 
@@ -44,6 +47,8 @@ class EditorShell {
     final hierarchyItem:h2d.Text;
     final spinRow:Stepper;
     final colorRow:SwatchPicker;
+    final objectNameField:TextInputField;
+    final objectNameLabel:h2d.Text;
     final spinLabel:h2d.Text;
     final colorLabel:h2d.Text;
     final console:ConsolePanel;
@@ -52,12 +57,14 @@ class EditorShell {
     public var onTestAction:Null<Void->Void>;
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
+    public var onObjectNameChanged:Null<String->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var viewportRect(default, null):LayoutRect;
 
     var lastWidth:Int = -1;
     var lastHeight:Int = -1;
     var selected:Bool = false;
+    var hierarchyItemFullText:String = "sampleCube";
     public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter) {
         this.ctx = ctx;
         this.input = input;
@@ -89,19 +96,25 @@ class EditorShell {
         };
         consoleSplitter.onDragEnd = saveLayout;
 
+        leftContentMask = new h2d.Mask(0, 0, root);
+        rightContentMask = new h2d.Mask(0, 0, root);
+
         appTitle = new h2d.Text(ctx.font, root);
         appTitle.text = "BOLTSPARK";
         appTitle.textColor = Theme.ACCENT;
+        appTitle.lineBreak = false;
 
-        hierarchyTitle = new h2d.Text(ctx.font, root);
+        hierarchyTitle = new h2d.Text(ctx.font, leftContentMask);
         hierarchyTitle.text = "HIERARCHY";
         hierarchyTitle.textColor = Theme.MUTED;
+        hierarchyTitle.lineBreak = false;
 
-        inspectorTitle = new h2d.Text(ctx.font, root);
+        inspectorTitle = new h2d.Text(ctx.font, rightContentMask);
         inspectorTitle.text = "INSPECTOR";
         inspectorTitle.textColor = Theme.MUTED;
+        inspectorTitle.lineBreak = false;
 
-        hierarchyItemBg = new h2d.Interactive(Theme.LEFT_PANEL_WIDTH - 24, 26, root);
+        hierarchyItemBg = new h2d.Interactive(Theme.LEFT_PANEL_WIDTH - 24, 26, leftContentMask);
         hierarchyItemBg.cursor = hxd.Cursor.Button;
         hierarchyItemBg.backgroundColor = 0;
         hierarchyItemBg.onClick = function(_) {
@@ -109,13 +122,15 @@ class EditorShell {
             log("hierarchy: sampleCube selected");
         };
 
-        hierarchyItem = new h2d.Text(ctx.font, root);
+        hierarchyItem = new h2d.Text(ctx.font, leftContentMask);
         hierarchyItem.text = "sampleCube";
         hierarchyItem.textColor = Theme.TEXT;
+        hierarchyItem.lineBreak = false;
 
-        spinLabel = new h2d.Text(ctx.font, root);
+        spinLabel = new h2d.Text(ctx.font, rightContentMask);
         spinLabel.text = "Spin speed (rad/s)";
         spinLabel.textColor = Theme.MUTED;
+        spinLabel.lineBreak = false;
 
         spinRow = new Stepper(ctx, Theme.RIGHT_PANEL_WIDTH - 32, Theme.CONTROL_HEIGHT,
             0.0, 4.0, 0.25, 0.35,
@@ -125,24 +140,38 @@ class EditorShell {
                 return Std.string(Std.int(hundredths / 100)) + "."
                     + (fractional < 10 ? "0" : "") + Std.string(fractional);
             },
-            root);
+            rightContentMask);
         spinRow.onValueChanged = function(v:Float) {
             if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         };
         spinRow.onEditRejected = function(message:String) log("inspector: " + message);
 
-        colorLabel = new h2d.Text(ctx.font, root);
+        colorLabel = new h2d.Text(ctx.font, rightContentMask);
         colorLabel.text = "Base color";
         colorLabel.textColor = Theme.MUTED;
+        colorLabel.lineBreak = false;
 
         colorRow = new SwatchPicker(ctx,
             [Theme.CUBE_ORANGE, Theme.CUBE_STEEL, Theme.CUBE_MOSS, Theme.CUBE_VIOLET],
-            22, 8, root);
+            22, 8, rightContentMask);
         colorRow.onColorChanged = function(color:Int) {
             if (onColorChanged != null) onColorChanged(color);
         };
 
-        testButton = new UiButton(ctx, "Test native input", Theme.BUTTON_WIDTH, Theme.BUTTON_HEIGHT, root);
+        objectNameLabel = new h2d.Text(ctx.font, rightContentMask);
+        objectNameLabel.text = "Object name";
+        objectNameLabel.textColor = Theme.MUTED;
+        objectNameLabel.lineBreak = false;
+
+        objectNameField = new TextInputField(ctx, "", Theme.RIGHT_PANEL_WIDTH - 32, Theme.CONTROL_HEIGHT, "sampleCube", rightContentMask);
+        objectNameField.onCommit = function(name:String) {
+            if (onObjectNameChanged != null) onObjectNameChanged(name);
+        };
+        objectNameField.onCancel = function() {
+            log("inspector: object name edit cancelled");
+        };
+
+        testButton = new UiButton(ctx, "Test native input", Theme.BUTTON_WIDTH, Theme.BUTTON_HEIGHT, leftContentMask);
         testButton.onClick = function() {
             if (onTestAction != null) onTestAction();
         };
@@ -152,9 +181,11 @@ class EditorShell {
         statusText = new h2d.Text(ctx.font, root);
         statusText.text = "Native window | HashLink | Heaps | BoltUI";
         statusText.textColor = Theme.MUTED;
+        statusText.lineBreak = false;
 
         inputStatus = new h2d.Text(ctx.font, root);
         inputStatus.textColor = Theme.MUTED;
+        inputStatus.lineBreak = false;
         input.bindReport(inputStatus);
 
         dockLayout = new DockLayout();
@@ -163,6 +194,27 @@ class EditorShell {
         if (layoutError != null) log("layout: " + layoutError);
 
         resize();
+    }
+
+    function fitText(target:h2d.Text, value:String, maxWidth:Float):Void {
+        target.lineBreak = false;
+        target.maxWidth = null;
+        if (maxWidth <= 0) {
+            target.text = "";
+            return;
+        }
+        if (target.calcTextWidth(value) <= maxWidth) {
+            target.text = value;
+            return;
+        }
+        var suffix = "...";
+        var fitted = "";
+        for (i in 0...value.length) {
+            var candidate = value.substr(0, i + 1) + suffix;
+            if (target.calcTextWidth(candidate) > maxWidth) break;
+            fitted = candidate;
+        }
+        target.text = fitted;
     }
 
     /** Editor console access. */
@@ -186,12 +238,23 @@ class EditorShell {
         var geometry = dockLayout.calculate(width, height);
         viewportRect = geometry.viewport;
         var leftWidth = geometry.leftPanel.width;
+        var rightWidth = Math.max(0, geometry.rightPanel.width);
         var rightX = geometry.rightPanel.x;
         var consoleH = geometry.console.height;
         var consoleY = geometry.console.y;
+        var rightContentWidth = Math.max(0, rightWidth - 32);
+        var leftContentWidth = Math.max(0, leftWidth - 24);
 
         lastWidth = width;
         lastHeight = height;
+
+        leftContentMask.width = Std.int(Math.max(0, leftWidth));
+        leftContentMask.height = Std.int(Math.max(0, height - Theme.STATUS_BAR_HEIGHT));
+        leftContentMask.visible = leftWidth >= 120;
+        rightContentMask.x = rightX;
+        rightContentMask.width = Std.int(Math.max(0, rightWidth));
+        rightContentMask.height = Std.int(Math.max(0, height - Theme.STATUS_BAR_HEIGHT));
+        rightContentMask.visible = rightWidth >= 144;
 
         chrome.clear();
 
@@ -251,35 +314,51 @@ class EditorShell {
 
         appTitle.x = 16;
         appTitle.y = 15;
+        fitText(appTitle, "BOLTSPARK", Math.max(0, width - 32));
 
         hierarchyTitle.x = 16;
         hierarchyTitle.y = bodyTop + 16;
+        fitText(hierarchyTitle, "HIERARCHY", Math.max(0, leftWidth - 24));
 
-        hierarchyItemBg.width = Math.max(0, leftWidth - 24);
+        hierarchyItemBg.width = leftContentWidth;
         hierarchyItemBg.x = 12;
         hierarchyItemBg.y = bodyTop + 46;
 
         hierarchyItem.x = 24;
         hierarchyItem.y = hierarchyItemBg.y + 6;
+        fitText(hierarchyItem, hierarchyItemFullText, Math.max(0, leftContentWidth - 16));
 
-        testButton.x = 16;
+        var buttonWidth = Math.min(Theme.BUTTON_WIDTH, leftContentWidth);
+        testButton.setWidth(buttonWidth);
+        testButton.x = 12;
         testButton.y = bodyTop + 92;
         testButton.center();
 
-        inspectorTitle.x = rightX + 16;
+        inspectorTitle.x = 16;
         inspectorTitle.y = bodyTop + 16;
+        fitText(inspectorTitle, "INSPECTOR", Math.max(0, rightWidth - 24));
 
-        spinLabel.x = rightX + 16;
+        spinLabel.x = 16;
         spinLabel.y = bodyTop + 48;
+        fitText(spinLabel, "Spin speed (rad/s)", rightContentWidth);
 
-        spinRow.x = rightX + 16;
+        spinRow.setWidth(rightContentWidth);
+        spinRow.x = 16;
         spinRow.y = bodyTop + 72;
 
-        colorLabel.x = rightX + 16;
+        colorLabel.x = 16;
         colorLabel.y = bodyTop + 124;
+        fitText(colorLabel, "Base color", rightContentWidth);
 
-        colorRow.x = rightX + 16;
+        colorRow.x = 16;
         colorRow.y = bodyTop + 148;
+
+        objectNameLabel.x = 16;
+        objectNameLabel.y = bodyTop + 190;
+        fitText(objectNameLabel, "Object name", rightContentWidth);
+        objectNameField.setWidth(rightContentWidth);
+        objectNameField.x = 16;
+        objectNameField.y = bodyTop + 212;
 
         console.x = geometry.console.x + 8;
         console.y = consoleY + 8;
@@ -287,6 +366,9 @@ class EditorShell {
 
         statusText.x = 12;
         statusText.y = height - Theme.STATUS_BAR_HEIGHT + 5;
+        inputStatus.visible = width >= 700;
+        fitText(statusText, "Native window | HashLink | Heaps | BoltUI",
+            Math.max(0, width - (inputStatus.visible ? 444 : 24)));
 
         inputStatus.x = width - 420;
         inputStatus.y = height - Theme.STATUS_BAR_HEIGHT + 5;
@@ -301,5 +383,14 @@ class EditorShell {
         selected = value;
         hierarchyItemBg.backgroundColor = selected ? Theme.BUTTON_ACTIVE : 0;
         hierarchyItem.textColor = selected ? Theme.ACCENT : Theme.TEXT;
+    }
+
+    public function setObjectName(value:String):Void {
+        if (value == null || value.length == 0) {
+            value = "sampleCube";
+        }
+        hierarchyItemFullText = value;
+        fitText(hierarchyItem, hierarchyItemFullText, Math.max(0, leftContentMask.width - 40));
+        objectNameField.setValue(value);
     }
 }

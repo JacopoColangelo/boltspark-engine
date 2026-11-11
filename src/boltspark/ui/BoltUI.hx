@@ -27,6 +27,7 @@ class BoltUI {
     public var onTestAction:Null<Void->Void>;
     public var onSpinSpeedChanged:Null<Float->Void>;
     public var onColorChanged:Null<Int->Void>;
+    public var onObjectNameChanged:Null<String->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window) {
@@ -36,6 +37,7 @@ class BoltUI {
         shell.onTestAction = function() if (onTestAction != null) onTestAction();
         shell.onSpinSpeedChanged = function(v) if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
         shell.onColorChanged = function(c) if (onColorChanged != null) onColorChanged(c);
+        shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
     }
 
@@ -60,5 +62,9 @@ class BoltUI {
 
     public function setSampleCubeSelected(selected:Bool):Void {
         shell.setSampleCubeSelected(selected);
+    }
+
+    public function setObjectName(name:String):Void {
+        shell.setObjectName(name);
     }
 }

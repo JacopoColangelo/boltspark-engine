@@ -11,13 +11,15 @@ class UiButton extends h2d.Object {
 
     final bg:h2d.Interactive;
     final label:h2d.Text;
-    final width:Float;
+    var fullText:String;
+    var width:Float;
     final height:Float;
 
     public function new(ctx:boltspark.ui.UiContext, text:String, w:Float, h:Float, ?parent:h2d.Object) {
         super(parent);
         this.width = w;
         this.height = h;
+        this.fullText = text;
 
         bg = new h2d.Interactive(w, h, this);
         bg.backgroundColor = boltspark.ui.Theme.BUTTON;
@@ -36,12 +38,38 @@ class UiButton extends h2d.Object {
         label = new h2d.Text(ctx.font, bg);
         label.text = text;
         label.textColor = boltspark.ui.Theme.TEXT;
+        label.lineBreak = false;
         bg.addChild(label);
     }
 
     /** Set text and re-center; call after the widget is positioned. */
     public function setText(text:String):Void {
+        fullText = text;
         label.text = text;
+        if (label.calcTextWidth(text) > width) {
+            label.text = "";
+            for (i in 0...text.length) {
+                var candidate = text.substr(0, i + 1) + "...";
+                if (label.calcTextWidth(candidate) > width) break;
+                label.text = candidate;
+            }
+        }
+        center();
+    }
+
+    public function setWidth(w:Float):Void {
+        width = Math.max(0, w);
+        bg.width = width;
+        var fitted = fullText;
+        if (label.calcTextWidth(fitted) > width) {
+            fitted = "";
+            for (i in 0...fullText.length) {
+                var candidate = fullText.substr(0, i + 1) + "...";
+                if (label.calcTextWidth(candidate) > width) break;
+                fitted = candidate;
+            }
+        }
+        label.text = fitted;
         center();
     }
 

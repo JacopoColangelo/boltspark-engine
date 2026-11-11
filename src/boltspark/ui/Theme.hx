@@ -8,6 +8,14 @@ package boltspark.ui;
  * per-theme overrides; M0 keeps a single fixed editor theme.
  */
 class Theme {
+    // Logical UI scaling; the project uses logical pixels before any future
+    // DPI-specific adaptation, which keeps the editor shell predictable while
+    // the native window still owns final OS sizing.
+    public static var uiScale:Float = 1.0;
+    public static inline function px(value:Float):Float {
+        return value * uiScale;
+    }
+
     // Layout metrics.
     public static inline var TOP_BAR_HEIGHT:Int = 48;
     public static inline var STATUS_BAR_HEIGHT:Int = 24;
@@ -19,6 +27,7 @@ class Theme {
     public static inline var SPLITTER_HOVER:Int = 0x58718D;
     public static inline var MIN_LEFT_PANEL_WIDTH:Int = 216;
     public static inline var MIN_CENTER_PANEL_WIDTH:Int = 240;
+    public static inline var MIN_RIGHT_PANEL_WIDTH:Int = 160;
     public static inline var SPACING:Int = 16;
     public static inline var BUTTON_WIDTH:Int = 184;
     public static inline var BUTTON_HEIGHT:Int = 34;

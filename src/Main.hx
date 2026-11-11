@@ -44,6 +44,7 @@ class Main extends hxd.App {
         cubePrimitive.addUVs();
 
         sampleCube = new h3d.scene.Mesh(cubePrimitive, s3d);
+        sampleCube.name = "sampleCube";
         sampleCube.setPosition(0, 0, 0);
         sampleCube.material.color.setColor(boltspark.ui.Theme.CUBE_ORANGE);
 
@@ -68,6 +69,11 @@ class Main extends hxd.App {
         boltUI.onColorChanged = function(color:Int) {
             sampleCube.material.color.setColor(color);
             boltUI.log("command: cube base color = 0x" + StringTools.hex(color, 6));
+        };
+        boltUI.onObjectNameChanged = function(name:String) {
+            sampleCube.name = name;
+            boltUI.setObjectName(name);
+            boltUI.log("command: object name = " + name);
         };
     }
 

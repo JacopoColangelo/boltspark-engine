@@ -20,7 +20,7 @@ class Stepper extends h2d.Object {
     final valueInput:h2d.TextInput;
     final fieldBackground:h2d.Graphics;
     final format:Float->String;
-    final width:Float;
+    var width:Float;
     final height:Float;
     var fieldFocused:Bool = false;
 
@@ -52,7 +52,8 @@ class Stepper extends h2d.Object {
 
         valueInput = new h2d.TextInput(ctx.font, this);
         valueInput.textColor = boltspark.ui.Theme.TEXT;
-        valueInput.inputWidth = Std.int(width - buttonSize * 2 - 12);
+        valueInput.lineBreak = false;
+        valueInput.inputWidth = Std.int(Math.max(0, width - buttonSize * 2 - 12));
         valueInput.useSoftwareKeyboard = false;
         valueInput.onTextInput = function(event) {
             if (!allowsCharacter(event.charCode)) event.cancel = true;
@@ -89,6 +90,11 @@ class Stepper extends h2d.Object {
         refresh(true);
     }
 
+    public function setWidth(w:Float):Void {
+        width = Math.max(0, w);
+        refresh();
+    }
+
     function clamp(v:Float):Float {
         if (v < min) v = min;
         if (v > max) v = max;
@@ -102,9 +108,11 @@ class Stepper extends h2d.Object {
         plus.setPosition(width - buttonSize, 0);
         valueInput.x = buttonSize + 6;
         valueInput.y = Math.max(0, (height - valueInput.font.lineHeight) / 2);
+        valueInput.maxWidth = null;
+        valueInput.inputWidth = Std.int(Math.max(0, width - buttonSize * 2 - 12));
         fieldBackground.clear();
         fieldBackground.beginFill(boltspark.ui.Theme.FIELD_BG);
-        fieldBackground.drawRect(buttonSize, 0, width - buttonSize * 2, height);
+        fieldBackground.drawRect(buttonSize, 0, Math.max(0, width - buttonSize * 2), height);
         fieldBackground.endFill();
         updateFieldStyle();
         if (notify && onValueChanged != null) onValueChanged(value);
@@ -150,13 +158,13 @@ class Stepper extends h2d.Object {
     function updateFieldStyle():Void {
         fieldBackground.clear();
         fieldBackground.beginFill(fieldFocused ? boltspark.ui.Theme.FIELD_FOCUS : boltspark.ui.Theme.FIELD_BG);
-        fieldBackground.drawRect(height, 0, width - height * 2, height);
+        fieldBackground.drawRect(height, 0, Math.max(0, width - height * 2), height);
         fieldBackground.endFill();
         fieldBackground.lineStyle(
             1,
             fieldFocused ? boltspark.ui.Theme.ACCENT : boltspark.ui.Theme.PANEL_EDGE,
             1);
-        fieldBackground.drawRect(height, 0, width - height * 2, height);
+        fieldBackground.drawRect(height, 0, Math.max(0, width - height * 2), height);
         fieldBackground.lineStyle();
     }
 }
