@@ -69,8 +69,10 @@ class EditorShell {
     final objectNameField:TextInputField;
 
     final transformSection:InspectorSection;
-    final transformLabel:h2d.Text;
+    final transformLabels:Array<h2d.Text> = [];
     final transformFields:Array<AxisValue> = [];
+    final rotationFields:Array<AxisValue> = [];
+    final scaleFields:Array<AxisValue> = [];
 
     final behaviorSection:InspectorSection;
     final spinLabel:h2d.Text;
@@ -110,6 +112,8 @@ class EditorShell {
     public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
+    public var onRotationChanged:Null<Int->Float->Void>;
+    public var onScaleChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
@@ -233,10 +237,7 @@ class EditorShell {
             var modeButton = new UiButton(ctx, "", 28, 28, root);
             modeButton.setIcon(transformKinds[index]).setQuiet().setSelected(index == 0);
             var capturedIndex = index;
-            modeButton.onClick = function() {
-                for (i in 0...transformButtons.length) transformButtons[i].setSelected(i == capturedIndex);
-                if (onToolChanged != null) onToolChanged(capturedIndex);
-            };
+            modeButton.onClick = function() selectTool(capturedIndex);
             transformButtons.push(modeButton);
         }
 
@@ -332,21 +333,32 @@ class EditorShell {
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
 
         transformSection = new InspectorSection(ctx, "Transform", inspectorContentMask);
-        transformLabel = new UiText(ctx.labelFont, transformSection.content);
-        transformLabel.text = "Position";
-        transformLabel.textColor = Theme.TEXT_SECONDARY;
-        transformLabel.lineBreak = false;
         var axisNames = ["X", "Y", "Z"];
         var axisColors = [Theme.AXIS_X, Theme.AXIS_Y, Theme.AXIS_Z];
-        for (index in 0...axisNames.length) {
-            var field = new AxisValue(ctx, axisNames[index], axisColors[index], 60,
-                Theme.CONTROL_HEIGHT, transformSection.content);
-            var capturedIndex = index;
-            field.onCommit = function(value:Float) {
-                if (onTransformChanged != null) onTransformChanged(capturedIndex, value);
-            };
-            field.onEditRejected = function(message:String) log("inspector: " + message);
-            transformFields.push(field);
+        var rowNames = ["Position", "Rotation", "Scale"];
+        for (rowIndex in 0...rowNames.length) {
+            var rowLabel = new UiText(ctx.labelFont, transformSection.content);
+            rowLabel.text = rowNames[rowIndex];
+            rowLabel.textColor = Theme.TEXT_SECONDARY;
+            rowLabel.lineBreak = false;
+            transformLabels.push(rowLabel);
+            var rowFields = rowIndex == 0 ? transformFields
+                : (rowIndex == 1 ? rotationFields : scaleFields);
+            for (index in 0...axisNames.length) {
+                var field = new AxisValue(ctx, axisNames[index], axisColors[index], 60,
+                    Theme.CONTROL_HEIGHT, transformSection.content);
+                var capturedRow = rowIndex;
+                var capturedIndex = index;
+                field.onCommit = function(value:Float) {
+                    if (capturedRow == 0) {
+                        if (onTransformChanged != null) onTransformChanged(capturedIndex, value);
+                    } else if (capturedRow == 1) {
+                        if (onRotationChanged != null) onRotationChanged(capturedIndex, value);
+                    } else if (onScaleChanged != null) onScaleChanged(capturedIndex, value);
+                };
+                field.onEditRejected = function(message:String) log("inspector: " + message);
+                rowFields.push(field);
+            }
         }
 
         behaviorSection = new InspectorSection(ctx, "Behavior", inspectorContentMask);
@@ -437,7 +449,18 @@ class EditorShell {
         input.onDeletePressed = function() {
             if (objectNameField.isFocused() || spinRow.isEditing() || hierarchySearch.isFocused()) return;
             for (field in transformFields) if (field.isEditing()) return;
+            for (field in rotationFields) if (field.isEditing()) return;
+            for (field in scaleFields) if (field.isEditing()) return;
             deleteSelection();
+        };
+        // Number-row tool shortcuts (1/2/3) share the Delete guard: text
+        // capture and steppers must not hijack the keypress.
+        input.onShortcutPressed = function(tool:Int) {
+            if (objectNameField.isFocused() || spinRow.isEditing() || hierarchySearch.isFocused()) return;
+            for (field in transformFields) if (field.isEditing()) return;
+            for (field in rotationFields) if (field.isEditing()) return;
+            for (field in scaleFields) if (field.isEditing()) return;
+            selectTool(tool);
         };
 
         dockLayout = new DockLayout();
@@ -736,7 +759,8 @@ class EditorShell {
 
     function layoutInspectorProperties():Void {
         objectSection.contentHeight = INSPECTOR_ROW_HEIGHT;
-        transformSection.contentHeight = INSPECTOR_ROW_HEIGHT;
+        // Transform now holds Position, Rotation, and Scale rows.
+        transformSection.contentHeight = INSPECTOR_ROW_HEIGHT * 3;
         behaviorSection.contentHeight = INSPECTOR_ROW_HEIGHT;
         materialSection.contentHeight = INSPECTOR_ROW_HEIGHT;
 
@@ -754,16 +778,22 @@ class EditorShell {
         objectNameField.y = 2;
         objectNameField.setWidth(Math.max(0, width - 16));
 
-        // Transform: one DCC-style property label with three axis fields.
-        transformLabel.x = 8;
-        transformLabel.y = 2 + Math.round((Theme.CONTROL_HEIGHT - transformLabel.textHeight) * 0.5 - 1);
+        // Transform: DCC-style property rows (label left, three axis fields).
         var fieldStart = 72.0;
         var axisGap = 4.0;
         var axisWidth = Math.max(0, (width - fieldStart - 8 - axisGap * 2) / 3);
-        for (index in 0...transformFields.length) {
-            transformFields[index].x = fieldStart + index * (axisWidth + axisGap);
-            transformFields[index].y = 2;
-            transformFields[index].setWidth(axisWidth);
+        var rowGroups = [transformFields, rotationFields, scaleFields];
+        for (rowIndex in 0...rowGroups.length) {
+            var rowFields = rowGroups[rowIndex];
+            var rowY = 2 + rowIndex * INSPECTOR_ROW_HEIGHT;
+            var label = transformLabels[rowIndex];
+            label.x = 8;
+            label.y = rowY + Math.round((Theme.CONTROL_HEIGHT - label.textHeight) * 0.5 - 1);
+            for (index in 0...rowFields.length) {
+                rowFields[index].x = fieldStart + index * (axisWidth + axisGap);
+                rowFields[index].y = rowY;
+                rowFields[index].setWidth(axisWidth);
+            }
         }
 
         // Behavior: label left, stepper right.
@@ -853,7 +883,8 @@ class EditorShell {
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
             name:String, speed:Float, color:Int, posX:Float = 0, posY:Float = 0,
-            posZ:Float = 0):Void {
+            posZ:Float = 0, rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
+            scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
         selectedObjectIds = ids.copy();
         selectedObjectId = primaryId;
         if (selectedObjectIds.length == 1) {
@@ -871,6 +902,12 @@ class EditorShell {
             transformFields[0].setValue(posX);
             transformFields[1].setValue(posY);
             transformFields[2].setValue(posZ);
+            rotationFields[0].setValue(rotX);
+            rotationFields[1].setValue(rotY);
+            rotationFields[2].setValue(rotZ);
+            scaleFields[0].setValue(scaleX);
+            scaleFields[1].setValue(scaleY);
+            scaleFields[2].setValue(scaleZ);
             inspectorContentMask.visible = true;
             selectionStatusValue = name + "  ·  Game Object";
         } else {
@@ -889,10 +926,18 @@ class EditorShell {
     public inline function setObjectName(value:String):Void objectNameField.setValue(value);
 
     /** Live transform update while a viewport gizmo drag moves the selection. */
-    public function updateTransformValues(posX:Float, posY:Float, posZ:Float):Void {
+    public function updateTransformValues(posX:Float, posY:Float, posZ:Float,
+            rotX:Float, rotY:Float, rotZ:Float,
+            scaleX:Float, scaleY:Float, scaleZ:Float):Void {
         transformFields[0].setValue(posX);
         transformFields[1].setValue(posY);
         transformFields[2].setValue(posZ);
+        rotationFields[0].setValue(rotX);
+        rotationFields[1].setValue(rotY);
+        rotationFields[2].setValue(rotZ);
+        scaleFields[0].setValue(scaleX);
+        scaleFields[1].setValue(scaleY);
+        scaleFields[2].setValue(scaleZ);
     }
 
     function selectHierarchyRow(id:Int, control:Bool, shift:Bool):Void {
@@ -986,5 +1031,13 @@ class EditorShell {
         if (selectedObjectIds.length > 0 && onDeleteObjects != null) {
             onDeleteObjects(selectedObjectIds.copy());
         }
+    }
+
+    /** Shared toolbar/shortcut tool switch (0 Move, 1 Rotate, 2 Scale). */
+    function selectTool(tool:Int):Void {
+        for (index in 0...transformButtons.length) {
+            transformButtons[index].setSelected(index == tool);
+        }
+        if (onToolChanged != null) onToolChanged(tool);
     }
 }

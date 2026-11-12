@@ -33,6 +33,8 @@ class BoltUI {
     public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
+    public var onRotationChanged:Null<Int->Float->Void>;
+    public var onScaleChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
@@ -54,6 +56,8 @@ class BoltUI {
         shell.onColorChanged = function(c) if (onColorChanged != null) onColorChanged(c);
         shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
         shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
+        shell.onRotationChanged = function(axis, value) if (onRotationChanged != null) onRotationChanged(axis, value);
+        shell.onScaleChanged = function(axis, value) if (onScaleChanged != null) onScaleChanged(axis, value);
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
         shell.onToolChanged = function(tool) if (onToolChanged != null) onToolChanged(tool);
         shell.onViewportHover = function(x, y) if (onViewportHover != null) onViewportHover(x, y);
@@ -92,8 +96,10 @@ class BoltUI {
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
             name:String, speed:Float, color:Int, posX:Float = 0, posY:Float = 0,
-            posZ:Float = 0):Void {
-        shell.setSelectedObjects(ids, primaryId, name, speed, color, posX, posY, posZ);
+            posZ:Float = 0, rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
+            scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
+        shell.setSelectedObjects(ids, primaryId, name, speed, color, posX, posY, posZ,
+            rotX, rotY, rotZ, scaleX, scaleY, scaleZ);
     }
 
     public function setObjectName(name:String):Void {
@@ -101,7 +107,10 @@ class BoltUI {
     }
 
     /** Live transform field update during viewport gizmo drags. */
-    public function updateTransformValues(posX:Float, posY:Float, posZ:Float):Void {
-        shell.updateTransformValues(posX, posY, posZ);
+    public function updateTransformValues(posX:Float, posY:Float, posZ:Float,
+            rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
+            scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
+        shell.updateTransformValues(posX, posY, posZ, rotX, rotY, rotZ,
+            scaleX, scaleY, scaleZ);
     }
 }

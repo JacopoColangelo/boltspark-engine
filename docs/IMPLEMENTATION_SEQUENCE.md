@@ -146,3 +146,37 @@ tools keep the gizmo hidden until their milestones.
 - [x] Dragging moves the object along the picked axis only, with live inspector value updates and no first-move jump.
 - [x] Release applies the position through the command flow and viewport click-picking stays suppressed during the drag.
 - [x] Automated evidence: a Win32 message probe (window-scoped `SendMessageTimeout`, no screen-level input injection) drives two axis-locked drags, moving sampleCube position.x 0 → -1.93 → 0 with y/z locked (`bin/gizmo-runlog.txt`).
+
+## Gate 9 - Full transform gizmo suite (planes, rotation, scale, shortcuts)
+
+Every transform tool now drives a live viewport gizmo from one implementation
+(`src/boltspark/editor/TransformGizmo.hx`), rendered as Unreal-style wireframe
+handles through `h3d.scene.Graphics` with always-on-top depth testing:
+
+- **Move**: three arrow axes plus three two-axis plane quads; plane drags are
+  constrained to their plane with the third axis locked.
+- **Rotate**: a ring around each local axis (orientation-aware) plus a center
+  omni ball for free view-space arc-ball rotation.
+- **Scale**: box handles on each axis (ratio of ray-to-axis distance), plane
+  quads (two-axis scale), and a center box for uniform relative scaling.
+- **Shortcuts**: number-row keys 1/2/3 switch Move/Rotate/Scale through the
+  input adapter, guarded like Delete so text capture wins while editing.
+
+Dragging solves pointer-ray to axis-line/plane intersections with press-time
+anchor compensation; the center handle is picked first near the gizmo origin so
+omni/uniform presses resolve to it, and axis shaft pick-samples start off-center
+so they never shadow the center handle. Plane drags capture their basis at
+press; drawing uses separate scratch vectors so per-frame redraws cannot corrupt
+an active drag. The inspector shows Position/Rotation/Scale rows and updates all
+nine values live during gizmo drags; rotation/scale fields commit through the
+same command flow. The selection outline traces the object's true transformed
+silhouette (12 mesh edges through rotation/scale, inflated about center) and
+redraws per frame.
+
+**Exit criteria**
+- [x] All three tools show their gizmo at the selection with hover highlighting and screen-space picking (`bin/gizmo-runlog-*.txt`).
+- [x] Two-axis plane drags lock the third axis (plane.xy drag ended at (-0.02, 0.87, 0), z = 0 exactly).
+- [x] Rotate rings apply ring-plane rotation; the omni ball rotates free arc-ball style (euler results well beyond the object's passive spin).
+- [x] Scale handles scale only their axes; uniform scaling preserves ratios from a prior axis drag ((23.99, 12.43, 12.43) = ×1.93 on all three).
+- [x] Shortcuts 1/2/3 switch tools with the text-editing guard; toolbar buttons share the same switch.
+- [x] Automated evidence: `bin/verify-transform-gizmo.ps1` drives axis, plane, ring, omni, and scale drags plus shortcut presses across three relaunched sessions; engine logs in `bin/gizmo-runlog-{move,rotate,scale}.txt`, summary in `bin/transform-gizmo-evidence.txt`. Two consecutive runs reproduced matching values.

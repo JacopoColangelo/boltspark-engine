@@ -71,12 +71,25 @@ Evidence files are under `bin/` unless noted otherwise.
 
 Executed on 2026-11-12 with the automated Win32 probe (`bin/verify-gizmo-drag.ps1`): synchronous `SendMessageTimeout` mouse events addressed to the Boltspark window handle only (no screen-level input injection), with stdout mirrored to `bin/gizmo-runlog.txt`.
 
-- [x] The Move tool shows a three-axis gizmo at the primary selection's position, rendered in `s3d` through the scene camera with always-on-top depth testing; Rotate/Scale tools hide the gizmo and log that they are reserved for a later milestone (`bin/gizmo-runlog.txt`).
+- [x] The Move tool shows a three-axis gizmo at the primary selection's position, rendered in `s3d` through the scene camera with always-on-top depth testing (now part of the full three-tool gizmo suite below; the Rotate/Scale-reserved behavior it references was superseded by `bin/verify-transform-gizmo.ps1` evidence).
 - [x] Hovering an axis highlights it; picking uses the closest axis segment (including arrowhead) within a 0.16 world-unit threshold of the pointer ray, rejecting candidates behind the camera or off the segment.
 - [x] Pressing an axis starts a constrained drag that moves the object along that world axis only, with the gizmo following per frame and inspector transform values updating live (`bin/gizmo-runlog.txt`).
 - [x] Drag motion solves the closest points between the pointer ray and the axis line (two-line solver) with press-time anchor compensation, so the object does not jump to the pointer on the first move (zero-delta at press verified).
 - [x] Releasing a gizmo drag applies the final position through the editor command flow (`command: sampleCube position.x = ...`) and never falls through to viewport click-picking (`preventClick`; no `viewport:` line appears during drags in `bin/gizmo-runlog.txt`).
 - [x] Axis-locked motion both directions: drag 1 moved sampleCube position.x 0 → -1.93 with y/z locked at 0; drag 2 pressed on the moved cube's projected pixel and returned it to 0 (`bin/gizmo-runlog.txt`, `bin/gizmo-drag-evidence.txt`).
+
+## Full transform gizmo suite (Move planes, Rotate, Scale, shortcuts)
+
+Executed on 2026-11-12 with the automated Win32 probe (`bin/verify-transform-gizmo.ps1`): three sessions with app relaunches between tools so every press starts with sampleCube at the origin; window-scoped `SendMessageTimeout` mouse and key messages only, no screen-level input injection. Engine evidence mirrored to `bin/gizmo-runlog-move.txt`, `bin/gizmo-runlog-rotate.txt`, `bin/gizmo-runlog-scale.txt`, summarized in `bin/transform-gizmo-evidence.txt`.
+
+- [x] All three tools drive live viewport gizmos from one gizmo implementation (`TransformGizmo.hx`): Move (axes + two-axis plane quads), Rotate (local-axis rings + center omni ball), Scale (axis boxes + plane quads + center uniform box), all rendered as Unreal-style wireframe cones/rings/quads with always-on-top depth testing (`bin/gizmo-runlog-*.txt`).
+- [x] Number-row shortcuts switch tools from the keyboard: 2 → "viewport tool: Rotate gizmo active", 3 → Scale, 1 → Move; the shortcut shares the text-editing/focus guard with Delete so typing 1/2/3 in inspector fields never switches tools (`bin/gizmo-runlog-rotate.txt`, `bin/gizmo-runlog-scale.txt`).
+- [x] Two-axis plane drags move the selection inside the handle's plane with the third axis locked: plane.xy drag ended at (-0.02, 0.87, 0) — z stayed exactly 0 across the whole drag (`bin/gizmo-runlog-move.txt`). The plane basis used for drawing/picking is scratch state separate from the drag's captured frame, so per-frame redraws cannot corrupt an active plane drag.
+- [x] Rotation gizmo: dragging an axis ring applies ring-plane rotation on top of the object's orientation (euler (-124.71, 79.67, 0) — well beyond the object's passive spin); dragging the center omni ball rotates free view-space arc-ball style, euler (8.5, 58.3, 155.23) after the ring drag (`bin/gizmo-runlog-rotate.txt`).
+- [x] Scale gizmo: axis box drag scales only that axis (scale (1.93, 1, 1)); center uniform box scales all three axes by the same ratio relative to the drag-start scale, preserving axis ratios set by a prior axis drag ((23.99, 12.43, 12.43) = ×1.93 on all three) (`bin/gizmo-runlog-scale.txt`).
+- [x] Inspector shows Position / Rotation / Scale rows; gizmo drags update all nine values live during the drag, and Rotation/Scale fields commit through the same command flow as position fields.
+- [x] Selection outline traces the object's actual transformed silhouette (12 mesh edges through the object rotation/scale, inflated about the object center) instead of an axis-aligned boundary cube, and is redrawn per frame so it tracks spinning/moving objects.
+- [x] Reproducibility: two consecutive full-probe runs produced matching values (axis 0 → 0.73 → 0; plane z locked at 0), confirming a previously observed one-off drag flake was probe timing, not gizmo math.
 
 ## Platform and toolchain
 

@@ -16,10 +16,13 @@ class InputAdapter {
     public var focusGotCount(default, null):Int = 0;
     public var pointerInsideWindow(default, null):Bool = true;
     public var onDeletePressed:Null<Void->Void>;
+    /** Keyboard shortcut reported as an editor tool index (Move/Rotate/Scale). */
+    public var onShortcutPressed:Null<Int->Void>;
 
     final scene:h2d.Scene;
     var report:h2d.Text;
     var deleteKeyDown:Bool = false;
+    var shortcutKeyDown:Bool = false;
 
     public function new(scene:h2d.Scene) {
         this.scene = scene;
@@ -55,10 +58,25 @@ class InputAdapter {
                     if (!deleteKeyDown && onDeletePressed != null) onDeletePressed();
                     deleteKeyDown = true;
                 }
+                // Tool shortcuts on the number row (1 = Move, 2 = Rotate,
+                // 3 = Scale); repeat while held is suppressed like Delete.
+                var shortcut = switch (event.keyCode) {
+                    case hxd.Key.NUMBER_1: 0;
+                    case hxd.Key.NUMBER_2: 1;
+                    case hxd.Key.NUMBER_3: 2;
+                    default: -1;
+                };
+                if (shortcut >= 0) {
+                    if (!shortcutKeyDown && onShortcutPressed != null) onShortcutPressed(shortcut);
+                    shortcutKeyDown = true;
+                }
                 refresh();
             case EKeyUp:
                 keyUpCount++;
                 if (event.keyCode == hxd.Key.DELETE) deleteKeyDown = false;
+                if (event.keyCode >= hxd.Key.NUMBER_1 && event.keyCode <= hxd.Key.NUMBER_3) {
+                    shortcutKeyDown = false;
+                }
                 refresh();
             case EMove:
                 pointerMoves++;
@@ -66,6 +84,7 @@ class InputAdapter {
             case EFocusLost:
                 focusLostCount++;
                 deleteKeyDown = false;
+                shortcutKeyDown = false;
                 refresh();
             case EFocus:
                 focusGotCount++;

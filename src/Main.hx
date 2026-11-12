@@ -26,7 +26,10 @@ class Main extends hxd.App {
     var gizmo:TransformGizmo;
     var currentTool:Int = 0;
     var gizmoDragging:Bool = false;
-    var gizmoAxis:Int = -1;
+    var gizmoHandle:Int = -1;
+
+    static inline var OUTLINE_INFLATE:Float = 1.015;
+    static inline var OUTLINE_LIFT:Float = 0.008;
 
     @:hlNative("directx", "win_set_interactive_resize_callback")
     static function setInteractiveResizeCallback(callback:Void->Void):Void return;
@@ -85,6 +88,8 @@ class Main extends hxd.App {
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
         boltUI.onTransformChanged = applyTransformChange;
+        boltUI.onRotationChanged = applyRotationChange;
+        boltUI.onScaleChanged = applyScaleChange;
         boltUI.onToolChanged = setEditorTool;
         boltUI.onViewportHover = onViewportHover;
         boltUI.onViewportPush = onViewportPush;
@@ -119,9 +124,7 @@ class Main extends hxd.App {
             var trimmedName = StringTools.trim(name);
             if (trimmedName.length == 0) {
                 boltUI.log("inspector: object name cannot be empty");
-                boltUI.setSelectedObjects(selectedObjectIds, selected.id,
-                    selected.name, selected.spinSpeed, selected.color,
-                    selected.mesh.x, selected.mesh.y, selected.mesh.z);
+                refreshSelectionInspector();
                 return;
             }
             selected.name = trimmedName;
@@ -139,6 +142,8 @@ class Main extends hxd.App {
             sceneObject.mesh.rotate(0.0, dt * sceneObject.spinSpeed, 0.0);
         }
         gizmo.follow();
+        // The selection outline must track spinning/moving objects every frame.
+        refreshSelectionOutline();
     }
 
     override function render(engine:h3d.Engine):Void {
@@ -176,6 +181,34 @@ class Main extends hxd.App {
             engine.height);
     }
 
+    /** Engine-space pointer coordinates matching camera.project output. */
+    function viewportPointer(viewX:Float, viewY:Float):h3d.Vector {
+        var viewport = boltUI.getViewportRect();
+        var engine = h3d.Engine.getCurrent();
+        var scaleX = engine.width / Math.max(1, nativeWindow.width);
+        var scaleY = engine.height / Math.max(1, nativeWindow.height);
+        return new h3d.Vector((viewport.x + viewX) * scaleX,
+            (viewport.y + viewY) * scaleY, 0);
+    }
+
+    static inline function degToRad(degrees:Float):Float {
+        return degrees * Math.PI / 180;
+    }
+
+    static inline function radToDeg(radians:Float):Float {
+        return radians * 180 / Math.PI;
+    }
+
+    static function round2(value:Float):Float {
+        return Math.round(value * 100) / 100;
+    }
+
+    /** Euler degrees (X, Y, Z) read from an object's rotation quaternion. */
+    function rotationDegrees(mesh:h3d.scene.Object):h3d.Vector {
+        var euler = mesh.getRotationQuat().toEuler();
+        return new h3d.Vector(radToDeg(euler.x), radToDeg(euler.y), radToDeg(euler.z));
+    }
+
     function applyTransformChange(axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
@@ -184,47 +217,71 @@ class Main extends hxd.App {
             case 1: selected.mesh.y = value;
             default: selected.mesh.z = value;
         }
-        refreshSelectionOutline();
-        boltUI.log('command: ${selected.name} position.${axis == 0 ? "x" : axis == 1 ? "y" : "z"} = ${Math.round(value * 100) / 100}');
+        boltUI.log('command: ${selected.name} position.${axisName(axis)} = ${round2(value)}');
     }
 
-    /** Toolbar tool switch: only the Move tool drives a viewport gizmo. */
+    function applyRotationChange(axis:Int, degrees:Float):Void {
+        var selected = getSelectedObject();
+        if (selected == null) return;
+        var current = rotationDegrees(selected.mesh);
+        switch (axis) {
+            case 0: current.x = degrees;
+            case 1: current.y = degrees;
+            default: current.z = degrees;
+        }
+        var quat = new h3d.Quat();
+        quat.initRotation(degToRad(current.x), degToRad(current.y), degToRad(current.z));
+        selected.mesh.setRotationQuat(quat);
+        boltUI.log('command: ${selected.name} rotation.${axisName(axis)} = ${round2(degrees)} deg');
+    }
+
+    function applyScaleChange(axis:Int, value:Float):Void {
+        var selected = getSelectedObject();
+        if (selected == null) return;
+        // Guard against zero/negative scale which collapses the mesh.
+        var clamped = Math.max(0.01, value);
+        switch (axis) {
+            case 0: selected.mesh.scaleX = clamped;
+            case 1: selected.mesh.scaleY = clamped;
+            default: selected.mesh.scaleZ = clamped;
+        }
+        boltUI.log('command: ${selected.name} scale.${axisName(axis)} = ${round2(clamped)}');
+    }
+
+    static function axisName(axis:Int):String {
+        return axis == 0 ? "x" : axis == 1 ? "y" : "z";
+    }
+
+    /** Toolbar/shortcut tool switch: every tool drives its viewport gizmo. */
     function setEditorTool(tool:Int):Void {
         currentTool = tool;
         gizmo.setTool(tool);
+        var selected = getSelectedObject();
+        gizmo.attach(selected == null ? null : selected.mesh);
         var toolNames = ["Move", "Rotate", "Scale"];
-        if (tool == 0) {
-            var selected = getSelectedObject();
-            gizmo.attach(selected == null ? null : selected.mesh);
-            boltUI.log("viewport tool: Move gizmo active");
-        } else {
-            // Rotate/Scale gizmos are a later milestone; keep the Move gizmo
-            // hidden so the viewport cannot imply a tool that does nothing.
-            gizmo.attach(null);
-            boltUI.log('viewport tool: ${toolNames[tool]} gizmo reserved for a later milestone');
-        }
+        boltUI.log('viewport tool: ${toolNames[tool]} gizmo active');
     }
 
     function onViewportHover(x:Float, y:Float):Void {
-        if (gizmoDragging || currentTool != 0) return;
-        gizmo.setHover(gizmo.pickAxis(viewportRay(x, y)));
+        if (gizmoDragging) return;
+        var pointer = viewportPointer(x, y);
+        gizmo.setHover(gizmo.pick(viewportRay(x, y), pointer.x, pointer.y));
     }
 
     function onViewportPush(x:Float, y:Float):Bool {
-        if (currentTool != 0) return false;
-        var axis = gizmo.pickAxis(viewportRay(x, y));
-        if (axis < 0) return false;
         var selected = getSelectedObject();
         if (selected == null) return false;
-        gizmoAxis = axis;
+        var pointer = viewportPointer(x, y);
+        var handle = gizmo.pick(viewportRay(x, y), pointer.x, pointer.y);
+        if (handle < 0) return false;
+        gizmoHandle = handle;
         gizmoDragging = true;
-        gizmo.beginDrag(axis, selected.mesh, viewportRay(x, y));
-        var axisNames = ["x", "y", "z"];
-        boltUI.log('gizmo: drag ${selected.name} position.${axisNames[axis]}');
-        Sys.println('[gizmo] drag start object=${selected.name} axis=${axisNames[axis]}'
-            + ' at=(${Math.round(selected.mesh.x * 100) / 100},'
-            + ' ${Math.round(selected.mesh.y * 100) / 100},'
-            + ' ${Math.round(selected.mesh.z * 100) / 100})');
+        gizmo.beginDrag(handle, selected.mesh, viewportRay(x, y), pointer.x, pointer.y);
+        var handleName = gizmo.describe(handle);
+        boltUI.log('gizmo: drag ${selected.name} ${handleName}');
+        Sys.println('[gizmo] drag start object=${selected.name} handle=${handleName}'
+            + ' at=(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
+            + ' ${round2(selected.mesh.z)})');
         return true;
     }
 
@@ -236,32 +293,57 @@ class Main extends hxd.App {
             gizmo.endDrag();
             return;
         }
-        var next = gizmo.dragTo(viewportRay(x, y));
+        var pointer = viewportPointer(x, y);
+        var next = gizmo.dragTo(viewportRay(x, y), pointer.x, pointer.y);
         if (next == null) return;
-        selected.mesh.setPosition(next.x, next.y, next.z);
-        refreshSelectionOutline();
-        boltUI.updateTransformValues(next.x, next.y, next.z);
+        switch (next) {
+            case MovePosition(nx, ny, nz):
+                selected.mesh.setPosition(nx, ny, nz);
+            case RotateQuat(q):
+                selected.mesh.setRotationQuat(q);
+            case ScaleValues(sx, sy, sz):
+                selected.mesh.scaleX = sx;
+                selected.mesh.scaleY = sy;
+                selected.mesh.scaleZ = sz;
+        }
+        pushInspectorTransform(selected);
+    }
+
+    /** Live inspector values while a gizmo drag is in progress. */
+    function pushInspectorTransform(selected:SceneObject):Void {
+        var rotation = rotationDegrees(selected.mesh);
+        boltUI.updateTransformValues(
+            selected.mesh.x, selected.mesh.y, selected.mesh.z,
+            rotation.x, rotation.y, rotation.z,
+            selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
     }
 
     function onViewportRelease(x:Float, y:Float):Void {
         if (!gizmoDragging) return;
         gizmoDragging = false;
-        var axis = gizmoAxis;
-        gizmoAxis = -1;
+        var handle = gizmoHandle;
+        gizmoHandle = -1;
         gizmo.endDrag();
         var selected = getSelectedObject();
-        if (selected == null || axis < 0) return;
-        var axisNames = ["x", "y", "z"];
-        var value = switch (axis) {
-            case 0: selected.mesh.x;
-            case 1: selected.mesh.y;
-            default: selected.mesh.z;
-        };
-        boltUI.log('command: ${selected.name} position.${axisNames[axis]} = ${Math.round(value * 100) / 100}');
-        Sys.println('[gizmo] drag end object=${selected.name}'
-            + ' at=(${Math.round(selected.mesh.x * 100) / 100},'
-            + ' ${Math.round(selected.mesh.y * 100) / 100},'
-            + ' ${Math.round(selected.mesh.z * 100) / 100})');
+        if (selected == null || handle < 0) return;
+        var handleName = gizmo.describe(handle);
+        var at = '(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
+            + ' ${round2(selected.mesh.z)})';
+        var rotation = rotationDegrees(selected.mesh);
+        var rot = '(${round2(rotation.x)}, ${round2(rotation.y)}, ${round2(rotation.z)} deg)';
+        var scl = '(${round2(selected.mesh.scaleX)}, ${round2(selected.mesh.scaleY)},'
+            + ' ${round2(selected.mesh.scaleZ)})';
+        switch (currentTool) {
+            case TransformGizmo.TOOL_MOVE:
+                boltUI.log('command: ${selected.name} ${handleName} position = ' + at);
+                Sys.println('[gizmo] drag end object=${selected.name} handle=${handleName} at=' + at);
+            case TransformGizmo.TOOL_ROTATE:
+                boltUI.log('command: ${selected.name} ${handleName} rotation = ' + rot);
+                Sys.println('[gizmo] drag end object=${selected.name} handle=${handleName} rotation=' + rot);
+            default:
+                boltUI.log('command: ${selected.name} ${handleName} scale = ' + scl);
+                Sys.println('[gizmo] drag end object=${selected.name} handle=${handleName} scale=' + scl);
+        }
     }
 
     function onViewportClick(x:Float, y:Float):Void {
@@ -363,16 +445,24 @@ class Main extends hxd.App {
         selectedObjectId = selectedObjectIds.indexOf(primaryId) >= 0
             ? primaryId
             : (selectedObjectIds.length == 0 ? -1 : selectedObjectIds[selectedObjectIds.length - 1]);
-        var selected = getSelectedObject();
         refreshSelectionOutline();
-        gizmo.attach(selected == null ? null : selected.mesh);
+        gizmo.attach(getSelectedObject() == null ? null : getSelectedObject().mesh);
+        refreshSelectionInspector();
+    }
+
+    /** Push the primary selection's full inspector state through BoltUI. */
+    function refreshSelectionInspector():Void {
+        var selected = getSelectedObject();
         if (selected == null) {
             boltUI.setSelectedObjects(selectedObjectIds, -1, "", 0, 0);
             return;
         }
+        var rotation = rotationDegrees(selected.mesh);
         boltUI.setSelectedObjects(selectedObjectIds, selected.id,
             selected.name, selected.spinSpeed, selected.color,
-            selected.mesh.x, selected.mesh.y, selected.mesh.z);
+            selected.mesh.x, selected.mesh.y, selected.mesh.z,
+            rotation.x, rotation.y, rotation.z,
+            selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
     }
 
     function getSelectedObject():Null<SceneObject> {
@@ -441,36 +531,49 @@ class Main extends hxd.App {
         selectionOutline.lineStyle(2.0, Theme.ACCENT, 1);
         for (sceneObject in sceneObjects) {
             if (selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
-            drawSelectionBox(selectionOutline, sceneObject.mesh.x,
-                sceneObject.mesh.y, sceneObject.mesh.z, 0.57);
+            drawSelectionEdges(selectionOutline, sceneObject.mesh);
         }
     }
 
-    function drawSelectionBox(graphic:h3d.scene.Graphics, cx:Float, cy:Float,
-            cz:Float, extent:Float):Void {
-        var x0 = cx - extent;
-        var x1 = cx + extent;
-        var y0 = cy - extent;
-        var y1 = cy + extent;
-        var z0 = cz - extent;
-        var z1 = cz + extent;
-        inline function segment(ax:Float, ay:Float, az:Float,
-                bx:Float, by:Float, bz:Float):Void {
-            graphic.moveTo(ax, ay, az);
-            graphic.lineTo(bx, by, bz);
+    /**
+     * Trace the mesh's actual silhouette: the unit cube primitive's 12 edges
+     * transformed by the object's current transform (rotation and scale), so
+     * a rotated object is outlined by its true shape rather than an
+     * axis-aligned boundary cube.
+     *
+     * The outline is inflated slightly about the object center and lifted a
+     * little on Y so it never z-fights with the object's own faces or the
+     * ground grid beneath it.
+     */
+    function drawSelectionEdges(graphic:h3d.scene.Graphics, mesh:h3d.scene.Mesh):Void {
+        var transform = mesh.getTransform();
+        var center = new h3d.Vector(mesh.x, mesh.y, mesh.z);
+        inline function corner(sx:Float, sy:Float, sz:Float):h3d.Vector {
+            var point = new h3d.Vector(sx * 0.5, sy * 0.5, sz * 0.5)
+                .transformed(transform);
+            // Inflate about the center, then lift clear of the grid plane.
+            point.x = center.x + (point.x - center.x) * OUTLINE_INFLATE;
+            point.y = center.y + (point.y - center.y) * OUTLINE_INFLATE
+                + OUTLINE_LIFT;
+            point.z = center.z + (point.z - center.z) * OUTLINE_INFLATE;
+            return point;
         }
-        segment(x0, y0, z0, x1, y0, z0);
-        segment(x1, y0, z0, x1, y0, z1);
-        segment(x1, y0, z1, x0, y0, z1);
-        segment(x0, y0, z1, x0, y0, z0);
-        segment(x0, y1, z0, x1, y1, z0);
-        segment(x1, y1, z0, x1, y1, z1);
-        segment(x1, y1, z1, x0, y1, z1);
-        segment(x0, y1, z1, x0, y1, z0);
-        segment(x0, y0, z0, x0, y1, z0);
-        segment(x1, y0, z0, x1, y1, z0);
-        segment(x1, y0, z1, x1, y1, z1);
-        segment(x0, y0, z1, x0, y1, z1);
+        var corners = [
+            corner(-1, -1, -1), corner(1, -1, -1), corner(1, 1, -1), corner(-1, 1, -1),
+            corner(-1, -1, 1), corner(1, -1, 1), corner(1, 1, 1), corner(-1, 1, 1)
+        ];
+        // 12 cube edges as index pairs over the corner list.
+        var edges = [
+            0, 1, 1, 2, 2, 3, 3, 0, // back face
+            4, 5, 5, 6, 6, 7, 7, 4, // front face
+            0, 4, 1, 5, 2, 6, 3, 7  // connecting edges
+        ];
+        for (index in 0...(edges.length >> 1)) {
+            var a = corners[edges[index * 2]];
+            var b = corners[edges[index * 2 + 1]];
+            graphic.moveTo(a.x, a.y, a.z);
+            graphic.lineTo(b.x, b.y, b.z);
+        }
     }
 
     static function main():Void {

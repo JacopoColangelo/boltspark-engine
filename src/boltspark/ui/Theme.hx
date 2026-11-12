@@ -85,6 +85,17 @@ class Theme {
     public static inline var AXIS_X_HOVER:Int = 0xFF8B8B;
     public static inline var AXIS_Y_HOVER:Int = 0x8FE5AC;
     public static inline var AXIS_Z_HOVER:Int = 0x93B8FF;
+    // Two-axis plane handles blend their two axis hues (Unreal-style quad
+    // handles), with brighter hover variants.
+    public static inline var AXIS_XY:Int = 0xC9B84C;
+    public static inline var AXIS_YZ:Int = 0x4FB5C4;
+    public static inline var AXIS_ZX:Int = 0xB27BC8;
+    public static inline var AXIS_XY_HOVER:Int = 0xE8D96A;
+    public static inline var AXIS_YZ_HOVER:Int = 0x78D6E8;
+    public static inline var AXIS_ZX_HOVER:Int = 0xD0A2E8;
+    // Tool-neutral gizmo handles (omni rotation ball, uniform scale box).
+    public static inline var GIZMO_NEUTRAL:Int = 0x9AA0A8;
+    public static inline var GIZMO_NEUTRAL_HOVER:Int = 0xC8CDD4;
 
     // Editor cube sample colors (also used by the inspector swatches).
     public static inline var CUBE_ORANGE:Int = 0xE58A3A;
