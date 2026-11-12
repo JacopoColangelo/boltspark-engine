@@ -91,6 +91,7 @@ class EditorShell {
     final viewportHintSurface:UiSurface;
     final viewportHintIcon:h2d.Graphics;
     final viewportHintText:h2d.Text;
+    final viewportHintHit:h2d.Interactive;
     final console:ConsolePanel;
     final statusDot:h2d.Graphics;
     final statusText:h2d.Text;
@@ -116,6 +117,8 @@ class EditorShell {
     public var onScaleChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
+    /** `true` selects Local axes; `false` selects World axes. */
+    public var onTransformSpaceChanged:Null<Bool->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
@@ -131,6 +134,8 @@ class EditorShell {
     var inspectorScrollValue:Float = 0;
     var hierarchyFilter:String = "";
     var selectionStatusValue:String = "Select an object to inspect";
+    var localTransformSpace:Bool = false;
+    var transformSpaceHovered:Bool = false;
 
     public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter) {
         this.ctx = ctx;
@@ -425,9 +430,29 @@ class EditorShell {
         viewportHintIcon = new h2d.Graphics(viewportHud);
         UiIcons.draw(viewportHintIcon, Move, 0, 0, 12, Theme.TEXT_SECONDARY);
         viewportHintText = new UiText(ctx.captionFont, viewportHud);
-        viewportHintText.text = "LOCAL";
+        viewportHintText.text = "WORLD";
         viewportHintText.textColor = Theme.TEXT_SECONDARY;
         viewportHintText.lineBreak = false;
+        viewportHintHit = new h2d.Interactive(80, 24, viewportHud);
+        viewportHintHit.backgroundColor = 0;
+        viewportHintHit.cursor = hxd.Cursor.Button;
+        viewportHintHit.onOver = function(_) {
+            transformSpaceHovered = true;
+            refreshTransformSpaceControl();
+        };
+        viewportHintHit.onOut = function(_) {
+            transformSpaceHovered = false;
+            refreshTransformSpaceControl();
+        };
+        viewportHintHit.onClick = function(event) {
+            if (event.button != 0) return;
+            localTransformSpace = !localTransformSpace;
+            refreshTransformSpaceControl();
+            if (onTransformSpaceChanged != null) {
+                onTransformSpaceChanged(localTransformSpace);
+            }
+            event.propagate = false;
+        };
 
         console = new ConsolePanel(ctx, root);
         console.onBackgroundClick = closePaletteIfOpen;
@@ -590,6 +615,8 @@ class EditorShell {
         viewportHintIcon.y = 6;
         viewportHintText.x = viewportHintSurface.x + 25;
         viewportHintText.y = 4;
+        viewportHintHit.x = viewportHintSurface.x;
+        viewportHintHit.y = 0;
 
         var statusY = height - Theme.STATUS_BAR_HEIGHT;
         statusDot.x = 8;
@@ -1025,6 +1052,17 @@ class EditorShell {
 
     function closePaletteIfOpen():Void {
         if (palette.visible) palette.close();
+    }
+
+    /** Redraw the clickable viewport World/Local axis-space control. */
+    function refreshTransformSpaceControl():Void {
+        var color = transformSpaceHovered ? Theme.ACCENT_HOVER : Theme.TEXT_SECONDARY;
+        viewportHintSurface.setStyle(
+            transformSpaceHovered ? Theme.BUTTON_HOVER : Theme.TITLE_BAR,
+            transformSpaceHovered ? Theme.ACCENT : Theme.BORDER_STRONG, 0);
+        viewportHintText.text = localTransformSpace ? "LOCAL" : "WORLD";
+        viewportHintText.textColor = color;
+        UiIcons.draw(viewportHintIcon, Move, 0, 0, 12, color);
     }
 
     function deleteSelection():Void {

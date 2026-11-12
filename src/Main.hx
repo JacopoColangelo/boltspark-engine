@@ -25,6 +25,7 @@ class Main extends hxd.App {
     var selectedObjectId:Int = -1;
     var gizmo:TransformGizmo;
     var currentTool:Int = 0;
+    var localTransformSpace:Bool = false;
     var gizmoDragging:Bool = false;
     var gizmoHandle:Int = -1;
 
@@ -91,6 +92,7 @@ class Main extends hxd.App {
         boltUI.onRotationChanged = applyRotationChange;
         boltUI.onScaleChanged = applyScaleChange;
         boltUI.onToolChanged = setEditorTool;
+        boltUI.onTransformSpaceChanged = setTransformSpace;
         boltUI.onViewportHover = onViewportHover;
         boltUI.onViewportPush = onViewportPush;
         boltUI.onViewportDrag = onViewportDrag;
@@ -262,6 +264,16 @@ class Main extends hxd.App {
         boltUI.log('viewport tool: ${toolNames[tool]} gizmo active');
     }
 
+    /** Apply the viewport World/Local axis-space toggle through Main. */
+    function setTransformSpace(local:Bool):Void {
+        localTransformSpace = local;
+        gizmo.setSpace(local ? TransformGizmo.SPACE_LOCAL : TransformGizmo.SPACE_WORLD);
+        boltUI.log('viewport transform space: ${local ? "Local" : "World"}');
+        var xAxis = gizmo.getAxisDirection(TransformGizmo.HANDLE_AXIS_X);
+        Sys.println('[gizmo] transform space=${local ? "Local" : "World"}'
+            + ' xAxis=(${round2(xAxis.x)}, ${round2(xAxis.y)}, ${round2(xAxis.z)})');
+    }
+
     function onViewportHover(x:Float, y:Float):Void {
         if (gizmoDragging) return;
         var pointer = viewportPointer(x, y);
@@ -280,6 +292,7 @@ class Main extends hxd.App {
         var handleName = gizmo.describe(handle);
         boltUI.log('gizmo: drag ${selected.name} ${handleName}');
         Sys.println('[gizmo] drag start object=${selected.name} handle=${handleName}'
+            + ' space=${localTransformSpace ? "Local" : "World"}'
             + ' at=(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
             + ' ${round2(selected.mesh.z)})');
         return true;

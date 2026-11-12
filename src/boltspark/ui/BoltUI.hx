@@ -37,6 +37,7 @@ class BoltUI {
     public var onScaleChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
+    public var onTransformSpaceChanged:Null<Bool->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
@@ -60,6 +61,9 @@ class BoltUI {
         shell.onScaleChanged = function(axis, value) if (onScaleChanged != null) onScaleChanged(axis, value);
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
         shell.onToolChanged = function(tool) if (onToolChanged != null) onToolChanged(tool);
+        shell.onTransformSpaceChanged = function(local) {
+            if (onTransformSpaceChanged != null) onTransformSpaceChanged(local);
+        };
         shell.onViewportHover = function(x, y) if (onViewportHover != null) onViewportHover(x, y);
         shell.onViewportPush = function(x, y) {
             return onViewportPush != null && onViewportPush(x, y);

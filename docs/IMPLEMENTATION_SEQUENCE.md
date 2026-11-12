@@ -153,18 +153,24 @@ Every transform tool now drives a live viewport gizmo from one implementation
 (`src/boltspark/editor/TransformGizmo.hx`), rendered as Unreal-style wireframe
 handles through `h3d.scene.Graphics` with always-on-top depth testing:
 
-- **Move**: three arrow axes plus three two-axis plane quads; plane drags are
-  constrained to their plane with the third axis locked.
-- **Rotate**: a ring around each local axis (orientation-aware) plus a center
-  omni ball for free view-space arc-ball rotation.
+- **Move**: three arrow axes, three two-axis plane quads, and a screen-facing
+  center square for unconstrained view-plane movement; plane drags keep their
+  third axis locked.
+- **Rotate**: a ring around each active-space axis plus a center wire sphere.
+  Its omni drag maps the pointer onto a proper virtual hemisphere and applies
+  incremental camera-space arc-ball rotations.
 - **Scale**: box handles on each axis (ratio of ray-to-axis distance), plane
   quads (two-axis scale), and a center box for uniform relative scaling.
 - **Shortcuts**: number-row keys 1/2/3 switch Move/Rotate/Scale through the
   input adapter, guarded like Delete so text capture wins while editing.
+- **Axis space**: the viewport WORLD/LOCAL overlay is a real clickable control.
+  WORLD (default) keeps all axes, planes, and rings fixed to the scene while an
+  object rotates; LOCAL transforms the same drawing, picking, and drag basis by
+  the object's orientation.
 
 Dragging solves pointer-ray to axis-line/plane intersections with press-time
 anchor compensation; the center handle is picked first near the gizmo origin so
-omni/uniform presses resolve to it, and axis shaft pick-samples start off-center
+free-move/omni/uniform presses resolve to it, and axis shaft pick-samples start off-center
 so they never shadow the center handle. Plane drags capture their basis at
 press; drawing uses separate scratch vectors so per-frame redraws cannot corrupt
 an active drag. The inspector shows Position/Rotation/Scale rows and updates all
@@ -177,6 +183,10 @@ redraws per frame.
 - [x] All three tools show their gizmo at the selection with hover highlighting and screen-space picking (`bin/gizmo-runlog-*.txt`).
 - [x] Two-axis plane drags lock the third axis (plane.xy drag ended at (-0.02, 0.87, 0), z = 0 exactly).
 - [x] Rotate rings apply ring-plane rotation; the omni ball rotates free arc-ball style (euler results well beyond the object's passive spin).
+- [x] WORLD is the default and keeps the rotation rings fixed while the object spins; LOCAL rotates drawing, picking, and drag constraints for Move/Rotate/Scale from the same object-space basis (focused evidence: spinning cube Local X = (0.69, 0, -0.72), then World X = (1, 0, 0)).
+- [x] The Move center square translates freely in the camera view plane (focused probe: (0, 0, 0) → (-0.72, 0.5, 0.32)).
+- [x] The omni center uses a virtual hemisphere (not the former z=0 circle), so a center-to-right drag tumbles around camera up instead of degenerating into screen roll (focused runs consistently produced large non-spin X/Z components, greater than 60° each).
 - [x] Scale handles scale only their axes; uniform scaling preserves ratios from a prior axis drag ((23.99, 12.43, 12.43) = ×1.93 on all three).
 - [x] Shortcuts 1/2/3 switch tools with the text-editing guard; toolbar buttons share the same switch.
 - [x] Automated evidence: `bin/verify-transform-gizmo.ps1` drives axis, plane, ring, omni, and scale drags plus shortcut presses across three relaunched sessions; engine logs in `bin/gizmo-runlog-{move,rotate,scale}.txt`, summary in `bin/transform-gizmo-evidence.txt`. Two consecutive runs reproduced matching values.
+- [x] Focused evidence: `bin/verify-gizmo-space-arcball.ps1` drives the Move center, presses the Rotate center and performs an arc-ball drag, then clicks the viewport toggle Local → World using window-scoped `SendMessageTimeout` only (`bin/gizmo-center-move-log.txt`, `bin/gizmo-arcball-log.txt`, `bin/gizmo-space-log.txt`).
