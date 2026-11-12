@@ -127,3 +127,22 @@ editing is intentionally limited to a single selected object.
   ownership of Delete while an inspector field is focused.
 - Inspector properties and console history remain reachable when their content
   exceeds panel bounds, and console Clear all removes the stored log.
+
+## Gate 8 — Viewport transform gizmo (Move tool)
+
+The viewport shows a three-axis move gizmo at the primary selection's position.
+It renders through the scene camera (`h3d.scene.Graphics`) with always-on-top
+depth testing, highlights the axis under the pointer, and captures the press to
+drag the object along the picked world axis. The drag solves the closest points
+between the pointer ray and the axis line with press-time anchor compensation,
+so the object never jumps to the pointer on the first move. Release applies the
+final position through the editor command flow; a consumed press calls
+`preventClick` so gizmo drags never re-pick the viewport. Rotate and Scale
+tools keep the gizmo hidden until their milestones.
+
+**Exit criteria**
+- [x] The Move tool shows the axis gizmo at the selection; Rotate/Scale hide it and report as reserved.
+- [x] Axis picking and hover highlighting use the pointer ray against the axis segments with a world-space threshold.
+- [x] Dragging moves the object along the picked axis only, with live inspector value updates and no first-move jump.
+- [x] Release applies the position through the command flow and viewport click-picking stays suppressed during the drag.
+- [x] Automated evidence: a Win32 message probe (window-scoped `SendMessageTimeout`, no screen-level input injection) drives two axis-locked drags, moving sampleCube position.x 0 → -1.93 → 0 with y/z locked (`bin/gizmo-runlog.txt`).

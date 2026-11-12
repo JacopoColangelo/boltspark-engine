@@ -34,6 +34,11 @@ class BoltUI {
     public var onObjectNameChanged:Null<String->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
+    public var onToolChanged:Null<Int->Void>;
+    public var onViewportHover:Null<Float->Float->Void>;
+    public var onViewportPush:Null<Float->Float->Bool>;
+    public var onViewportDrag:Null<Float->Float->Void>;
+    public var onViewportRelease:Null<Float->Float->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window) {
         ctx = new UiContext(window);
@@ -50,11 +55,21 @@ class BoltUI {
         shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
         shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
+        shell.onToolChanged = function(tool) if (onToolChanged != null) onToolChanged(tool);
+        shell.onViewportHover = function(x, y) if (onViewportHover != null) onViewportHover(x, y);
+        shell.onViewportPush = function(x, y) {
+            return onViewportPush != null && onViewportPush(x, y);
+        };
+        shell.onViewportDrag = function(x, y) if (onViewportDrag != null) onViewportDrag(x, y);
+        shell.onViewportRelease = function(x, y) if (onViewportRelease != null) onViewportRelease(x, y);
     }
 
     /** Editor console access. */
     public function log(line:String):Void {
         shell.log(line);
+        // Mirror the editor console to stdout so automated runs can verify
+        // command flow without screenshots.
+        Sys.println('[console] ' + line);
     }
 
     /** Called once per app frame. Re-layout only when the OS window changes size. */
@@ -83,5 +98,10 @@ class BoltUI {
 
     public function setObjectName(name:String):Void {
         shell.setObjectName(name);
+    }
+
+    /** Live transform field update during viewport gizmo drags. */
+    public function updateTransformValues(posX:Float, posY:Float, posZ:Float):Void {
+        shell.updateTransformValues(posX, posY, posZ);
     }
 }

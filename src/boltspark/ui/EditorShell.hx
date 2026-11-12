@@ -111,6 +111,11 @@ class EditorShell {
     public var onObjectNameChanged:Null<String->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
+    public var onToolChanged:Null<Int->Void>;
+    public var onViewportHover:Null<Float->Float->Void>;
+    public var onViewportPush:Null<Float->Float->Bool>;
+    public var onViewportDrag:Null<Float->Float->Void>;
+    public var onViewportRelease:Null<Float->Float->Void>;
     public var viewportRect(default, null):LayoutRect;
 
     var lastWidth:Int = -1;
@@ -141,6 +146,36 @@ class EditorShell {
         viewportHit = new h2d.Interactive(1, 1, root);
         viewportHit.backgroundColor = 0;
         viewportHit.cursor = hxd.Cursor.Default;
+        viewportHit.onMove = function(event) {
+            if (onViewportHover != null) onViewportHover(event.relX, event.relY);
+        };
+        viewportHit.onPush = function(event) {
+            if (event.button != 0) return;
+            var gizmoConsumed = onViewportPush != null
+                && onViewportPush(event.relX, event.relY);
+            if (!gizmoConsumed) return;
+            // A gizmo drag owns this press: the release must not fall through
+            // to onClick (which would re-run object picking).
+            closePaletteIfOpen();
+            viewportHit.preventClick();
+            viewportHit.startCapture(function(captured) {
+                switch (captured.kind) {
+                    case EMove:
+                        if (onViewportDrag != null) onViewportDrag(
+                            ctx.window.mouseX - viewportRect.x,
+                            ctx.window.mouseY - viewportRect.y);
+                        captured.propagate = false;
+                    case ERelease, EReleaseOutside, EFocusLost:
+                        captured.propagate = false;
+                        viewportHit.stopCapture();
+                        if (onViewportRelease != null) onViewportRelease(
+                            ctx.window.mouseX - viewportRect.x,
+                            ctx.window.mouseY - viewportRect.y);
+                    case _:
+                        captured.propagate = true;
+                }
+            });
+        };
         viewportHit.onClick = function(event) {
             closePaletteIfOpen();
             if (onViewportClick != null) onViewportClick(event.relX, event.relY);
@@ -194,14 +229,13 @@ class EditorShell {
             }
         };
         var transformKinds:Array<UiIconKind> = [Move, Rotate, Scale];
-        var transformNames = ["Move", "Rotate", "Scale"];
         for (index in 0...transformKinds.length) {
             var modeButton = new UiButton(ctx, "", 28, 28, root);
             modeButton.setIcon(transformKinds[index]).setQuiet().setSelected(index == 0);
             var capturedIndex = index;
             modeButton.onClick = function() {
                 for (i in 0...transformButtons.length) transformButtons[i].setSelected(i == capturedIndex);
-                log("viewport tool: " + transformNames[capturedIndex]);
+                if (onToolChanged != null) onToolChanged(capturedIndex);
             };
             transformButtons.push(modeButton);
         }
@@ -853,6 +887,13 @@ class EditorShell {
     }
 
     public inline function setObjectName(value:String):Void objectNameField.setValue(value);
+
+    /** Live transform update while a viewport gizmo drag moves the selection. */
+    public function updateTransformValues(posX:Float, posY:Float, posZ:Float):Void {
+        transformFields[0].setValue(posX);
+        transformFields[1].setValue(posY);
+        transformFields[2].setValue(posZ);
+    }
 
     function selectHierarchyRow(id:Int, control:Bool, shift:Bool):Void {
         var clickedIndex = -1;

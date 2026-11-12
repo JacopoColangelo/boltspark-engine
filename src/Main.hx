@@ -1,4 +1,5 @@
 import boltspark.editor.SceneObject;
+import boltspark.editor.TransformGizmo;
 import boltspark.ui.BoltUI;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
@@ -22,6 +23,10 @@ class Main extends hxd.App {
     final selectedObjectIds:Array<Int> = [];
     var nextObjectId:Int = 1;
     var selectedObjectId:Int = -1;
+    var gizmo:TransformGizmo;
+    var currentTool:Int = 0;
+    var gizmoDragging:Bool = false;
+    var gizmoAxis:Int = -1;
 
     @:hlNative("directx", "win_set_interactive_resize_callback")
     static function setInteractiveResizeCallback(callback:Void->Void):Void return;
@@ -57,6 +62,7 @@ class Main extends hxd.App {
         cubePrimitive.addUVs();
         cubePrimitive.addNormals();
         setupViewportScene();
+        gizmo = new TransformGizmo(s3d);
         addSceneObject("sampleCube", 0, Theme.CUBE_ORANGE);
 
         s3d.camera.pos.set(5.8, 4.2, 6.4);
@@ -79,6 +85,11 @@ class Main extends hxd.App {
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
         boltUI.onTransformChanged = applyTransformChange;
+        boltUI.onToolChanged = setEditorTool;
+        boltUI.onViewportHover = onViewportHover;
+        boltUI.onViewportPush = onViewportPush;
+        boltUI.onViewportDrag = onViewportDrag;
+        boltUI.onViewportRelease = onViewportRelease;
         boltUI.log('renderer driver: ${driverName}');
         boltUI.log("editor shell ready — hierarchy, inspector, console live");
         refreshHierarchy();
@@ -127,6 +138,7 @@ class Main extends hxd.App {
         for (sceneObject in sceneObjects) {
             sceneObject.mesh.rotate(0.0, dt * sceneObject.spinSpeed, 0.0);
         }
+        gizmo.follow();
     }
 
     override function render(engine:h3d.Engine):Void {
@@ -151,6 +163,19 @@ class Main extends hxd.App {
         s2d.render(engine);
     }
 
+    /** Build a scene ray from viewport-local pointer coordinates. */
+    function viewportRay(viewX:Float, viewY:Float):h3d.col.Ray {
+        var viewport = boltUI.getViewportRect();
+        var engine = h3d.Engine.getCurrent();
+        var scaleX = engine.width / Math.max(1, nativeWindow.width);
+        var scaleY = engine.height / Math.max(1, nativeWindow.height);
+        return s3d.camera.rayFromScreen(
+            (viewport.x + viewX) * scaleX,
+            (viewport.y + viewY) * scaleY,
+            engine.width,
+            engine.height);
+    }
+
     function applyTransformChange(axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
@@ -163,16 +188,84 @@ class Main extends hxd.App {
         boltUI.log('command: ${selected.name} position.${axis == 0 ? "x" : axis == 1 ? "y" : "z"} = ${Math.round(value * 100) / 100}');
     }
 
+    /** Toolbar tool switch: only the Move tool drives a viewport gizmo. */
+    function setEditorTool(tool:Int):Void {
+        currentTool = tool;
+        gizmo.setTool(tool);
+        var toolNames = ["Move", "Rotate", "Scale"];
+        if (tool == 0) {
+            var selected = getSelectedObject();
+            gizmo.attach(selected == null ? null : selected.mesh);
+            boltUI.log("viewport tool: Move gizmo active");
+        } else {
+            // Rotate/Scale gizmos are a later milestone; keep the Move gizmo
+            // hidden so the viewport cannot imply a tool that does nothing.
+            gizmo.attach(null);
+            boltUI.log('viewport tool: ${toolNames[tool]} gizmo reserved for a later milestone');
+        }
+    }
+
+    function onViewportHover(x:Float, y:Float):Void {
+        if (gizmoDragging || currentTool != 0) return;
+        gizmo.setHover(gizmo.pickAxis(viewportRay(x, y)));
+    }
+
+    function onViewportPush(x:Float, y:Float):Bool {
+        if (currentTool != 0) return false;
+        var axis = gizmo.pickAxis(viewportRay(x, y));
+        if (axis < 0) return false;
+        var selected = getSelectedObject();
+        if (selected == null) return false;
+        gizmoAxis = axis;
+        gizmoDragging = true;
+        gizmo.beginDrag(axis, selected.mesh, viewportRay(x, y));
+        var axisNames = ["x", "y", "z"];
+        boltUI.log('gizmo: drag ${selected.name} position.${axisNames[axis]}');
+        Sys.println('[gizmo] drag start object=${selected.name} axis=${axisNames[axis]}'
+            + ' at=(${Math.round(selected.mesh.x * 100) / 100},'
+            + ' ${Math.round(selected.mesh.y * 100) / 100},'
+            + ' ${Math.round(selected.mesh.z * 100) / 100})');
+        return true;
+    }
+
+    function onViewportDrag(x:Float, y:Float):Void {
+        if (!gizmoDragging) return;
+        var selected = getSelectedObject();
+        if (selected == null) {
+            gizmoDragging = false;
+            gizmo.endDrag();
+            return;
+        }
+        var next = gizmo.dragTo(viewportRay(x, y));
+        if (next == null) return;
+        selected.mesh.setPosition(next.x, next.y, next.z);
+        refreshSelectionOutline();
+        boltUI.updateTransformValues(next.x, next.y, next.z);
+    }
+
+    function onViewportRelease(x:Float, y:Float):Void {
+        if (!gizmoDragging) return;
+        gizmoDragging = false;
+        var axis = gizmoAxis;
+        gizmoAxis = -1;
+        gizmo.endDrag();
+        var selected = getSelectedObject();
+        if (selected == null || axis < 0) return;
+        var axisNames = ["x", "y", "z"];
+        var value = switch (axis) {
+            case 0: selected.mesh.x;
+            case 1: selected.mesh.y;
+            default: selected.mesh.z;
+        };
+        boltUI.log('command: ${selected.name} position.${axisNames[axis]} = ${Math.round(value * 100) / 100}');
+        Sys.println('[gizmo] drag end object=${selected.name}'
+            + ' at=(${Math.round(selected.mesh.x * 100) / 100},'
+            + ' ${Math.round(selected.mesh.y * 100) / 100},'
+            + ' ${Math.round(selected.mesh.z * 100) / 100})');
+    }
+
     function onViewportClick(x:Float, y:Float):Void {
-        var viewport = boltUI.getViewportRect();
-        var engine = h3d.Engine.getCurrent();
-        var scaleX = engine.width / Math.max(1, nativeWindow.width);
-        var scaleY = engine.height / Math.max(1, nativeWindow.height);
-        var ray = s3d.camera.rayFromScreen(
-            (viewport.x + x) * scaleX,
-            (viewport.y + y) * scaleY,
-            engine.width,
-            engine.height);
+        var ray = viewportRay(x, y);
         var nearestDistance = Math.POSITIVE_INFINITY;
         var nearestObject:Null<SceneObject> = null;
         for (sceneObject in sceneObjects) {
@@ -211,15 +304,7 @@ class Main extends hxd.App {
     }
 
     function createCubeAtViewport(viewX:Float, viewY:Float):Void {
-        var viewport = boltUI.getViewportRect();
-        var engine = h3d.Engine.getCurrent();
-        var scaleX = engine.width / Math.max(1, nativeWindow.width);
-        var scaleY = engine.height / Math.max(1, nativeWindow.height);
-        var ray = s3d.camera.rayFromScreen(
-            (viewport.x + viewX) * scaleX,
-            (viewport.y + viewY) * scaleY,
-            engine.width,
-            engine.height);
+        var ray = viewportRay(viewX, viewY);
         var x = nextObjectId * 1.5;
         var z = 0.0;
         if (Math.abs(ray.ly) > 0.0001) {
@@ -280,6 +365,7 @@ class Main extends hxd.App {
             : (selectedObjectIds.length == 0 ? -1 : selectedObjectIds[selectedObjectIds.length - 1]);
         var selected = getSelectedObject();
         refreshSelectionOutline();
+        gizmo.attach(selected == null ? null : selected.mesh);
         if (selected == null) {
             boltUI.setSelectedObjects(selectedObjectIds, -1, "", 0, 0);
             return;

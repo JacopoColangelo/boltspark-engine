@@ -81,6 +81,10 @@ class Theme {
     public static inline var AXIS_X:Int = 0xE26868;
     public static inline var AXIS_Y:Int = 0x69C183;
     public static inline var AXIS_Z:Int = 0x5F91E8;
+    // Brighter variants used when a viewport gizmo axis is hovered/dragged.
+    public static inline var AXIS_X_HOVER:Int = 0xFF8B8B;
+    public static inline var AXIS_Y_HOVER:Int = 0x8FE5AC;
+    public static inline var AXIS_Z_HOVER:Int = 0x93B8FF;
 
     // Editor cube sample colors (also used by the inspector swatches).
     public static inline var CUBE_ORANGE:Int = 0xE58A3A;

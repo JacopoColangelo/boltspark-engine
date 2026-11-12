@@ -67,6 +67,17 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] Native cursor policy is stable: ordinary editor controls use Arrow, text values use IBeam, splitters use SizeWE/SizeNS, and the draggable palette item uses SizeAll; numeric scrub regions use SizeWE while hovered but restore Arrow after leaving or releasing a drag outside (`bin/cursor-regression.txt`, `bin/numeric-cursor-dismiss-regression.txt`, captured with Win32 `GetCursorInfo`).
 - [x] Keyboard event reporting flows through the central input adapter (status bar shows `key ... | dN uN mvN focus G/L` live; `boltspark/ui/InputAdapter.hx`).
 
+## Viewport transform gizmo (Move tool)
+
+Executed on 2026-11-12 with the automated Win32 probe (`bin/verify-gizmo-drag.ps1`): synchronous `SendMessageTimeout` mouse events addressed to the Boltspark window handle only (no screen-level input injection), with stdout mirrored to `bin/gizmo-runlog.txt`.
+
+- [x] The Move tool shows a three-axis gizmo at the primary selection's position, rendered in `s3d` through the scene camera with always-on-top depth testing; Rotate/Scale tools hide the gizmo and log that they are reserved for a later milestone (`bin/gizmo-runlog.txt`).
+- [x] Hovering an axis highlights it; picking uses the closest axis segment (including arrowhead) within a 0.16 world-unit threshold of the pointer ray, rejecting candidates behind the camera or off the segment.
+- [x] Pressing an axis starts a constrained drag that moves the object along that world axis only, with the gizmo following per frame and inspector transform values updating live (`bin/gizmo-runlog.txt`).
+- [x] Drag motion solves the closest points between the pointer ray and the axis line (two-line solver) with press-time anchor compensation, so the object does not jump to the pointer on the first move (zero-delta at press verified).
+- [x] Releasing a gizmo drag applies the final position through the editor command flow (`command: sampleCube position.x = ...`) and never falls through to viewport click-picking (`preventClick`; no `viewport:` line appears during drags in `bin/gizmo-runlog.txt`).
+- [x] Axis-locked motion both directions: drag 1 moved sampleCube position.x 0 → -1.93 with y/z locked at 0; drag 2 pressed on the moved cube's projected pixel and returned it to 0 (`bin/gizmo-runlog.txt`, `bin/gizmo-drag-evidence.txt`).
+
 ## Platform and toolchain
 
 - [x] Record Haxe, HashLink, Heaps, `format`, `hldx`, hlfreetype, and FreeType versions (`docs/TOOLCHAIN_VERSIONS.md`).
