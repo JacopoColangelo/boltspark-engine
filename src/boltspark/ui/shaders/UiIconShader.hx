@@ -231,6 +231,26 @@ class UiIconShader extends hxsl.Shader {
             else if (iconKind == 22) {
                 d = circle(p, vec2(0.50), 0.42);
             }
+            // Linked scale proportions.
+            else if (iconKind == 23) {
+                d = circleStroke(p, vec2(0.35, 0.35), 0.19);
+                d = min(d, circleStroke(p, vec2(0.65, 0.65), 0.19));
+                d = min(d, segment(p, vec2(0.41, 0.41), vec2(0.59, 0.59)));
+            }
+            // Unlinked scale proportions: the same chain with a clear slash.
+            else if (iconKind == 24) {
+                d = circleStroke(p, vec2(0.34, 0.34), 0.17);
+                d = min(d, circleStroke(p, vec2(0.66, 0.66), 0.17));
+                d = min(d, segment(p, vec2(0.18, 0.82), vec2(0.82, 0.18)));
+            }
+            // Reset to the row's canonical transform value.
+            else if (iconKind == 25) {
+                var resetRing = circleStroke(p, vec2(0.50, 0.52), 0.29);
+                var resetGap = box(p, vec2(0.25, 0.25), vec2(0.18, 0.16));
+                d = max(resetRing, -resetGap);
+                d = min(d, segment(p, vec2(0.19, 0.35), vec2(0.19, 0.16)));
+                d = min(d, segment(p, vec2(0.19, 0.16), vec2(0.38, 0.16)));
+            }
 
             var antialias = max(fwidth(d) * 0.5, 0.0001);
             var coverage = 1.0 - smoothstep(-antialias, antialias, d);

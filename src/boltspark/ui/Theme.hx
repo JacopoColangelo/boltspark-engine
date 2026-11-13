@@ -111,9 +111,6 @@ class Theme {
     public static inline var GIZMO_NEUTRAL:Int = 0x9AA0A8;
     public static inline var GIZMO_NEUTRAL_HOVER:Int = 0xC8CDD4;
 
-    // Editor cube sample colors (also used by the inspector swatches).
+    // Default editor primitive color.
     public static inline var CUBE_ORANGE:Int = 0xE58A3A;
-    public static inline var CUBE_STEEL:Int = 0x7FA6C9;
-    public static inline var CUBE_MOSS:Int = 0x7FB069;
-    public static inline var CUBE_VIOLET:Int = 0xA78BFA;
 }

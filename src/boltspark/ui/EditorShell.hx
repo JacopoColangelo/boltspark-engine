@@ -12,8 +12,6 @@ import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
-import boltspark.ui.widgets.Stepper;
-import boltspark.ui.widgets.SwatchPicker;
 import boltspark.ui.widgets.TextInputField;
 import boltspark.ui.widgets.UiButton;
 
@@ -24,6 +22,7 @@ import boltspark.ui.widgets.UiButton;
 class EditorShell {
     static inline var HIERARCHY_ROW_HEIGHT:Int = 22;
     static inline var INSPECTOR_ROW_HEIGHT:Int = 28;
+    static inline var TRANSFORM_ACTION_WIDTH:Int = 22;
 
     final ctx:UiContext;
     final input:InputAdapter;
@@ -73,14 +72,8 @@ class EditorShell {
     final transformFields:Array<AxisValue> = [];
     final rotationFields:Array<AxisValue> = [];
     final scaleFields:Array<AxisValue> = [];
-
-    final behaviorSection:InspectorSection;
-    final spinLabel:h2d.Text;
-    final spinRow:Stepper;
-
-    final materialSection:InspectorSection;
-    final colorLabel:h2d.Text;
-    final colorRow:SwatchPicker;
+    final transformResetButtons:Array<UiButton> = [];
+    final scaleLinkButton:UiButton;
 
     // Viewport/console/status.
     final viewportHit:h2d.Interactive;
@@ -109,12 +102,13 @@ class EditorShell {
     public var onCreateObjectAt:Null<Float->Float->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
-    public var onSpinSpeedChanged:Null<Float->Void>;
-    public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onRotationChanged:Null<Int->Float->Void>;
     public var onScaleChanged:Null<Int->Float->Void>;
+    /** Row index: 0 Position, 1 Rotation, 2 Scale. */
+    public var onTransformReset:Null<Int->Void>;
+    public var onScaleLinkChanged:Null<Bool->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     /** `true` selects Local axes; `false` selects World axes. */
@@ -136,6 +130,7 @@ class EditorShell {
     var selectionStatusValue:String = "Select an object to inspect";
     var localTransformSpace:Bool = false;
     var transformSpaceHovered:Bool = false;
+    var scaleLinked:Bool = false;
 
     public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter) {
         this.ctx = ctx;
@@ -364,39 +359,24 @@ class EditorShell {
                 field.onEditRejected = function(message:String) log("inspector: " + message);
                 rowFields.push(field);
             }
+            var resetRow = rowIndex;
+            var resetButton = new UiButton(ctx, "", TRANSFORM_ACTION_WIDTH,
+                Theme.CONTROL_HEIGHT, transformSection.content);
+            resetButton.setIcon(Reset);
+            resetButton.onClick = function() {
+                if (onTransformReset != null) onTransformReset(resetRow);
+            };
+            transformResetButtons.push(resetButton);
         }
 
-        behaviorSection = new InspectorSection(ctx, "Behavior", inspectorContentMask);
-        spinLabel = new UiText(ctx.labelFont, behaviorSection.content);
-        spinLabel.text = "Spin speed";
-        spinLabel.textColor = Theme.TEXT_SECONDARY;
-        spinLabel.lineBreak = false;
-        spinRow = new Stepper(ctx, Theme.RIGHT_PANEL_WIDTH - 124, Theme.CONTROL_HEIGHT,
-            0.0, 4.0, 0.25, 0.35,
-            function(v:Float) {
-                var hundredths = Math.round(v * 100);
-                var fractional = hundredths % 100;
-                return Std.string(Std.int(hundredths / 100)) + "."
-                    + (fractional < 10 ? "0" : "") + Std.string(fractional);
-            }, behaviorSection.content);
-        spinRow.onValueChanged = function(v:Float) {
-            if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
-        };
-        spinRow.onEditRejected = function(message:String) log("inspector: " + message);
-
-        materialSection = new InspectorSection(ctx, "Material", inspectorContentMask);
-        colorLabel = new UiText(ctx.labelFont, materialSection.content);
-        colorLabel.text = "Base color";
-        colorLabel.textColor = Theme.TEXT_SECONDARY;
-        colorLabel.lineBreak = false;
-        colorRow = new SwatchPicker(ctx,
-            [Theme.CUBE_ORANGE, Theme.CUBE_STEEL, Theme.CUBE_MOSS, Theme.CUBE_VIOLET],
-            18, 6, materialSection.content);
-        colorRow.onColorChanged = function(color:Int) {
-            if (onColorChanged != null) onColorChanged(color);
+        scaleLinkButton = new UiButton(ctx, "", TRANSFORM_ACTION_WIDTH,
+            Theme.CONTROL_HEIGHT, transformSection.content);
+        scaleLinkButton.setIcon(Unlink);
+        scaleLinkButton.onClick = function() {
+            setScaleLinked(!scaleLinked, true);
         };
 
-        inspectorSections = [objectSection, transformSection, behaviorSection, materialSection];
+        inspectorSections = [objectSection, transformSection];
         for (section in inspectorSections) {
             section.onToggle = function() layoutInspectorProperties();
         }
@@ -472,16 +452,16 @@ class EditorShell {
         inputStatus.lineBreak = false;
         // Input diagnostics are intentionally not surfaced in the shipped status bar.
         input.onDeletePressed = function() {
-            if (objectNameField.isFocused() || spinRow.isEditing() || hierarchySearch.isFocused()) return;
+            if (objectNameField.isFocused() || hierarchySearch.isFocused()) return;
             for (field in transformFields) if (field.isEditing()) return;
             for (field in rotationFields) if (field.isEditing()) return;
             for (field in scaleFields) if (field.isEditing()) return;
             deleteSelection();
         };
         // Number-row tool shortcuts (1/2/3) share the Delete guard: text
-        // capture and steppers must not hijack the keypress.
+        // capture must not hijack the keypress.
         input.onShortcutPressed = function(tool:Int) {
-            if (objectNameField.isFocused() || spinRow.isEditing() || hierarchySearch.isFocused()) return;
+            if (objectNameField.isFocused() || hierarchySearch.isFocused()) return;
             for (field in transformFields) if (field.isEditing()) return;
             for (field in rotationFields) if (field.isEditing()) return;
             for (field in scaleFields) if (field.isEditing()) return;
@@ -786,10 +766,9 @@ class EditorShell {
 
     function layoutInspectorProperties():Void {
         objectSection.contentHeight = INSPECTOR_ROW_HEIGHT;
-        // Transform now holds Position, Rotation, and Scale rows.
+        // Transform holds Position, Rotation, and Scale rows with per-row
+        // reset actions and a scale-proportion link on the Scale row.
         transformSection.contentHeight = INSPECTOR_ROW_HEIGHT * 3;
-        behaviorSection.contentHeight = INSPECTOR_ROW_HEIGHT;
-        materialSection.contentHeight = INSPECTOR_ROW_HEIGHT;
 
         var width = Math.max(0, inspectorContentMask.width);
         var y:Float = 0;
@@ -808,7 +787,11 @@ class EditorShell {
         // Transform: DCC-style property rows (label left, three axis fields).
         var fieldStart = 72.0;
         var axisGap = 4.0;
-        var axisWidth = Math.max(0, (width - fieldStart - 8 - axisGap * 2) / 3);
+        var actionGap = 3.0;
+        var resetX = Math.max(fieldStart, width - 8 - TRANSFORM_ACTION_WIDTH);
+        var linkX = resetX - actionGap - TRANSFORM_ACTION_WIDTH;
+        var fieldEnd = linkX - axisGap;
+        var axisWidth = Math.max(0, (fieldEnd - fieldStart - axisGap * 2) / 3);
         var rowGroups = [transformFields, rotationFields, scaleFields];
         for (rowIndex in 0...rowGroups.length) {
             var rowFields = rowGroups[rowIndex];
@@ -821,22 +804,11 @@ class EditorShell {
                 rowFields[index].y = rowY;
                 rowFields[index].setWidth(axisWidth);
             }
+            transformResetButtons[rowIndex].x = resetX;
+            transformResetButtons[rowIndex].y = rowY;
         }
-
-        // Behavior: label left, stepper right.
-        spinLabel.x = 8;
-        spinLabel.y = 2 + Math.round((Theme.CONTROL_HEIGHT - spinLabel.textHeight) * 0.5 - 1);
-        var spinX = 92.0;
-        var spinWidth = Math.max(84, width - spinX - 8);
-        spinRow.x = spinX;
-        spinRow.y = 2;
-        spinRow.setWidth(spinWidth);
-
-        // Material: label left, swatches right.
-        colorLabel.x = 8;
-        colorLabel.y = 2 + Math.round((Theme.CONTROL_HEIGHT - colorLabel.textHeight) * 0.5 - 1);
-        colorRow.x = Math.max(92, width - colorRow.totalWidth() - 8);
-        colorRow.y = 2 + Math.round((Theme.CONTROL_HEIGHT - 18) * 0.5);
+        scaleLinkButton.x = linkX;
+        scaleLinkButton.y = 2 + 2 * INSPECTOR_ROW_HEIGHT;
 
         inspectorContentHeight = Math.round(y);
         var ratio = Math.min(1, inspectorContentMask.height / Math.max(1, inspectorContentHeight));
@@ -909,8 +881,8 @@ class EditorShell {
     }
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
-            name:String, speed:Float, color:Int, posX:Float = 0, posY:Float = 0,
-            posZ:Float = 0, rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
+            name:String, posX:Float = 0, posY:Float = 0, posZ:Float = 0,
+            rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
             scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
         selectedObjectIds = ids.copy();
         selectedObjectId = primaryId;
@@ -924,8 +896,6 @@ class EditorShell {
                 break;
             }
             objectNameField.setValue(name);
-            spinRow.setValue(speed);
-            colorRow.setColor(color);
             transformFields[0].setValue(posX);
             transformFields[1].setValue(posY);
             transformFields[2].setValue(posZ);
@@ -965,6 +935,15 @@ class EditorShell {
         scaleFields[0].setValue(scaleX);
         scaleFields[1].setValue(scaleY);
         scaleFields[2].setValue(scaleZ);
+    }
+
+    /** Toggle ratio-preserving scale edits without changing current values. */
+    function setScaleLinked(value:Bool, notify:Bool):Void {
+        if (scaleLinked == value && !notify) return;
+        scaleLinked = value;
+        scaleLinkButton.setIcon(scaleLinked ? Link : Unlink);
+        scaleLinkButton.setSelected(scaleLinked);
+        if (notify && onScaleLinkChanged != null) onScaleLinkChanged(scaleLinked);
     }
 
     function selectHierarchyRow(id:Int, control:Bool, shift:Bool):Void {

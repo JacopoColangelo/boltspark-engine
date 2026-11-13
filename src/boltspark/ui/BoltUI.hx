@@ -14,7 +14,7 @@ import boltspark.ui.HierarchyEntry;
  *  - Theme        — tokens (colors, metrics)
  *  - UiContext    — shared window/font state handed to widgets
  *  - InputAdapter — central keyboard/focus/pointer reporting (Gate 3)
- *  - widgets/     — button, stepper, swatch picker, console panel
+ *  - widgets/     — buttons, transform fields, hierarchy, console panel
  *  - EditorShell  — editor chrome: top bar, hierarchy, viewport, inspector,
  *                   console, status bar
  *
@@ -29,12 +29,13 @@ class BoltUI {
     public var onCreateObjectAt:Null<Float->Float->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
-    public var onSpinSpeedChanged:Null<Float->Void>;
-    public var onColorChanged:Null<Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onRotationChanged:Null<Int->Float->Void>;
     public var onScaleChanged:Null<Int->Float->Void>;
+    /** Row index: 0 Position, 1 Rotation, 2 Scale. */
+    public var onTransformReset:Null<Int->Void>;
+    public var onScaleLinkChanged:Null<Bool->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     public var onTransformSpaceChanged:Null<Bool->Void>;
@@ -53,12 +54,14 @@ class BoltUI {
         shell.onObjectsSelected = function(ids, primary) {
             if (onObjectsSelected != null) onObjectsSelected(ids, primary);
         };
-        shell.onSpinSpeedChanged = function(v) if (onSpinSpeedChanged != null) onSpinSpeedChanged(v);
-        shell.onColorChanged = function(c) if (onColorChanged != null) onColorChanged(c);
         shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
         shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
         shell.onRotationChanged = function(axis, value) if (onRotationChanged != null) onRotationChanged(axis, value);
         shell.onScaleChanged = function(axis, value) if (onScaleChanged != null) onScaleChanged(axis, value);
+        shell.onTransformReset = function(row) if (onTransformReset != null) onTransformReset(row);
+        shell.onScaleLinkChanged = function(linked) {
+            if (onScaleLinkChanged != null) onScaleLinkChanged(linked);
+        };
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
         shell.onToolChanged = function(tool) if (onToolChanged != null) onToolChanged(tool);
         shell.onTransformSpaceChanged = function(local) {
@@ -99,10 +102,10 @@ class BoltUI {
     }
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
-            name:String, speed:Float, color:Int, posX:Float = 0, posY:Float = 0,
-            posZ:Float = 0, rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
+            name:String, posX:Float = 0, posY:Float = 0, posZ:Float = 0,
+            rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
             scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
-        shell.setSelectedObjects(ids, primaryId, name, speed, color, posX, posY, posZ,
+        shell.setSelectedObjects(ids, primaryId, name, posX, posY, posZ,
             rotX, rotY, rotZ, scaleX, scaleY, scaleZ);
     }
 

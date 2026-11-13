@@ -26,8 +26,12 @@ class Main extends hxd.App {
     var gizmo:TransformGizmo;
     var currentTool:Int = 0;
     var localTransformSpace:Bool = false;
+    var scaleProportionsLinked:Bool = false;
     var gizmoDragging:Bool = false;
     var gizmoHandle:Int = -1;
+    var dragStartScaleX:Float = 1;
+    var dragStartScaleY:Float = 1;
+    var dragStartScaleZ:Float = 1;
     // Gizmo drag pointer tracking. During a drag the window enters
     // relative mouse mode: the OS cursor is hidden and locked while raw
     // hardware deltas drive a virtual pointer, so drags continue
@@ -85,7 +89,7 @@ class Main extends hxd.App {
         cubePrimitive.addNormals();
         setupViewportScene();
         gizmo = new TransformGizmo(s3d);
-        addSceneObject("sampleCube", 0, Theme.CUBE_ORANGE);
+        addSceneObject("sampleCube", 0);
 
         s3d.camera.pos.set(5.8, 4.2, 6.4);
         s3d.camera.target.set(0, 0, 0);
@@ -109,6 +113,8 @@ class Main extends hxd.App {
         boltUI.onTransformChanged = applyTransformChange;
         boltUI.onRotationChanged = applyRotationChange;
         boltUI.onScaleChanged = applyScaleChange;
+        boltUI.onTransformReset = resetTransformRow;
+        boltUI.onScaleLinkChanged = setScaleProportionsLinked;
         boltUI.onToolChanged = setEditorTool;
         boltUI.onTransformSpaceChanged = setTransformSpace;
         boltUI.onViewportHover = onViewportHover;
@@ -120,24 +126,6 @@ class Main extends hxd.App {
         refreshHierarchy();
         selectSceneObject(sceneObjects[0].id);
 
-        boltUI.onSpinSpeedChanged = function(v:Float) {
-            var selected = getSelectedObject();
-            if (selected == null) return;
-            for (sceneObject in sceneObjects) {
-                if (selectedObjectIds.indexOf(sceneObject.id) >= 0) sceneObject.spinSpeed = v;
-            }
-            boltUI.log('command: ${selected.name} spin speed = ${Std.string(v)}');
-        };
-        boltUI.onColorChanged = function(color:Int) {
-            var selected = getSelectedObject();
-            if (selected == null) return;
-            for (sceneObject in sceneObjects) {
-                if (selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
-                sceneObject.color = color;
-                sceneObject.mesh.material.color.setColor(color);
-            }
-            boltUI.log('command: ${selected.name} base color = 0x' + StringTools.hex(color, 6));
-        };
         boltUI.onObjectNameChanged = function(name:String) {
             var selected = getSelectedObject();
             if (selected == null) return;
@@ -155,14 +143,8 @@ class Main extends hxd.App {
 
     override function update(dt:Float):Void {
         boltUI.update(dt);
-
-        // Visible motion confirms the 3D update path is alive; the editor
-        // controls the rate through the inspector stepper.
-        for (sceneObject in sceneObjects) {
-            sceneObject.mesh.rotate(0.0, dt * sceneObject.spinSpeed, 0.0);
-        }
         gizmo.follow();
-        // The selection outline must track spinning/moving objects every frame.
+        // The selection outline tracks transform edits and gizmo drags.
         refreshSelectionOutline();
     }
 
@@ -223,10 +205,14 @@ class Main extends hxd.App {
         return Math.round(value * 100) / 100;
     }
 
-    /** Euler degrees (X, Y, Z) read from an object's rotation quaternion. */
+    /**
+     * Editor Euler degrees read from an engine quaternion. Boltspark's editor
+     * rotation convention maps editor X/Z to Heaps Z/X; Y is shared.
+     */
     function rotationDegrees(mesh:h3d.scene.Object):h3d.Vector {
-        var euler = mesh.getRotationQuat().toEuler();
-        return new h3d.Vector(radToDeg(euler.x), radToDeg(euler.y), radToDeg(euler.z));
+        var engineEuler = mesh.getRotationQuat().toEuler();
+        return new h3d.Vector(radToDeg(engineEuler.z), radToDeg(engineEuler.y),
+            radToDeg(engineEuler.x));
     }
 
     function applyTransformChange(axis:Int, value:Float):Void {
@@ -250,7 +236,7 @@ class Main extends hxd.App {
             default: current.z = degrees;
         }
         var quat = new h3d.Quat();
-        quat.initRotation(degToRad(current.x), degToRad(current.y), degToRad(current.z));
+        quat.initRotation(degToRad(current.z), degToRad(current.y), degToRad(current.x));
         selected.mesh.setRotationQuat(quat);
         boltUI.log('command: ${selected.name} rotation.${axisName(axis)} = ${round2(degrees)} deg');
     }
@@ -260,12 +246,62 @@ class Main extends hxd.App {
         if (selected == null) return;
         // Guard against zero/negative scale which collapses the mesh.
         var clamped = Math.max(0.01, value);
-        switch (axis) {
-            case 0: selected.mesh.scaleX = clamped;
-            case 1: selected.mesh.scaleY = clamped;
-            default: selected.mesh.scaleZ = clamped;
+        if (scaleProportionsLinked) {
+            var previous = switch (axis) {
+                case 0: selected.mesh.scaleX;
+                case 1: selected.mesh.scaleY;
+                default: selected.mesh.scaleZ;
+            };
+            var ratio = clamped / Math.max(0.01, previous);
+            selected.mesh.scaleX = clampedScale(selected.mesh.scaleX * ratio);
+            selected.mesh.scaleY = clampedScale(selected.mesh.scaleY * ratio);
+            selected.mesh.scaleZ = clampedScale(selected.mesh.scaleZ * ratio);
+            boltUI.log('command: ${selected.name} proportional scale = '
+                + scaleDescription(selected.mesh));
+        } else {
+            switch (axis) {
+                case 0: selected.mesh.scaleX = clamped;
+                case 1: selected.mesh.scaleY = clamped;
+                default: selected.mesh.scaleZ = clamped;
+            }
+            boltUI.log('command: ${selected.name} scale.${axisName(axis)} = ${round2(clamped)}');
         }
-        boltUI.log('command: ${selected.name} scale.${axisName(axis)} = ${round2(clamped)}');
+        pushInspectorTransform(selected);
+    }
+
+    static inline function clampedScale(value:Float):Float {
+        return Math.max(0.01, Math.min(1000, value));
+    }
+
+    function scaleDescription(mesh:h3d.scene.Object):String {
+        return '(${round2(mesh.scaleX)}, ${round2(mesh.scaleY)}, ${round2(mesh.scaleZ)})';
+    }
+
+    function setScaleProportionsLinked(linked:Bool):Void {
+        scaleProportionsLinked = linked;
+        boltUI.log('inspector: scale proportions ${linked ? "linked" : "unlinked"}');
+    }
+
+    /** Reset Position/Rotation/Scale to their canonical transform values. */
+    function resetTransformRow(row:Int):Void {
+        var selected = getSelectedObject();
+        if (selected == null) return;
+        var rowName:String;
+        switch (row) {
+            case 0:
+                selected.mesh.setPosition(0, 0, 0);
+                rowName = "position";
+            case 1:
+                selected.mesh.setRotationQuat(new h3d.Quat());
+                rowName = "rotation";
+            default:
+                selected.mesh.scaleX = 1;
+                selected.mesh.scaleY = 1;
+                selected.mesh.scaleZ = 1;
+                rowName = "scale";
+        }
+        pushInspectorTransform(selected);
+        boltUI.log('command: ${selected.name} reset ${rowName}');
     }
 
     static function axisName(axis:Int):String {
@@ -310,6 +346,9 @@ class Main extends hxd.App {
         dragLastY = y;
         dragVirtualX = x;
         dragVirtualY = y;
+        dragStartScaleX = selected.mesh.scaleX;
+        dragStartScaleY = selected.mesh.scaleY;
+        dragStartScaleZ = selected.mesh.scaleZ;
         // Use Heaps' authoritative client coordinates rather than rebuilding
         // them from layout floats; this is the exact OS position to restore.
         dragRestoreX = nativeWindow.mouseX;
@@ -417,11 +456,30 @@ class Main extends hxd.App {
             case RotateQuat(q):
                 selected.mesh.setRotationQuat(q);
             case ScaleValues(sx, sy, sz):
-                selected.mesh.scaleX = sx;
-                selected.mesh.scaleY = sy;
-                selected.mesh.scaleZ = sz;
+                if (scaleProportionsLinked) {
+                    var ratio = linkedGizmoScaleRatio(sx, sy, sz);
+                    selected.mesh.scaleX = clampedScale(dragStartScaleX * ratio);
+                    selected.mesh.scaleY = clampedScale(dragStartScaleY * ratio);
+                    selected.mesh.scaleZ = clampedScale(dragStartScaleZ * ratio);
+                } else {
+                    selected.mesh.scaleX = sx;
+                    selected.mesh.scaleY = sy;
+                    selected.mesh.scaleZ = sz;
+                }
         }
         pushInspectorTransform(selected);
+    }
+
+    /** Ratio represented by the active scale handle's unlinked result. */
+    function linkedGizmoScaleRatio(sx:Float, sy:Float, sz:Float):Float {
+        return switch (gizmoHandle) {
+            case TransformGizmo.HANDLE_AXIS_Y, TransformGizmo.HANDLE_PLANE_YZ:
+                sy / Math.max(0.01, dragStartScaleY);
+            case TransformGizmo.HANDLE_AXIS_Z, TransformGizmo.HANDLE_PLANE_ZX:
+                sz / Math.max(0.01, dragStartScaleZ);
+            default:
+                sx / Math.max(0.01, dragStartScaleX);
+        };
     }
 
     /** Live inspector values while a gizmo drag is in progress. */
@@ -484,15 +542,15 @@ class Main extends hxd.App {
         }
     }
 
-    function addSceneObject(name:String, x:Float, color:Int, z:Float = 0):SceneObject {
+    function addSceneObject(name:String, x:Float, z:Float = 0):SceneObject {
         var mesh = new h3d.scene.Mesh(cubePrimitive, s3d);
         mesh.name = name;
         mesh.setPosition(x, 0, z);
-        mesh.material.color.setColor(color);
+        mesh.material.color.setColor(Theme.CUBE_ORANGE);
         mesh.material.shadows = false;
         mesh.material.specularAmount = 0.18;
         mesh.material.specularPower = 24;
-        var sceneObject = new SceneObject(nextObjectId++, mesh, color);
+        var sceneObject = new SceneObject(nextObjectId++, mesh);
         sceneObjects.push(sceneObject);
         return sceneObject;
     }
@@ -516,10 +574,8 @@ class Main extends hxd.App {
     }
 
     function createCubeAtPosition(x:Float, z:Float):Void {
-        var colors = [Theme.CUBE_ORANGE, Theme.CUBE_STEEL, Theme.CUBE_MOSS, Theme.CUBE_VIOLET];
-        var color = colors[sceneObjects.length % colors.length];
         var name = "Cube" + nextObjectId;
-        var sceneObject = addSceneObject(name, x, color, z);
+        var sceneObject = addSceneObject(name, x, z);
         refreshHierarchy();
         selectSceneObject(sceneObject.id);
         boltUI.log("scene: created " + name);
@@ -570,13 +626,12 @@ class Main extends hxd.App {
     function refreshSelectionInspector():Void {
         var selected = getSelectedObject();
         if (selected == null) {
-            boltUI.setSelectedObjects(selectedObjectIds, -1, "", 0, 0);
+            boltUI.setSelectedObjects(selectedObjectIds, -1, "");
             return;
         }
         var rotation = rotationDegrees(selected.mesh);
         boltUI.setSelectedObjects(selectedObjectIds, selected.id,
-            selected.name, selected.spinSpeed, selected.color,
-            selected.mesh.x, selected.mesh.y, selected.mesh.z,
+            selected.name, selected.mesh.x, selected.mesh.y, selected.mesh.z,
             rotation.x, rotation.y, rotation.z,
             selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
     }
@@ -618,27 +673,33 @@ class Main extends hxd.App {
         groundGrid = new h3d.scene.Graphics(s3d);
         groundGrid.name = "EditorGrid";
         groundGrid.material.mainPass.depthWrite = false;
+        // Draw the grid before scene geometry and editor overlays. Both the
+        // grid and selection outline are screen-space Graphics lines, so an
+        // explicit layer prevents material sorting from painting grid pixels
+        // over the outline where their projections cross.
+        groundGrid.material.mainPass.layer = -10;
         var extent = 20;
         var gridY = -0.505;
         for (i in -extent...(extent + 1)) {
             var major = i % 5 == 0;
-            groundGrid.lineStyle(major ? 1.25 : 1.0,
+            groundGrid.lineStyle(major ? 1.0 : 0.75,
                 major ? 0x384450 : 0x252D37, 1);
             groundGrid.moveTo(i, gridY, -extent);
             groundGrid.lineTo(i, gridY, extent);
             groundGrid.moveTo(-extent, gridY, i);
             groundGrid.lineTo(extent, gridY, i);
         }
-        groundGrid.lineStyle(1.8, Theme.AXIS_X, 1);
+        groundGrid.lineStyle(1.35, Theme.AXIS_X, 1);
         groundGrid.moveTo(-extent, gridY + 0.003, 0);
         groundGrid.lineTo(extent, gridY + 0.003, 0);
-        groundGrid.lineStyle(1.8, Theme.AXIS_Z, 1);
+        groundGrid.lineStyle(1.35, Theme.AXIS_Z, 1);
         groundGrid.moveTo(0, gridY + 0.003, -extent);
         groundGrid.lineTo(0, gridY + 0.003, extent);
 
         selectionOutline = new h3d.scene.Graphics(s3d);
         selectionOutline.name = "SelectionOutline";
         selectionOutline.material.mainPass.depthWrite = false;
+        selectionOutline.material.mainPass.layer = 10;
     }
 
     function refreshSelectionOutline():Void {

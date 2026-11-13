@@ -26,6 +26,9 @@ enum abstract UiIconKind(Int) from Int to Int {
     var BrandOuter = 20;
     var BrandBolt = 21;
     var StatusDot = 22;
+    var Link = 23;
+    var Unlink = 24;
+    var Reset = 25;
 }
 
 /** Analytic single-color editor icons; no icon font or bitmap asset. */

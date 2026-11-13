@@ -131,6 +131,7 @@ class TransformGizmo {
 	final drawPlaneN:h3d.Vector = new h3d.Vector();
 
 	// Rotation ring drag.
+	/** Engine-space axis for the editor's mapped X/Y/Z rotation handle. */
 	final ringAxis:h3d.Vector = new h3d.Vector();
 	final ringU:h3d.Vector = new h3d.Vector();
 	final ringV:h3d.Vector = new h3d.Vector();
@@ -248,6 +249,9 @@ class TransformGizmo {
 		var best = -1;
 		var bestDistance = PICK_PIXELS;
 		for (handle in activeHandles()) {
+			// Score each handle from only its own samples. Keeping prior handle
+			// samples here biases later rings and can mismatch visible colors.
+			samples.resize(0);
 			collectSamples(handle, ray, samples);
 			var distance = nearestSamplePixels(samples, px, py);
 			if (distance >= 0 && distance < bestDistance) {
@@ -302,7 +306,7 @@ class TransformGizmo {
 		}
 		// Keep the cached quaternion current in both modes, but only local
 		// handles need rebuilt when the object rotates. World handles remain
-		// fixed even while the sample cube is spinning.
+		// fixed even while the selected object is explicitly rotated.
 		if (rotated) {
 			lastQuat.load(quat);
 		}
@@ -354,16 +358,17 @@ class TransformGizmo {
 		} else if (currentTool == TOOL_ROTATE) {
 			if (handle <= HANDLE_AXIS_Z) {
 				dragKind = KRotRing;
-				// The ring axis follows the space toggle: a world axis, or
-				// the object's local axis rotated by its orientation.
-				var localAxis = axisVector(handle);
+				// Editor rotation X/Z map to the engine's Z/X axes respectively;
+				// rendering, picking, and transform application all use this same
+				// mapped axis. Y remains unchanged.
+				var localAxis = axisVector(rotationEngineAxis(handle));
 				if (gizmoSpace == SPACE_LOCAL) {
 					quatRotate(startQuat, localAxis, ringAxis);
 				} else {
 					ringAxis.load(localAxis);
 				}
 				ringAxis.normalize();
-				// Build a stable orthonormal in-plane basis for angle reads.
+				// Build a stable basis in the plane that is actually rendered.
 				var reference = new h3d.Vector(1, 0, 0);
 				if (Math.abs(ringAxis.x) > 0.9) reference.set(0, 1, 0);
 				ringU.load(ringAxis.cross(reference));
@@ -1001,14 +1006,18 @@ class TransformGizmo {
 		var quad = makeQuad();
 		var cube = new h3d.prim.Cube(1, 1, 1, true);
 		cube.addNormals();
-		var torus = makeTorusX(RING_RADIUS, RING_TUBE, RING_SEGMENTS, 10);
 		var centerBall = new h3d.prim.Sphere(CENTER_HALF * 1.2, 20, 14);
 		centerBall.addNormals();
 		for (axis in 0...3) {
 			moveShafts.push(createSolid(shaft, 'MoveAxis${axis}Shaft'));
 			moveHeads.push(createSolid(cone, 'MoveAxis${axis}Head'));
 			movePlanes.push(createSolid(quad, 'MovePlane${axis}'));
-			rotateRings.push(createSolid(torus, 'RotateRing${axis}'));
+			// Editor rotation X/Z map to engine Z/X. Build each colored ring on
+			// that mapped axis so its rendering and transform semantics agree.
+			rotateRings.push(createSolid(
+				makeAxisTorus(rotationEngineAxis(axis), RING_RADIUS, RING_TUBE,
+					RING_SEGMENTS, 10),
+				'RotateRing${axis}'));
 			scaleShafts.push(createSolid(shaft, 'ScaleAxis${axis}Shaft'));
 			scaleHeads.push(createSolid(cube, 'ScaleAxis${axis}Head'));
 			scalePlanes.push(createSolid(quad, 'ScalePlane${axis}'));
@@ -1111,11 +1120,13 @@ class TransformGizmo {
 			case TOOL_ROTATE:
 				var interiorActive = HANDLE_CENTER == hoverHandle
 					|| HANDLE_CENTER == dragHandle;
+				var localRotation = gizmoSpace == SPACE_LOCAL
+					? attached.getRotationQuat().clone()
+					: new h3d.Quat();
 				for (axisIndex in 0...3) {
 					var active = axisIndex == hoverHandle || axisIndex == dragHandle;
-					var axis = gizmoAxis(axisIndex);
 					rotateRings[axisIndex].setPosition(0, 0, 0);
-					rotateRings[axisIndex].setDirection(axis);
+					rotateRings[axisIndex].setRotationQuat(localRotation.clone());
 					rotateRings[axisIndex].setScale(1);
 					// Arc-ball interior hover/drag slightly brightens every
 					// ring as a hint that the whole disc rotates freely.
@@ -1219,10 +1230,14 @@ class TransformGizmo {
 		return primitive;
 	}
 
-	static function makeTorusX(radius:Float, tube:Float, majorSegments:Int,
-			minorSegments:Int):h3d.prim.Polygon {
+	/** Torus whose plane and normal exactly match ringSamples for `axis`. */
+	static function makeAxisTorus(axis:Int, radius:Float, tube:Float,
+			majorSegments:Int, minorSegments:Int):h3d.prim.Polygon {
 		var points:Array<h3d.col.Point> = [];
 		var indexes = new hxd.IndexBuffer();
+		var normal = axisVector(axis);
+		var u = perpendicularU(axis);
+		var v = perpendicularV(axis);
 		for (major in 0...majorSegments) {
 			var a = major / majorSegments * Math.PI * 2;
 			var ca = Math.cos(a);
@@ -1230,7 +1245,11 @@ class TransformGizmo {
 			for (minor in 0...minorSegments) {
 				var b = minor / minorSegments * Math.PI * 2;
 				var radial = radius + Math.cos(b) * tube;
-				points.push(new h3d.col.Point(Math.sin(b) * tube, ca * radial, sa * radial));
+				var normalOffset = Math.sin(b) * tube;
+				points.push(new h3d.col.Point(
+					u.x * ca * radial + v.x * sa * radial + normal.x * normalOffset,
+					u.y * ca * radial + v.y * sa * radial + normal.y * normalOffset,
+					u.z * ca * radial + v.z * sa * radial + normal.z * normalOffset));
 			}
 		}
 		for (major in 0...majorSegments) {
@@ -1264,8 +1283,9 @@ class TransformGizmo {
 	}
 
 	function ringSamples(axis:Int, radius:Float, out:Array<h3d.Vector>):Void {
-		var worldU = gizmoDirection(perpendicularU(axis));
-		var worldV = gizmoDirection(perpendicularV(axis));
+		var engineAxis = rotationEngineAxis(axis);
+		var worldU = gizmoDirection(perpendicularU(engineAxis));
+		var worldV = gizmoDirection(perpendicularV(engineAxis));
 		for (segment in 0...RING_SEGMENTS) {
 			var angle = segment / RING_SEGMENTS * Math.PI * 2;
 			var cos = Math.cos(angle) * radius;
@@ -1275,6 +1295,18 @@ class TransformGizmo {
 				worldU.y * cos + worldV.y * sin,
 				worldU.z * cos + worldV.z * sin));
 		}
+	}
+
+	/**
+	 * Convert an editor rotation component to the engine axis used to apply it.
+	 * The editor convention swaps X/Z while preserving Y.
+	 */
+	static inline function rotationEngineAxis(axis:Int):Int {
+		return switch (axis) {
+			case HANDLE_AXIS_X: HANDLE_AXIS_Z;
+			case HANDLE_AXIS_Z: HANDLE_AXIS_X;
+			default: HANDLE_AXIS_Y;
+		};
 	}
 
 	static function perpendicularU(axis:Int):h3d.Vector {

@@ -182,8 +182,8 @@ redraws per frame.
 **Exit criteria**
 - [x] All three tools show their gizmo at the selection with hover highlighting and screen-space picking (`bin/gizmo-runlog-*.txt`).
 - [x] Two-axis plane drags lock the third axis (plane.xy drag ended at (-0.02, 0.87, 0), z = 0 exactly).
-- [x] Rotate rings apply ring-plane rotation; the omni ball rotates free arc-ball style (euler results well beyond the object's passive spin).
-- [x] WORLD is the default and keeps the rotation rings fixed while the object spins; LOCAL rotates drawing, picking, and drag constraints for Move/Rotate/Scale from the same object-space basis (focused evidence: spinning cube Local X = (0.69, 0, -0.72), then World X = (1, 0, 0)).
+- [x] Rotate rings apply ring-plane rotation; the omni ball rotates free arc-ball style across multiple world axes.
+- [x] WORLD is the default and keeps the rotation rings scene-aligned; after an explicit object rotation, LOCAL rotates drawing, picking, and drag constraints for Move/Rotate/Scale from the same object-space basis (focused evidence: Local X = (0.69, 0, -0.72), then World X = (1, 0, 0)).
 - [x] The Move center square translates freely in the camera view plane (focused probe: (0, 0, 0) → (-0.72, 0.5, 0.32)).
 - [x] The omni center uses a virtual hemisphere (not the former z=0 circle), so a center-to-right drag tumbles around camera up instead of degenerating into screen roll (focused runs consistently produced large non-spin X/Z components, greater than 60° each).
 - [x] Scale handles scale only their axes; uniform scaling preserves ratios from a prior axis drag ((23.99, 12.43, 12.43) = ×1.93 on all three).

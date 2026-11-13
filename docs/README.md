@@ -6,7 +6,7 @@ The proof slice contains:
 
 - one native Windows desktop window;
 - Heaps `hxd.App` owns startup, frame lifecycle, input routing, and the standard 2D/3D scenes;
-- `h3d` renders a simple rotating test mesh through the DX12 driver;
+- `h3d` renders a static orange editor cube through the DX12 driver;
 - `h2d` renders a native editor chrome overlay;
 - a native Heaps interactive control verifies mouse input;
 - the UI responds to native window resizing.
@@ -106,9 +106,9 @@ The development output is HashLink bytecode (`bin/boltspark.hl`); the native Win
 ## What you should see
 
 - A native Windows window titled `Boltspark Engine`.
-- A 3D cube rotating in the transparent center viewport using the DX12 driver (runtime log prints `[M0] renderer driver = h3d.impl.DX12Driver`).
-- Editor chrome drawn with H2D: top bar (`BOLTSPARK`), left hierarchy (`sampleCube` + `Test native input`), right inspector (`Spin speed (rad/s)` stepper and `Base color` swatches), an editor console below the viewport, and a bottom status bar with central input diagnostics.
-- Clicking `Test native input` (or the swatches / numeric property arrows) logs `command: ...` lines into the console; swatches change the cube color live; arrow stepping and horizontal value scrubbing change the spin rate live.
+- A static orange 3D cube in the transparent center viewport using the DX12 driver (runtime log prints `[M0] renderer driver = h3d.impl.DX12Driver`).
+- Editor chrome drawn with H2D: top bar (`BOLTSPARK`), left hierarchy, Transform inspector with Position/Rotation/Scale fields, an editor console below the viewport, and a bottom status bar.
+- Transform fields support arrow stepping, horizontal scrubbing, and keyboard entry. Each row has a reset action; Scale also has a chain toggle that preserves existing axis proportions for field and gizmo scaling.
 - Resizing the OS window redraws the editor chrome to the new dimensions.
 
 ## Windows native release

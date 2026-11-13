@@ -5,13 +5,14 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 ## What is working (M0)
 
 - A native Windows 11 x64 desktop window ("Boltspark Engine") booted by the HashLink VM, rendering through the **DirectX 12** Heaps driver (positively identified at runtime as `h3d.impl.DX12Driver`).
-- A rotating 3D mesh in `s3d` behind a native `h2d` editor chrome overlay.
+- A static orange editor cube in `s3d` behind a native `h2d` editor chrome overlay.
 - A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
 - A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter, analytic anti-aliased icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - All three transform tools drive viewport gizmos: Move offers axis, two-axis plane, and center free-view-plane drags; Rotate offers axis rings plus a true virtual-sphere omni arc-ball; Scale offers axis/plane/uniform scaling. A clickable WORLD/LOCAL viewport control changes the shared axis frame (WORLD is the default), all changes flow through the editor command path with live inspector updates, and number-row shortcuts 1/2/3 switch tools.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
 - Inspector numeric fields support compact up/down stepping, horizontal drag scrubbing, and keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
+- Position, Rotation, and Scale rows have one-click canonical resets; Scale can link its axes to preserve the current X/Y/Z proportions across field edits and gizmo drags.
 - Editor commands flow UI → command → engine object (widgets never mutate engine state directly).
 
 ## Hard platform policy
