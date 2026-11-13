@@ -93,7 +93,21 @@ class Theme {
     public static inline var AXIS_XY_HOVER:Int = 0xE8D96A;
     public static inline var AXIS_YZ_HOVER:Int = 0x78D6E8;
     public static inline var AXIS_ZX_HOVER:Int = 0xD0A2E8;
-    // Tool-neutral gizmo handles (omni rotation ball, uniform scale box).
+    // Vivid viewport gizmo colors - deliberately more saturated than the
+    // softer inspector label colors above, matching the Unreal reference.
+    public static inline var GIZMO_AXIS_X:Int = 0xE8443C;
+    public static inline var GIZMO_AXIS_Y:Int = 0x33C85A;
+    public static inline var GIZMO_AXIS_Z:Int = 0x3D6EF5;
+    public static inline var GIZMO_AXIS_X_HOVER:Int = 0xFF7A6E;
+    public static inline var GIZMO_AXIS_Y_HOVER:Int = 0x63E88F;
+    public static inline var GIZMO_AXIS_Z_HOVER:Int = 0x7A9CFF;
+    public static inline var GIZMO_PLANE_XY:Int = 0xD8C020;
+    public static inline var GIZMO_PLANE_YZ:Int = 0x20B8D8;
+    public static inline var GIZMO_PLANE_ZX:Int = 0xA855D6;
+    public static inline var GIZMO_PLANE_XY_HOVER:Int = 0xF0DC3C;
+    public static inline var GIZMO_PLANE_YZ_HOVER:Int = 0x55D8F0;
+    public static inline var GIZMO_PLANE_ZX_HOVER:Int = 0xC678F0;
+    // Tool-neutral gizmo handles (uniform scale box, move center ball).
     public static inline var GIZMO_NEUTRAL:Int = 0x9AA0A8;
     public static inline var GIZMO_NEUTRAL_HOVER:Int = 0xC8CDD4;
 

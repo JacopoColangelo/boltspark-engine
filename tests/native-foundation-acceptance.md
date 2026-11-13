@@ -74,7 +74,7 @@ Executed on 2026-11-12 with the automated Win32 probe (`bin/verify-gizmo-drag.ps
 - [x] The Move tool shows a three-axis gizmo at the primary selection's position, rendered in `s3d` through the scene camera with always-on-top depth testing (now part of the full three-tool gizmo suite below; the Rotate/Scale-reserved behavior it references was superseded by `bin/verify-transform-gizmo.ps1` evidence).
 - [x] Hovering an axis highlights it; picking compares projected handle samples against a 14-pixel screen-space threshold, keeping interaction stable across camera distance.
 - [x] Pressing an axis starts a constrained drag that moves the object along that world axis only, with the gizmo following per frame and inspector transform values updating live (`bin/gizmo-runlog.txt`).
-- [x] Drag motion solves the closest points between the pointer ray and the axis line (two-line solver) with press-time anchor compensation, so the object does not jump to the pointer on the first move (zero-delta at press verified).
+- [x] Drag motion captures a press-time projected axis mapping and applies accumulated pointer displacement from that unchanged anchor, so the object does not jump on the first move and sensitivity does not decay outside the viewport (zero-delta at press verified).
 - [x] Releasing a gizmo drag applies the final position through the editor command flow (`command: sampleCube position.x = ...`) and never falls through to viewport click-picking (`preventClick`; no `viewport:` line appears during drags in `bin/gizmo-runlog.txt`).
 - [x] Axis-locked motion both directions: drag 1 moved sampleCube position.x 0 → -1.93 with y/z locked at 0; drag 2 pressed on the moved cube's projected pixel and returned it to 0 (`bin/gizmo-runlog.txt`, `bin/gizmo-drag-evidence.txt`).
 
@@ -92,6 +92,8 @@ Executed on 2026-11-12 with the automated Win32 probe (`bin/verify-transform-giz
 - [x] Inspector shows Position / Rotation / Scale rows; gizmo drags update all nine values live during the drag, and Rotation/Scale fields commit through the same command flow as position fields.
 - [x] Selection outline traces the object's actual transformed silhouette (12 mesh edges through the object rotation/scale, inflated about the object center) instead of an axis-aligned boundary cube, and is redrawn per frame so it tracks spinning/moving objects.
 - [x] Reproducibility: two consecutive full-probe runs produced matching values (axis 0 → 0.73 → 0; plane z locked at 0), confirming a previously observed one-off drag flake was probe timing, not gizmo math.
+- [x] Production gizmo drags use Heaps `MouseMode.Relative`: the pinned hldx backend hides/clips the cursor, registers Windows Raw Input, suppresses legacy absolute `WM_MOUSEMOVE`, and reports hardware `lLastX/lLastY` to the drag callback. Release restores `Absolute` mode and the press-time client cursor position; no edge wrapping or cursor teleport loop is used.
+- [x] Beyond-edge regression: press-time screen Jacobians/tangents replace rays built from distant synthetic screen coordinates for move, ring rotation, and scale. A window-scoped unbounded X-axis probe produced 0.99, 9.95, and 19.89 world units for 1×, 10×, and 20× equal displacement; the 20× endpoint `(-971, 994)` was beyond both client edges and retained proportional motion with Y/Z locked. Ring rotation remained active at 10× displacement, while axis scale produced 1.95, 10.46, and 19.92 with its other axes fixed at 1 (`bin/gizmo-unbounded-drag-evidence.txt`).
 
 ## Platform and toolchain
 

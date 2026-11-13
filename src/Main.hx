@@ -28,6 +28,24 @@ class Main extends hxd.App {
     var localTransformSpace:Bool = false;
     var gizmoDragging:Bool = false;
     var gizmoHandle:Int = -1;
+    // Gizmo drag pointer tracking. During a drag the window enters
+    // relative mouse mode: the OS cursor is hidden and locked while raw
+    // hardware deltas drive a virtual pointer, so drags continue
+    // indefinitely past screen edges with no cursor wrapping or jumping.
+    // On release the mode switches back to Absolute, which unhides the
+    // cursor and restores it to the position it had when the drag began.
+    var dragLastX:Float = 0;
+    var dragLastY:Float = 0;
+    var dragVirtualX:Float = 0;
+    var dragVirtualY:Float = 0;
+    var dragRelative:Bool = false;
+    // Window-client position to restore the cursor to when the drag ends
+    // (Heaps' hldx path unbars the cursor but does not restore position).
+    var dragRestoreX:Int = 0;
+    var dragRestoreY:Int = 0;
+    // Synthetic-input verification probes drive drags with WM_MOUSEMOVE,
+    // which relative mode ignores; probes keep Absolute mode.
+    var inputProbeMode:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null;
 
     static inline var OUTLINE_INFLATE:Float = 1.015;
     static inline var OUTLINE_LIFT:Float = 0.008;
@@ -288,7 +306,17 @@ class Main extends hxd.App {
         if (handle < 0) return false;
         gizmoHandle = handle;
         gizmoDragging = true;
+        dragLastX = x;
+        dragLastY = y;
+        dragVirtualX = x;
+        dragVirtualY = y;
+        // Use Heaps' authoritative client coordinates rather than rebuilding
+        // them from layout floats; this is the exact OS position to restore.
+        dragRestoreX = nativeWindow.mouseX;
+        dragRestoreY = nativeWindow.mouseY;
         gizmo.beginDrag(handle, selected.mesh, viewportRay(x, y), pointer.x, pointer.y);
+        // Capture all gizmo anchors before raw input can invoke its callback.
+        beginRelativeDrag();
         var handleName = gizmo.describe(handle);
         boltUI.log('gizmo: drag ${selected.name} ${handleName}');
         Sys.println('[gizmo] drag start object=${selected.name} handle=${handleName}'
@@ -302,12 +330,86 @@ class Main extends hxd.App {
         if (!gizmoDragging) return;
         var selected = getSelectedObject();
         if (selected == null) {
-            gizmoDragging = false;
-            gizmo.endDrag();
+            cancelGizmoDrag();
             return;
         }
-        var pointer = viewportPointer(x, y);
-        var next = gizmo.dragTo(viewportRay(x, y), pointer.x, pointer.y);
+        // Absolute path (verification probes only): fold pixel motion into
+        // the virtual pointer. Relative-mode drags are driven by
+        // onDragRelativeMove instead; hxd delivers no EMove then.
+        dragVirtualX += x - dragLastX;
+        dragVirtualY += y - dragLastY;
+        dragLastX = x;
+        dragLastY = y;
+        applyDragTransform(selected);
+    }
+
+    /**
+     * Relative mouse mode for gizmo drags: the OS cursor is hidden and
+     * locked while raw hardware deltas drive the virtual drag pointer, so
+     * drags keep going however far the hand moves - no stalls, no cursor
+     * wrapping. Switching back to Absolute on drag end unhides the cursor
+     * and restores it to where it was when the drag started.
+     */
+    function beginRelativeDrag():Void {
+        dragRelative = false;
+        if (inputProbeMode) return;
+        try {
+            nativeWindow.mouseMode =
+                hxd.impl.MouseMode.Relative(onDragRelativeMove, true);
+            dragRelative = switch (nativeWindow.mouseMode) {
+                case Relative(_, _): true;
+                case _: false;
+            };
+            if (!dragRelative) {
+                Sys.println('[gizmo] relative mouse mode was rejected; using absolute fallback');
+            }
+        } catch (error:Dynamic) {
+            Sys.println('[gizmo] relative mouse mode unavailable: ${Std.string(error)}');
+        }
+    }
+
+    function endRelativeDrag():Void {
+        if (!dragRelative) return;
+        dragRelative = false;
+        try {
+            nativeWindow.mouseMode = hxd.impl.MouseMode.Absolute;
+            // The hldx path of set_mouseMode skips the position restore,
+            // so warp the cursor back to where the drag started by hand.
+            nativeWindow.setCursorPos(dragRestoreX, dragRestoreY);
+        } catch (error:Dynamic) {
+            Sys.println('[gizmo] mouse mode restore failed: ${Std.string(error)}');
+        }
+    }
+
+    /** Raw hardware deltas from the hidden-cursor drag drive the gizmo. */
+    function onDragRelativeMove(event:hxd.Event):Void {
+        if (!gizmoDragging || !dragRelative) return;
+        // Relative callbacks are private to the gizmo. Never turn them back
+        // into absolute EMove events, which would run the capture path twice.
+        event.propagate = false;
+        if (event.relX == 0 && event.relY == 0) return;
+        dragVirtualX += event.relX;
+        dragVirtualY += event.relY;
+        var selected = getSelectedObject();
+        if (selected == null) {
+            cancelGizmoDrag();
+            return;
+        }
+        applyDragTransform(selected);
+    }
+
+    /** Abort a drag safely if its selected object disappears mid-capture. */
+    function cancelGizmoDrag():Void {
+        gizmoDragging = false;
+        gizmoHandle = -1;
+        endRelativeDrag();
+        gizmo.endDrag();
+    }
+
+    /** Apply the current virtual drag pointer to the gizmo and the inspector. */
+    function applyDragTransform(selected:SceneObject):Void {
+        var pointer = viewportPointer(dragVirtualX, dragVirtualY);
+        var next = gizmo.dragTo(pointer.x, pointer.y);
         if (next == null) return;
         switch (next) {
             case MovePosition(nx, ny, nz):
@@ -334,6 +436,7 @@ class Main extends hxd.App {
     function onViewportRelease(x:Float, y:Float):Void {
         if (!gizmoDragging) return;
         gizmoDragging = false;
+        endRelativeDrag();
         var handle = gizmoHandle;
         gizmoHandle = -1;
         gizmo.endDrag();

@@ -1,6 +1,7 @@
-package boltspark.editor;
+﻿package boltspark.editor;
 
 import boltspark.ui.Theme;
+import h2d.BlendMode;
 
 /**
  * Result of one gizmo drag step. Main applies it to the scene object through
@@ -16,11 +17,13 @@ enum GizmoResult {
  * Viewport transform gizmo (Move / Rotate / Scale) drawn in s3d at the
  * primary selection's position.
  *
- * Rendering is line graphics through the same DX12 driver as the scene
- * (always-on-top lines that never write depth) in the Unreal reference style:
- * arrow shafts with wireframe cone heads, two-axis plane quads, rotation
- * rings around each axis, a screen-facing omni ring for free rotation, and
- * wireframe boxes for scale handles.
+ * Rendering is solid primitives only through the same DX12 driver as the
+ * scene (always-on-top meshes that never write depth), in the Unreal
+ * reference style: solid cylinder shafts with solid cone arrowheads,
+ * two-axis plane quads, solid torus rotation rings, and solid boxes for
+ * scale handles. Free rotation is an invisible arc-ball: any drag inside
+ * the projected rotation rings that misses an axis ring tumbles the
+ * object. No line graphics are used anywhere.
  *
  * All constrained-drag math lives here. Picking projects candidate handle
  * samples to engine pixels and compares them against the pointer, so hit
@@ -54,28 +57,37 @@ class TransformGizmo {
 	public static inline var SPACE_LOCAL:Int = 1;
 
 	static inline var AXIS_LENGTH:Float = 1.05;
-	static inline var HEAD_LENGTH:Float = 0.2;
-	static inline var HEAD_RADIUS:Float = 0.085;
+	static inline var HEAD_LENGTH:Float = 0.18;
+	static inline var HEAD_RADIUS:Float = 0.1;
 	static inline var PLANE_OFFSET:Float = 0.6;
 	static inline var PLANE_HALF:Float = 0.13;
-	static inline var RING_RADIUS:Float = 1.05;
-	static inline var OMNI_RADIUS:Float = 1.38;
-	static inline var OMNI_CENTER_RADIUS:Float = 0.34;
+	static inline var RING_RADIUS:Float = 0.8;
+	static inline var RING_TUBE:Float = 0.024;
 	static inline var BOX_HALF:Float = 0.075;
 	static inline var CENTER_HALF:Float = 0.1;
+	static inline var SHAFT_RADIUS:Float = 0.026;
 	static inline var SHAFT_END:Float = 0.92;
 	static inline var SHAFT_PICK_START:Float = 0.2;
 	static inline var PICK_PIXELS:Float = 14;
-	static inline var LINE_WIDTH:Float = 2.2;
-	static inline var LINE_WIDTH_ACTIVE:Float = 3.2;
-	static inline var RING_WIDTH:Float = 1.8;
-	static inline var RING_WIDTH_ACTIVE:Float = 3.0;
 	static inline var RING_SEGMENTS:Int = 48;
-	static inline var CONE_SEGMENTS:Int = 10;
 	static inline var OMNI_MIN_RADIUS:Float = 4;
+	/** Local projection sample used to build stable pixels-per-world mappings. */
+	static inline var SCREEN_PROJECTION_STEP:Float = 0.1;
+	static inline var SCREEN_EPSILON_SQ:Float = 1e-8;
+	static inline var PLANE_SCREEN_SIN_EPSILON:Float = 1e-4;
 
-	final graphics:h3d.scene.Graphics;
-	/** Reusable solver result (the gizmo solves one axis at a time). */
+	final solidRoot:h3d.scene.Object;
+	/** Scene reference for camera queries (the root the gizmo lives in). */
+	final scene:h3d.scene.Scene;
+	final moveShafts:Array<h3d.scene.Mesh> = [];
+	final moveHeads:Array<h3d.scene.Mesh> = [];
+	final movePlanes:Array<h3d.scene.Mesh> = [];
+	var moveCenter:h3d.scene.Mesh;
+	final rotateRings:Array<h3d.scene.Mesh> = [];
+	final scaleShafts:Array<h3d.scene.Mesh> = [];
+	final scaleHeads:Array<h3d.scene.Mesh> = [];
+	final scalePlanes:Array<h3d.scene.Mesh> = [];
+	var scaleCenter:h3d.scene.Mesh;	/** Reusable solver result (the gizmo solves one axis at a time). */
 	final closest:AxisRayClosest = new AxisRayClosest();
 	var attached:h3d.scene.Object;
 	var currentTool:Int = TOOL_MOVE;
@@ -93,17 +105,24 @@ class TransformGizmo {
 	final dragStartPos:h3d.Vector = new h3d.Vector();
 	final startQuat:h3d.Quat = new h3d.Quat();
 	final scaleStart:h3d.Vector = new h3d.Vector(1, 1, 1);
+	/** Unbounded engine-pixel pointer captured when the drag begins. */
+	final dragStartPointer:h3d.Vector = new h3d.Vector();
+	/** Projected pixels per world unit for axis move/scale drags. */
+	final dragScreenAxis:h3d.Vector = new h3d.Vector();
+	var dragScreenAxisLengthSq:Float = 0;
 
 	// Move axis drag.
 	final dragAxis:h3d.Vector = new h3d.Vector();
-	var dragAnchorT:Float = 0;
 
 	// Move/scale plane drag (two-axis handles). Captured at beginDrag and
 	// never touched by drawing (drawing uses the draw* scratch basis below).
 	final planeU:h3d.Vector = new h3d.Vector();
 	final planeV:h3d.Vector = new h3d.Vector();
 	final planeNormal:h3d.Vector = new h3d.Vector();
-	final planeAnchor:h3d.Vector = new h3d.Vector();
+	/** Projected pixels per world unit for the captured plane basis. */
+	final planeScreenU:h3d.Vector = new h3d.Vector();
+	final planeScreenV:h3d.Vector = new h3d.Vector();
+	var planeScreenDet:Float = 0;
 
 	// Scratch plane basis for drawing/picking so redraws during a drag can
 	// never corrupt the drag's captured plane frame.
@@ -115,19 +134,26 @@ class TransformGizmo {
 	final ringAxis:h3d.Vector = new h3d.Vector();
 	final ringU:h3d.Vector = new h3d.Vector();
 	final ringV:h3d.Vector = new h3d.Vector();
-	var ringLastAngle:Float = 0;
 	var ringDelta:Float = 0;
+	/** Fixed press-time ring tangent in pixels per radian. */
+	final ringScreenTangent:h3d.Vector = new h3d.Vector();
+	var ringScreenTangentLengthSq:Float = 0;
 
 	// Omni trackball drag.
 	final omniCenterPx:h3d.Vector = new h3d.Vector();
 	var omniRadiusPx:Float = 100;
 	var omniPrevS:h3d.Vector;
+	/** Raw previous pointer, used for the past-the-rim continuation. */
+	var omniPrevPx:Float = 0;
+	var omniPrevPy:Float = 0;
 	final omniQuat:h3d.Quat = new h3d.Quat();
 
 	// Scale drag anchors.
 	var scaleAxisT0:Float = 1;
 	var scaleDist0:Float = 1;
 	final scaleCenterPx:h3d.Vector = new h3d.Vector();
+	final scaleScreenDirection:h3d.Vector = new h3d.Vector();
+	var scaleDirectionPending:Bool = false;
 
 	/** Scratch vectors for drag math (one call at a time). */
 	final tmpA:h3d.Vector = new h3d.Vector();
@@ -135,11 +161,11 @@ class TransformGizmo {
 	final tmpC:h3d.Vector = new h3d.Vector();
 
 	public function new(parent:h3d.scene.Object) {
-		graphics = new h3d.scene.Graphics(parent);
-		graphics.name = "TransformGizmo";
-		graphics.material.mainPass.depthWrite = false;
-		graphics.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
-		graphics.visible = false;
+		scene = parent.getScene();
+		solidRoot = new h3d.scene.Object(parent);
+		solidRoot.name = "TransformGizmoSolids";
+		buildSolidHandles();
+		solidRoot.visible = false;
 	}
 
 	/** Attach the gizmo to an object (or detach with null). */
@@ -229,13 +255,44 @@ class TransformGizmo {
 				best = handle;
 			}
 		}
+		// Free-rotate fallback: a pointer inside the projected gizmo that is
+		// not near an axis ring starts a free arc-ball rotation, so the whole
+		// ring interior is usable and no center ball handle is drawn.
+		if (best < 0 && currentTool == TOOL_ROTATE && insideGizmoDisc(px, py)) {
+			return HANDLE_CENTER;
+		}
 		return best;
+	}
+
+	/**
+	 * Projected screen-space radius (engine pixels) of the rotation gizmo,
+	 * measured along the camera's right axis.
+	 */
+	function projectedGizmoRadius():Float {
+		var center = new h3d.Vector();
+		projectToScreen(pointAt(0, 0, 0), center);
+		var basis = cameraBasis();
+		var edge = new h3d.Vector();
+		projectToScreen(pointAt(basis.ax.x * RING_RADIUS,
+			basis.ax.y * RING_RADIUS, basis.ax.z * RING_RADIUS), edge);
+		var dx = edge.x - center.x;
+		var dy = edge.y - center.y;
+		return Math.max(OMNI_MIN_RADIUS, Math.sqrt(dx * dx + dy * dy));
+	}
+
+	/** True when the engine-space pointer lies within the gizmo's disc. */
+	function insideGizmoDisc(px:Float, py:Float):Bool {
+		var center = new h3d.Vector();
+		projectToScreen(pointAt(0, 0, 0), center);
+		var dx = px - center.x;
+		var dy = py - center.y;
+		return Math.sqrt(dx * dx + dy * dy) < projectedGizmoRadius() * 0.85;
 	}
 
 	/** Keep the gizmo glued to the attached object; call per frame. */
 	public function follow():Void {
-		if (attached == null || !graphics.visible) return;
-		graphics.setPosition(attached.x, attached.y, attached.z);
+		if (attached == null || !solidRoot.visible) return;
+		solidRoot.setPosition(attached.x, attached.y, attached.z);
 		var quat = attached.getRotationQuat();
 		var moved = attached.x != lastPos.x || attached.y != lastPos.y
 			|| attached.z != lastPos.z;
@@ -272,29 +329,27 @@ class TransformGizmo {
 		dragStartPos.set(target.x, target.y, target.z);
 		startQuat.load(target.getRotationQuat());
 		scaleStart.set(target.scaleX, target.scaleY, target.scaleZ);
+		dragStartPointer.set(px, py, 0);
 		hoverHandle = -1;
 
 		if (currentTool == TOOL_MOVE) {
 			if (handle <= HANDLE_AXIS_Z) {
 				dragKind = KMoveAxis;
 				dragAxis.load(gizmoAxis(handle));
-				solveAxisRay(dragStartPos, dragAxis, ray, closest);
-				dragAnchorT = closest.valid ? closest.axisT : 0;
+				captureScreenDirection(dragAxis, dragScreenAxis);
+				dragScreenAxisLengthSq = screenLengthSq(dragScreenAxis);
 			} else if (handle == HANDLE_CENTER) {
 				// Free move: translate within the camera view plane.
 				dragKind = KMoveView;
-				planeNormal.load(cameraBasis().az);
-				planeAnchor.set(dragStartPos.x, dragStartPos.y, dragStartPos.z);
-				if (rayPlaneHit(ray, dragStartPos, planeNormal, tmpA)) {
-					planeAnchor.set(tmpA.x, tmpA.y, tmpA.z);
-				}
+				var basis = cameraBasis();
+				planeU.load(basis.ax);
+				planeV.load(basis.ay);
+				planeNormal.load(basis.az);
+				capturePlaneScreenBasis();
 			} else {
 				dragKind = KMovePlane;
 				planeBasis(handle, planeU, planeV, planeNormal);
-				planeAnchor.set(dragStartPos.x, dragStartPos.y, dragStartPos.z);
-				if (rayPlaneHit(ray, dragStartPos, planeNormal, tmpA)) {
-					planeAnchor.set(tmpA.x, tmpA.y, tmpA.z);
-				}
+				capturePlaneScreenBasis();
 			}
 		} else if (currentTool == TOOL_ROTATE) {
 			if (handle <= HANDLE_AXIS_Z) {
@@ -318,21 +373,17 @@ class TransformGizmo {
 				var hit = rayPlaneHit(ray, dragStartPos, ringAxis, tmpA);
 				var angle = 0.0;
 				if (hit) angle = planeAngle(tmpA);
-				ringLastAngle = angle;
 				ringDelta = 0;
+				captureRingScreenTangent(angle);
 			} else {
 				dragKind = KRotOmni;
 				projectToScreen(dragStartPos, omniCenterPx);
-				// The trackball radius in engine pixels, read from the drawn
-				// omni ring so drag mapping matches what is on screen.
-				var basis = cameraBasis();
-				projectToScreen(pointAt(basis.ax.x * OMNI_RADIUS,
-					basis.ax.y * OMNI_RADIUS, basis.ax.z * OMNI_RADIUS), tmpC);
-				var rdx = tmpC.x - omniCenterPx.x;
-				var rdy = tmpC.y - omniCenterPx.y;
-				omniRadiusPx = Math.max(8, Math.sqrt(rdx * rdx + rdy * rdy));
+				// The trackball radius in engine pixels matches the projected
+				// gizmo size, so a drag anywhere inside the rings maps onto
+				// the virtual sphere and the rim clamps to the equator.
+				omniRadiusPx = projectedGizmoRadius();
 				omniPrevS = new h3d.Vector();
-				omniPrevS.load(omniScreenVector(px, py, tmpA));
+				storeOmniPrev(px, py);
 				omniQuat.load(startQuat);
 			}
 		} else {
@@ -342,74 +393,84 @@ class TransformGizmo {
 				dragKind = KScaleAxis;
 				dragAxis.load(gizmoAxis(handle));
 				solveAxisRay(dragStartPos, dragAxis, ray, closest);
-				if (closest.valid && Math.abs(closest.axisT) > 0.05) {
+				if (closest.valid && closest.axisT > 0.05) {
 					scaleAxisT0 = closest.axisT;
 				}
+				captureScreenDirection(dragAxis, dragScreenAxis);
+				dragScreenAxisLengthSq = screenLengthSq(dragScreenAxis);
 			} else if (handle <= HANDLE_PLANE_ZX) {
 				dragKind = KScalePlane;
 				planeBasis(handle, planeU, planeV, planeNormal);
-				if (rayPlaneHit(ray, dragStartPos, planeNormal, tmpA)) {
-					scaleDist0 = Math.max(1e-6, tmpA.sub(dragStartPos).length());
-				} else {
-					scaleDist0 = 1;
-				}
+				captureScaleScreenDirection(px, py);
 			} else {
 				dragKind = KScaleUniform;
-				projectToScreen(dragStartPos, scaleCenterPx);
-				var dx = px - scaleCenterPx.x;
-				var dy = py - scaleCenterPx.y;
-				scaleDist0 = Math.max(OMNI_MIN_RADIUS, Math.sqrt(dx * dx + dy * dy));
+				captureScaleScreenDirection(px, py);
 			}
 		}
 		redraw();
 	}
 
 	/**
-	 * Move the drag for the current pointer ray. Returns the new transform,
-	 * or null when this step is degenerate (parallel ray, tiny trackball
-	 * radius) and the last valid state should be kept.
+	 * Move the drag to an unbounded engine-pixel pointer. Drag mappings are
+	 * captured at press time and consume screen displacement directly; no ray
+	 * is built from an off-screen coordinate, so sensitivity cannot flatten as
+	 * the virtual pointer travels farther beyond a monitor edge.
 	 */
-	public function dragTo(ray:h3d.col.Ray, px:Float, py:Float):Null<GizmoResult> {
+	public function dragTo(px:Float, py:Float):Null<GizmoResult> {
 		if (dragHandle < 0 || dragKind == null) return null;
 		return switch (dragKind) {
-			case KMoveAxis: dragMoveAxis(ray);
-			case KMovePlane, KMoveView: dragMovePlane(ray);
-			case KRotRing: dragRotateRing(ray);
+			case KMoveAxis: dragMoveAxis(px, py);
+			case KMovePlane, KMoveView: dragMovePlane(px, py);
+			case KRotRing: dragRotateRing(px, py);
 			case KRotOmni: dragRotateOmni(px, py);
-			case KScaleAxis: dragScaleAxis(ray);
-			case KScalePlane: dragScalePlane(ray);
+			case KScaleAxis: dragScaleAxis(px, py);
+			case KScalePlane: dragScalePlane(px, py);
 			case KScaleUniform: dragScaleUniform(px, py);
 		};
 	}
 
-	function dragMoveAxis(ray:h3d.col.Ray):Null<GizmoResult> {
-		solveAxisRay(dragStartPos, dragAxis, ray, closest);
-		if (!closest.valid) return null;
-		var delta = closest.axisT - dragAnchorT;
+	function dragMoveAxis(px:Float, py:Float):Null<GizmoResult> {
+		if (dragScreenAxisLengthSq < SCREEN_EPSILON_SQ) return null;
+		var dx = px - dragStartPointer.x;
+		var dy = py - dragStartPointer.y;
+		var delta = (dx * dragScreenAxis.x + dy * dragScreenAxis.y)
+			/ dragScreenAxisLengthSq;
 		return MovePosition(
 			dragStartPos.x + dragAxis.x * delta,
 			dragStartPos.y + dragAxis.y * delta,
 			dragStartPos.z + dragAxis.z * delta);
 	}
 
-	function dragMovePlane(ray:h3d.col.Ray):Null<GizmoResult> {
-		if (!rayPlaneHit(ray, dragStartPos, planeNormal, tmpA)) return null;
+	function dragMovePlane(px:Float, py:Float):Null<GizmoResult> {
+		var basisMagnitude = Math.sqrt(screenLengthSq(planeScreenU)
+			* screenLengthSq(planeScreenV));
+		if (basisMagnitude < SCREEN_EPSILON_SQ
+				|| Math.abs(planeScreenDet) < basisMagnitude * PLANE_SCREEN_SIN_EPSILON) {
+			return null;
+		}
+		var dx = px - dragStartPointer.x;
+		var dy = py - dragStartPointer.y;
+		// Invert the projected 2x2 plane basis. This is a press-time local
+		// screen mapping, so sensitivity remains constant even when the raw
+		// pointer has travelled many screens away.
+		var du = (dx * planeScreenV.y - dy * planeScreenV.x) / planeScreenDet;
+		var dv = (planeScreenU.x * dy - planeScreenU.y * dx) / planeScreenDet;
 		return MovePosition(
-			dragStartPos.x + (tmpA.x - planeAnchor.x),
-			dragStartPos.y + (tmpA.y - planeAnchor.y),
-			dragStartPos.z + (tmpA.z - planeAnchor.z));
+			dragStartPos.x + planeU.x * du + planeV.x * dv,
+			dragStartPos.y + planeU.y * du + planeV.y * dv,
+			dragStartPos.z + planeU.z * du + planeV.z * dv);
 	}
 
-	function dragRotateRing(ray:h3d.col.Ray):Null<GizmoResult> {
-		if (!rayPlaneHit(ray, dragStartPos, ringAxis, tmpA)) return null;
-		var angle = planeAngle(tmpA);
-		var step = angle - ringLastAngle;
-		// Normalize the step to (-pi, pi] so sweeps can accumulate turns.
-		while (step > Math.PI) step -= Math.PI * 2;
-		while (step <= -Math.PI) step += Math.PI * 2;
-		ringLastAngle = angle;
-		if (Math.abs(step) < 1e-9) return null;
-		ringDelta += step;
+	function dragRotateRing(px:Float, py:Float):Null<GizmoResult> {
+		if (ringScreenTangentLengthSq < SCREEN_EPSILON_SQ) return null;
+		var dx = px - dragStartPointer.x;
+		var dy = py - dragStartPointer.y;
+		// The press-time projected tangent is measured in pixels/radian.
+		// Projecting total raw motion onto it gives an unbounded angle with
+		// no atan2 radius falloff after the pointer passes a screen edge.
+		ringDelta = (dx * ringScreenTangent.x + dy * ringScreenTangent.y)
+			/ ringScreenTangentLengthSq;
+		if (Math.abs(ringDelta) < 1e-9) return null;
 		var quat = new h3d.Quat();
 		quat.initRotateAxis(ringAxis.x, ringAxis.y, ringAxis.z, ringDelta);
 		var result = new h3d.Quat();
@@ -420,21 +481,53 @@ class TransformGizmo {
 	}
 
 	function dragRotateOmni(px:Float, py:Float):Null<GizmoResult> {
-		var s = omniScreenVector(px, py, tmpA);
 		if (omniPrevS == null) return null;
-		var cx = omniPrevS.y * s.z - omniPrevS.z * s.y;
-		var cy = omniPrevS.z * s.x - omniPrevS.x * s.z;
-		var cz = omniPrevS.x * s.y - omniPrevS.y * s.x;
-		var dot = omniPrevS.dot(s);
-		var crossLength = Math.sqrt(cx * cx + cy * cy + cz * cz);
-		if (crossLength < 1e-6) {
-			omniPrevS.load(s);
-			return null;
-		}
-		var angle = Math.atan2(crossLength, dot);
-		if (angle < 1e-6) {
-			omniPrevS.load(s);
-			return null;
+		var prevDx = (omniPrevPx - omniCenterPx.x) / omniRadiusPx;
+		var prevDy = -(omniPrevPy - omniCenterPx.y) / omniRadiusPx;
+		var curDx = (px - omniCenterPx.x) / omniRadiusPx;
+		var curDy = -(py - omniCenterPx.y) / omniRadiusPx;
+		var prevR = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+		var r = Math.sqrt(curDx * curDx + curDy * curDy);
+		var cx:Float;
+		var cy:Float;
+		var cz:Float;
+		var angle:Float;
+		if (r <= 1 && prevR <= 1) {
+			// True trackball: both pointers are on the front hemisphere, so
+			// rotate about the axis that carries the previous surface point
+			// into the current one. s x prev (not prev x s) makes the near
+			// surface of the ball follow the pointer.
+			var s = omniScreenVector(px, py, tmpA);
+			cx = s.y * omniPrevS.z - s.z * omniPrevS.y;
+			cy = s.z * omniPrevS.x - s.x * omniPrevS.z;
+			cz = s.x * omniPrevS.y - s.y * omniPrevS.x;
+			var crossLength = Math.sqrt(cx * cx + cy * cy + cz * cz);
+			if (crossLength < 1e-6) {
+				storeOmniPrev(px, py);
+				return null;
+			}
+			angle = Math.atan2(crossLength, omniPrevS.dot(s));
+			if (angle < 1e-6) {
+				storeOmniPrev(px, py);
+				return null;
+			}
+		} else {
+			// Past the rim the sphere map saturates (the mapped point stops
+			// moving outward), which read as a clamp and then an inversion.
+			// Continue instead with the same surface rate about the in-plane
+			// axis perpendicular to the pointer motion, so the tumble keeps
+			// going the same way however far the cursor travels.
+			var mx = curDx - prevDx;
+			var my = curDy - prevDy;
+			var motion = Math.sqrt(mx * mx + my * my);
+			if (motion < 1e-6) {
+				storeOmniPrev(px, py);
+				return null;
+			}
+			cx = my;
+			cy = -mx;
+			cz = 0;
+			angle = motion;
 		}
 		// Map the view-space trackball axis into the world through the
 		// camera basis (right, up, toward-scene).
@@ -448,51 +541,61 @@ class TransformGizmo {
 		var quat = new h3d.Quat();
 		quat.initRotateAxis(worldAxis.x, worldAxis.y, worldAxis.z, angle);
 		omniQuat.multiply(quat, omniQuat);
-		omniPrevS.load(s);
+		storeOmniPrev(px, py);
 		var result = new h3d.Quat();
 		result.load(omniQuat);
 		return RotateQuat(result);
 	}
 
+	/** Cache the mapped ball point and raw pointer for the next step. */
+	function storeOmniPrev(px:Float, py:Float):Void {
+		omniPrevS.load(omniScreenVector(px, py, tmpA));
+		omniPrevPx = px;
+		omniPrevPy = py;
+	}
+
 	/**
-	 * Map an engine-space pointer to a unit hemisphere in view space. Inside
-	 * the drawn omni ring this is a true virtual sphere; outside it clamps to
-	 * the equator. Unlike the old z=0 circle mapping, horizontal/vertical
-	 * drags across the ball now tumble the object around camera-right/up axes
-	 * instead of degenerating into screen-axis roll.
+	 * Map an engine-space pointer to a unit point on the front hemisphere of
+	 * the virtual ball in view space (used for the trackball cross products
+	 * while both pointer positions stay inside the projected disc). Points
+	 * beyond the disc are clamped to the horizon and never drive rotation:
+	 * past-the-rim drags are handled by the explicit motion-based
+	 * continuation in dragRotateOmni, so they neither clamp nor invert.
 	 */
 	function omniScreenVector(px:Float, py:Float, out:h3d.Vector):h3d.Vector {
 		var x = (px - omniCenterPx.x) / omniRadiusPx;
 		var y = -(py - omniCenterPx.y) / omniRadiusPx;
-		var lengthSq = x * x + y * y;
-		if (lengthSq <= 1) {
-			out.set(x, y, Math.sqrt(Math.max(0, 1 - lengthSq)));
-		} else {
-			var invLength = 1 / Math.sqrt(lengthSq);
-			out.set(x * invLength, y * invLength, 0);
+		var rSq = x * x + y * y;
+		if (rSq > 1) {
+			var inv = 1 / Math.sqrt(rSq);
+			out.set(x * inv, y * inv, 0);
+			return out;
 		}
+		out.set(x, y, Math.sqrt(Math.max(0, 1 - rSq)));
 		return out;
 	}
 
-	function dragScaleAxis(ray:h3d.col.Ray):Null<GizmoResult> {
-		solveAxisRay(dragStartPos, dragAxis, ray, closest);
-		if (!closest.valid) return null;
-		var ratio = closest.axisT / scaleAxisT0;
+	function dragScaleAxis(px:Float, py:Float):Null<GizmoResult> {
+		if (dragScreenAxisLengthSq < SCREEN_EPSILON_SQ) return null;
+		var dx = px - dragStartPointer.x;
+		var dy = py - dragStartPointer.y;
+		var axisDelta = (dx * dragScreenAxis.x + dy * dragScreenAxis.y)
+			/ dragScreenAxisLengthSq;
+		var ratio = (scaleAxisT0 + axisDelta) / scaleAxisT0;
 		if (ratio <= 0) return null;
 		return scaleResult(dragHandle, ratio);
 	}
 
-	function dragScalePlane(ray:h3d.col.Ray):Null<GizmoResult> {
-		if (!rayPlaneHit(ray, dragStartPos, planeNormal, tmpA)) return null;
-		var ratio = tmpA.sub(dragStartPos).length() / scaleDist0;
+	function dragScalePlane(px:Float, py:Float):Null<GizmoResult> {
+		var ratio = screenScaleRatio(px, py);
+		if (ratio == null) return null;
 		if (ratio <= 0) return null;
 		return scaleResult(dragHandle, ratio);
 	}
 
 	function dragScaleUniform(px:Float, py:Float):Null<GizmoResult> {
-		var dx = px - scaleCenterPx.x;
-		var dy = py - scaleCenterPx.y;
-		var ratio = Math.sqrt(dx * dx + dy * dy) / scaleDist0;
+		var ratio = screenScaleRatio(px, py);
+		if (ratio == null) return null;
 		if (ratio <= 0) return null;
 		return scaleResult(HANDLE_CENTER, ratio);
 	}
@@ -530,8 +633,8 @@ class TransformGizmo {
 
 	function activeHandles():Array<Int> {
 		// The center handle is checked first so a pointer near the gizmo
-		// origin resolves to the free-move ball / omni ball / uniform box
-		// instead of an axis shaft sample that projects nearby.
+		// origin resolves to the free-move ball / free-rotate interior /
+		// uniform box instead of an axis shaft sample that projects nearby.
 		return switch (currentTool) {
 			case TOOL_MOVE: [HANDLE_CENTER, 0, 1, 2, 3, 4, 5];
 			case TOOL_ROTATE: [HANDLE_CENTER, 0, 1, 2];
@@ -549,10 +652,10 @@ class TransformGizmo {
 	 */
 	function collectSamples(handle:Int, ray:h3d.col.Ray, out:Array<h3d.Vector>):Void {
 		if (currentTool == TOOL_ROTATE) {
+			// HANDLE_CENTER has no samples of its own: pick() falls back to
+			// the whole ring interior for free arc-ball rotation.
 			if (handle <= HANDLE_AXIS_Z) {
 				ringSamples(handle, RING_RADIUS, out);
-			} else {
-				omniRingSamples(out);
 			}
 			return;
 		}
@@ -612,15 +715,112 @@ class TransformGizmo {
 	/** Project a world point to engine pixels (into out.x/out.y). */
 	function projectToScreen(world:h3d.Vector, out:h3d.Vector):Void {
 		var engine = h3d.Engine.getCurrent();
-		var camera = graphics.getScene().camera;
+		var camera = scene.camera;
 		var projected = camera.project(world.x, world.y, world.z,
 			engine.width, engine.height, false);
 		out.set(projected.x, projected.y, 0);
 	}
 
+	static inline function screenLengthSq(vector:h3d.Vector):Float {
+		return vector.x * vector.x + vector.y * vector.y;
+	}
+
+	/**
+	 * Project a unit world direction at the drag origin into engine pixels.
+	 * A short local sample avoids perspective distortion from treating a whole
+	 * world unit as a derivative, while division by the sample length leaves
+	 * the result in pixels per world unit.
+	 */
+	function captureScreenDirection(direction:h3d.Vector, out:h3d.Vector):Void {
+		var originPx = new h3d.Vector();
+		var endPx = new h3d.Vector();
+		projectToScreen(dragStartPos, originPx);
+		var end = new h3d.Vector(
+			dragStartPos.x + direction.x * SCREEN_PROJECTION_STEP,
+			dragStartPos.y + direction.y * SCREEN_PROJECTION_STEP,
+			dragStartPos.z + direction.z * SCREEN_PROJECTION_STEP);
+		projectToScreen(end, endPx);
+		out.set((endPx.x - originPx.x) / SCREEN_PROJECTION_STEP,
+			(endPx.y - originPx.y) / SCREEN_PROJECTION_STEP, 0);
+	}
+
+	/** Capture the local screen Jacobian of the active movement plane. */
+	function capturePlaneScreenBasis():Void {
+		captureScreenDirection(planeU, planeScreenU);
+		captureScreenDirection(planeV, planeScreenV);
+		planeScreenDet = planeScreenU.x * planeScreenV.y
+			- planeScreenU.y * planeScreenV.x;
+	}
+
+	/** World point on the captured rotation ring at `angle`. */
+	function ringWorldPoint(angle:Float, out:h3d.Vector):Void {
+		var cos = Math.cos(angle) * RING_RADIUS;
+		var sin = Math.sin(angle) * RING_RADIUS;
+		out.set(
+			dragStartPos.x + ringU.x * cos + ringV.x * sin,
+			dragStartPos.y + ringU.y * cos + ringV.y * sin,
+			dragStartPos.z + ringU.z * cos + ringV.z * sin);
+	}
+
+	/**
+	 * Capture the projected ring tangent at the grab point in pixels/radian.
+	 * Ring drags subsequently use raw displacement against this fixed tangent
+	 * instead of repeatedly taking atan2 of an ever more distant pointer.
+	 */
+	function captureRingScreenTangent(angle:Float):Void {
+		var angleStep = 0.01;
+		var world = new h3d.Vector();
+		var nextWorld = new h3d.Vector();
+		var projected = new h3d.Vector();
+		var nextProjected = new h3d.Vector();
+		ringWorldPoint(angle, world);
+		ringWorldPoint(angle + angleStep, nextWorld);
+		projectToScreen(world, projected);
+		projectToScreen(nextWorld, nextProjected);
+		ringScreenTangent.set(
+			(nextProjected.x - projected.x) / angleStep,
+			(nextProjected.y - projected.y) / angleStep, 0);
+		ringScreenTangentLengthSq = screenLengthSq(ringScreenTangent);
+	}
+
+	/** Capture the outward screen direction used by plane/uniform scaling. */
+	function captureScaleScreenDirection(px:Float, py:Float):Void {
+		projectToScreen(dragStartPos, scaleCenterPx);
+		var dx = px - scaleCenterPx.x;
+		var dy = py - scaleCenterPx.y;
+		var distanceSq = dx * dx + dy * dy;
+		if (distanceSq < SCREEN_EPSILON_SQ) {
+			// The exact center has no radial direction. The first non-zero raw
+			// movement chooses one, after which reversing the mouse shrinks.
+			scaleScreenDirection.set(0, 0, 0);
+			scaleDist0 = OMNI_MIN_RADIUS;
+			scaleDirectionPending = true;
+			return;
+		}
+		var distance = Math.sqrt(distanceSq);
+		scaleScreenDirection.set(dx / distance, dy / distance, 0);
+		scaleDist0 = Math.max(OMNI_MIN_RADIUS, distance);
+		scaleDirectionPending = false;
+	}
+
+	/** Linear, unbounded scale ratio from the accumulated raw pointer. */
+	function screenScaleRatio(px:Float, py:Float):Null<Float> {
+		var dx = px - dragStartPointer.x;
+		var dy = py - dragStartPointer.y;
+		if (scaleDirectionPending) {
+			var distanceSq = dx * dx + dy * dy;
+			if (distanceSq < SCREEN_EPSILON_SQ) return null;
+			var distance = Math.sqrt(distanceSq);
+			scaleScreenDirection.set(dx / distance, dy / distance, 0);
+			scaleDirectionPending = false;
+		}
+		return 1 + (dx * scaleScreenDirection.x + dy * scaleScreenDirection.y)
+			/ scaleDist0;
+	}
+
 	/** Camera basis: right (ax), up (ay), toward scene (az). */
 	function cameraBasis():{ax:h3d.Vector, ay:h3d.Vector, az:h3d.Vector} {
-		var camera = graphics.getScene().camera;
+		var camera = scene.camera;
 		var az = camera.target.sub(camera.pos);
 		az.normalize();
 		var ax = camera.up.clone().cross(az);
@@ -660,7 +860,7 @@ class TransformGizmo {
 		}
 	}
 
-	/** In-plane angle of a hit point around ringU/ringV from ringLastAngle. */
+	/** In-plane angle of a hit point around the captured ring basis. */
 	function planeAngle(hit:h3d.Vector):Float {
 		var dx = hit.x - dragStartPos.x;
 		var dy = hit.y - dragStartPos.y;
@@ -745,252 +945,322 @@ class TransformGizmo {
 
 	static function axisColor(axis:Int, active:Bool):Int {
 		return switch (axis) {
-			case 0: active ? Theme.AXIS_X_HOVER : Theme.AXIS_X;
-			case 1: active ? Theme.AXIS_Y_HOVER : Theme.AXIS_Y;
-			default: active ? Theme.AXIS_Z_HOVER : Theme.AXIS_Z;
+			case 0: active ? Theme.GIZMO_AXIS_X_HOVER : Theme.GIZMO_AXIS_X;
+			case 1: active ? Theme.GIZMO_AXIS_Y_HOVER : Theme.GIZMO_AXIS_Y;
+			default: active ? Theme.GIZMO_AXIS_Z_HOVER : Theme.GIZMO_AXIS_Z;
 		};
 	}
 
 	static function planeColor(handle:Int, active:Bool):Int {
 		return switch (handle) {
-			case HANDLE_PLANE_XY: active ? Theme.AXIS_XY_HOVER : Theme.AXIS_XY;
-			case HANDLE_PLANE_YZ: active ? Theme.AXIS_YZ_HOVER : Theme.AXIS_YZ;
-			default: active ? Theme.AXIS_ZX_HOVER : Theme.AXIS_ZX;
+			case HANDLE_PLANE_XY: active ? Theme.GIZMO_PLANE_XY_HOVER : Theme.GIZMO_PLANE_XY;
+			case HANDLE_PLANE_YZ: active ? Theme.GIZMO_PLANE_YZ_HOVER : Theme.GIZMO_PLANE_YZ;
+			default: active ? Theme.GIZMO_PLANE_ZX_HOVER : Theme.GIZMO_PLANE_ZX;
 		};
 	}
 
+	/** Lerp `color` toward white by `amount` (0..1) for subtle hover hints. */
+	static function brighten(color:Int, amount:Float):Int {
+		var r = (color >> 16) & 0xFF;
+		var g = (color >> 8) & 0xFF;
+		var b = color & 0xFF;
+		inline function lift(channel:Int):Int {
+			return Math.round(channel + (0xFF - channel) * amount);
+		}
+		return (lift(r) << 16) | (lift(g) << 8) | lift(b);
+	}
+
 	// ------------------------------------------------------------------
-	// Drawing (all coordinates are relative to the object position).
+	// Solid handle construction and placement (relative to the object).
 	// ------------------------------------------------------------------
 
+	static function configureOverlayMaterial(material:h3d.mat.Material):Void {
+		material.shadows = false;
+		material.mainPass.enableLights = false;
+		material.mainPass.depthWrite = false;
+		material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
+		material.mainPass.culling = h3d.mat.Data.Face.None;
+	}
+
+	/**
+	 * Build one handle mesh from a shared primitive. All handles are opaque
+	 * solids with an always-on-top overlay material.
+	 */
+	function createSolid(primitive:h3d.prim.Primitive, name:String):h3d.scene.Mesh {
+		var mesh = new h3d.scene.Mesh(primitive, null, solidRoot);
+		mesh.name = name;
+		configureOverlayMaterial(mesh.material);
+		mesh.material.blendMode = Alpha;
+		mesh.visible = false;
+		return mesh;
+	}
+
+	function buildSolidHandles():Void {
+		var shaft = makeCylinderX(16);
+		var cone = makeConeX(20);
+		var quad = makeQuad();
+		var cube = new h3d.prim.Cube(1, 1, 1, true);
+		cube.addNormals();
+		var torus = makeTorusX(RING_RADIUS, RING_TUBE, RING_SEGMENTS, 10);
+		var centerBall = new h3d.prim.Sphere(CENTER_HALF * 1.2, 20, 14);
+		centerBall.addNormals();
+		for (axis in 0...3) {
+			moveShafts.push(createSolid(shaft, 'MoveAxis${axis}Shaft'));
+			moveHeads.push(createSolid(cone, 'MoveAxis${axis}Head'));
+			movePlanes.push(createSolid(quad, 'MovePlane${axis}'));
+			rotateRings.push(createSolid(torus, 'RotateRing${axis}'));
+			scaleShafts.push(createSolid(shaft, 'ScaleAxis${axis}Shaft'));
+			scaleHeads.push(createSolid(cube, 'ScaleAxis${axis}Head'));
+			scalePlanes.push(createSolid(quad, 'ScalePlane${axis}'));
+		}
+		moveCenter = createSolid(centerBall, "MoveCenter");
+		scaleCenter = createSolid(cube, "ScaleCenter");
+	}
+
+	/** Show a solid with its fill alpha. */
+	function show(mesh:h3d.scene.Mesh, color:Int, alpha:Float):Void {
+		mesh.visible = true;
+		mesh.material.color.setColor(color);
+		mesh.material.color.a = alpha;
+	}
+
+	function hideSolids(meshes:Array<h3d.scene.Mesh>):Void {
+		for (mesh in meshes) mesh.visible = false;
+	}
+
+	function hideAllSolids():Void {
+		hideSolids(moveShafts);
+		hideSolids(moveHeads);
+		hideSolids(movePlanes);
+		hideSolids(rotateRings);
+		hideSolids(scaleShafts);
+		hideSolids(scaleHeads);
+		hideSolids(scalePlanes);
+		hideSolids([moveCenter, scaleCenter]);
+	}
+
+	/** Place a cylinder/cone mesh along `axis`. */
+	function setAxisSolid(mesh:h3d.scene.Mesh, axis:h3d.Vector, start:Float,
+			length:Float, radius:Float):Void {
+		mesh.setPosition(axis.x * start, axis.y * start, axis.z * start);
+		mesh.setDirection(axis);
+		mesh.scaleX = length;
+		mesh.scaleY = radius;
+		mesh.scaleZ = radius;
+	}
+
+	/** Box handle at `t` along `axis` with independent side scales. */
+	function setBoxSolid(mesh:h3d.scene.Mesh, axis:h3d.Vector, t:Float,
+			sx:Float, sy:Float, sz:Float):Void {
+		mesh.setPosition(axis.x * t, axis.y * t, axis.z * t);
+		mesh.setDirection(axis);
+		mesh.scaleX = sx;
+		mesh.scaleY = sy;
+		mesh.scaleZ = sz;
+	}
+
+	/** Flat quad mesh centered at (cx,cy,cz), X along `u`, facing `n`. */
+	function setQuadSolid(mesh:h3d.scene.Mesh, cx:Float, cy:Float, cz:Float,
+			u:h3d.Vector, n:h3d.Vector, size:Float):Void {
+		mesh.setPosition(cx, cy, cz);
+		mesh.setDirection(u, n);
+		mesh.scaleX = size;
+		mesh.scaleY = size;
+		mesh.scaleZ = 1;
+	}
+
+	function setPlaneSolid(mesh:h3d.scene.Mesh, handle:Int):Void {
+		planeBasis(handle, drawPlaneU, drawPlaneV, drawPlaneN);
+		setQuadSolid(mesh,
+			PLANE_OFFSET * (drawPlaneU.x + drawPlaneV.x),
+			PLANE_OFFSET * (drawPlaneU.y + drawPlaneV.y),
+			PLANE_OFFSET * (drawPlaneU.z + drawPlaneV.z),
+			drawPlaneU, drawPlaneN, PLANE_HALF * 2);
+	}
+
+	function updateSolidHandles():Void {
+		hideAllSolids();
+		if (attached == null) return;
+		switch (currentTool) {
+			case TOOL_MOVE:
+				for (axisIndex in 0...3) {
+					var active = axisIndex == hoverHandle || axisIndex == dragHandle;
+					var color = axisColor(axisIndex, active);
+					var axis = gizmoAxis(axisIndex);
+					setAxisSolid(moveShafts[axisIndex], axis, 0,
+						AXIS_LENGTH - HEAD_LENGTH, SHAFT_RADIUS);
+					show(moveShafts[axisIndex], color, 1);
+					setAxisSolid(moveHeads[axisIndex], axis,
+						AXIS_LENGTH - HEAD_LENGTH, HEAD_LENGTH, HEAD_RADIUS);
+					show(moveHeads[axisIndex], color, 1);
+				}
+				var movePlaneHandles = [HANDLE_PLANE_XY, HANDLE_PLANE_YZ, HANDLE_PLANE_ZX];
+				for (index in 0...movePlaneHandles.length) {
+					var handle = movePlaneHandles[index];
+					var active = handle == hoverHandle || handle == dragHandle;
+					setPlaneSolid(movePlanes[index], handle);
+					show(movePlanes[index], planeColor(handle, active),
+						active ? 1 : 0.92);
+				}
+				var centerActive = HANDLE_CENTER == hoverHandle || HANDLE_CENTER == dragHandle;
+				moveCenter.setPosition(0, 0, 0);
+				moveCenter.setScale(1);
+				show(moveCenter, centerActive ? Theme.GIZMO_NEUTRAL_HOVER
+					: Theme.GIZMO_NEUTRAL, centerActive ? 1 : 0.9);
+
+			case TOOL_ROTATE:
+				var interiorActive = HANDLE_CENTER == hoverHandle
+					|| HANDLE_CENTER == dragHandle;
+				for (axisIndex in 0...3) {
+					var active = axisIndex == hoverHandle || axisIndex == dragHandle;
+					var axis = gizmoAxis(axisIndex);
+					rotateRings[axisIndex].setPosition(0, 0, 0);
+					rotateRings[axisIndex].setDirection(axis);
+					rotateRings[axisIndex].setScale(1);
+					// Arc-ball interior hover/drag slightly brightens every
+					// ring as a hint that the whole disc rotates freely.
+					var color = axisColor(axisIndex, active);
+					if (interiorActive && !active) color = brighten(color, 0.25);
+					show(rotateRings[axisIndex], color, 1);
+				}
+				// No center ball: HANDLE_CENTER is the invisible arc-ball
+				// region covering the whole ring interior (see pick()).
+
+			default:
+				for (axisIndex in 0...3) {
+					var active = axisIndex == hoverHandle || axisIndex == dragHandle;
+					var color = axisColor(axisIndex, active);
+					var axis = gizmoAxis(axisIndex);
+					setAxisSolid(scaleShafts[axisIndex], axis, 0, SHAFT_END,
+						SHAFT_RADIUS);
+					show(scaleShafts[axisIndex], color, 1);
+					setBoxSolid(scaleHeads[axisIndex], axis,
+						AXIS_LENGTH - BOX_HALF * 1.4,
+						BOX_HALF * 2.8, BOX_HALF * 2, BOX_HALF * 2);
+					show(scaleHeads[axisIndex], color, 1);
+				}
+				var scalePlaneHandles = [HANDLE_PLANE_XY, HANDLE_PLANE_YZ, HANDLE_PLANE_ZX];
+				for (index in 0...scalePlaneHandles.length) {
+					var handle = scalePlaneHandles[index];
+					var active = handle == hoverHandle || handle == dragHandle;
+					setPlaneSolid(scalePlanes[index], handle);
+					show(scalePlanes[index], planeColor(handle, active),
+						active ? 1 : 0.92);
+				}
+				var centerActive = HANDLE_CENTER == hoverHandle || HANDLE_CENTER == dragHandle;
+				scaleCenter.setPosition(0, 0, 0);
+				scaleCenter.setRotation(0, 0, 0);
+				scaleCenter.setScale(CENTER_HALF * 2);
+				show(scaleCenter, centerActive ? Theme.GIZMO_NEUTRAL_HOVER
+					: Theme.GIZMO_NEUTRAL, centerActive ? 1 : 0.95);
+		}
+	}
+
+	static function makeCylinderX(segments:Int):h3d.prim.Polygon {
+		var points:Array<h3d.col.Point> = [];
+		var indexes = new hxd.IndexBuffer();
+		for (end in 0...2) {
+			for (segment in 0...segments) {
+				var angle = segment / segments * Math.PI * 2;
+				points.push(new h3d.col.Point(end, Math.cos(angle), Math.sin(angle)));
+			}
+		}
+		var startCenter = points.length;
+		points.push(new h3d.col.Point(0, 0, 0));
+		var endCenter = points.length;
+		points.push(new h3d.col.Point(1, 0, 0));
+		for (segment in 0...segments) {
+			var next = (segment + 1) % segments;
+			var a = segment;
+			var b = next;
+			var c = segments + segment;
+			var d = segments + next;
+			indexes.push(a); indexes.push(c); indexes.push(b);
+			indexes.push(b); indexes.push(c); indexes.push(d);
+			indexes.push(startCenter); indexes.push(b); indexes.push(a);
+			indexes.push(endCenter); indexes.push(c); indexes.push(d);
+		}
+		var primitive = new h3d.prim.Polygon(points, indexes);
+		primitive.addNormals();
+		return primitive;
+	}
+
+	static function makeConeX(segments:Int):h3d.prim.Polygon {
+		var points:Array<h3d.col.Point> = [];
+		var indexes = new hxd.IndexBuffer();
+		for (segment in 0...segments) {
+			var angle = segment / segments * Math.PI * 2;
+			points.push(new h3d.col.Point(0, Math.cos(angle), Math.sin(angle)));
+		}
+		var tip = points.length;
+		points.push(new h3d.col.Point(1, 0, 0));
+		var center = points.length;
+		points.push(new h3d.col.Point(0, 0, 0));
+		for (segment in 0...segments) {
+			var next = (segment + 1) % segments;
+			indexes.push(segment); indexes.push(tip); indexes.push(next);
+			indexes.push(center); indexes.push(next); indexes.push(segment);
+		}
+		var primitive = new h3d.prim.Polygon(points, indexes);
+		primitive.addNormals();
+		return primitive;
+	}
+
+	static function makeQuad():h3d.prim.Polygon {
+		var points = [
+			new h3d.col.Point(-0.5, -0.5, 0), new h3d.col.Point(0.5, -0.5, 0),
+			new h3d.col.Point(0.5, 0.5, 0), new h3d.col.Point(-0.5, 0.5, 0)
+		];
+		var indexes = new hxd.IndexBuffer();
+		indexes.push(0); indexes.push(1); indexes.push(2);
+		indexes.push(0); indexes.push(2); indexes.push(3);
+		var primitive = new h3d.prim.Polygon(points, indexes);
+		primitive.addNormals();
+		return primitive;
+	}
+
+	static function makeTorusX(radius:Float, tube:Float, majorSegments:Int,
+			minorSegments:Int):h3d.prim.Polygon {
+		var points:Array<h3d.col.Point> = [];
+		var indexes = new hxd.IndexBuffer();
+		for (major in 0...majorSegments) {
+			var a = major / majorSegments * Math.PI * 2;
+			var ca = Math.cos(a);
+			var sa = Math.sin(a);
+			for (minor in 0...minorSegments) {
+				var b = minor / minorSegments * Math.PI * 2;
+				var radial = radius + Math.cos(b) * tube;
+				points.push(new h3d.col.Point(Math.sin(b) * tube, ca * radial, sa * radial));
+			}
+		}
+		for (major in 0...majorSegments) {
+			var nextMajor = (major + 1) % majorSegments;
+			for (minor in 0...minorSegments) {
+				var nextMinor = (minor + 1) % minorSegments;
+				var a = major * minorSegments + minor;
+				var b = nextMajor * minorSegments + minor;
+				var c = major * minorSegments + nextMinor;
+				var d = nextMajor * minorSegments + nextMinor;
+				indexes.push(a); indexes.push(b); indexes.push(c);
+				indexes.push(c); indexes.push(b); indexes.push(d);
+			}
+		}
+		var primitive = new h3d.prim.Polygon(points, indexes);
+		primitive.addNormals();
+		return primitive;
+	}
+
 	function refresh():Void {
-		graphics.visible = attached != null;
-		if (graphics.visible) redraw();
+		var shown = attached != null;
+		solidRoot.visible = shown;
+		if (shown) {
+			solidRoot.setPosition(attached.x, attached.y, attached.z);
+			redraw();
+		}
 	}
 
 	function redraw():Void {
-		graphics.clear();
-		switch (currentTool) {
-			case TOOL_MOVE: drawMoveGizmo();
-			case TOOL_ROTATE: drawRotateGizmo();
-			default: drawScaleGizmo();
-		}
-	}
-
-	function drawMoveGizmo():Void {
-		for (axis in 0...3) {
-			var active = axis == hoverHandle || axis == dragHandle;
-			graphics.lineStyle(active ? LINE_WIDTH_ACTIVE : LINE_WIDTH,
-				axisColor(axis, active), 1);
-			drawArrow(axis);
-		}
-		for (plane in [HANDLE_PLANE_XY, HANDLE_PLANE_YZ, HANDLE_PLANE_ZX]) {
-			var active = plane == hoverHandle || plane == dragHandle;
-			graphics.lineStyle(active ? 2.6 : 1.6, planeColor(plane, active), 1);
-			drawPlaneQuad(plane);
-		}
-		var centerActive = HANDLE_CENTER == hoverHandle || HANDLE_CENTER == dragHandle;
-		graphics.lineStyle(centerActive ? 2.6 : 1.6,
-			centerActive ? Theme.GIZMO_NEUTRAL_HOVER : Theme.GIZMO_NEUTRAL, 1);
-		drawViewSquare(CENTER_HALF * 1.15);
-	}
-
-	function drawRotateGizmo():Void {
-		for (axis in 0...3) {
-			var active = axis == hoverHandle || axis == dragHandle;
-			graphics.lineStyle(active ? RING_WIDTH_ACTIVE : RING_WIDTH,
-				axisColor(axis, active), 1);
-			drawAxisRing(axis, RING_RADIUS);
-		}
-		var active = HANDLE_CENTER == hoverHandle || HANDLE_CENTER == dragHandle;
-		graphics.lineStyle(active ? RING_WIDTH_ACTIVE : RING_WIDTH,
-			active ? Theme.GIZMO_NEUTRAL_HOVER : Theme.GIZMO_NEUTRAL, 1);
-		drawOmniRing();
-	}
-
-	function drawScaleGizmo():Void {
-		for (axis in 0...3) {
-			var active = axis == hoverHandle || axis == dragHandle;
-			graphics.lineStyle(active ? LINE_WIDTH_ACTIVE : LINE_WIDTH,
-				axisColor(axis, active), 1);
-			drawScaleShaft(axis);
-			drawAxisBox(axis);
-		}
-		for (plane in [HANDLE_PLANE_XY, HANDLE_PLANE_YZ, HANDLE_PLANE_ZX]) {
-			var active = plane == hoverHandle || plane == dragHandle;
-			graphics.lineStyle(active ? 2.6 : 1.6, planeColor(plane, active), 1);
-			drawPlaneQuad(plane);
-		}
-		var active = HANDLE_CENTER == hoverHandle || HANDLE_CENTER == dragHandle;
-		graphics.lineStyle(active ? 2.6 : 1.6,
-			active ? Theme.GIZMO_NEUTRAL_HOVER : Theme.GIZMO_NEUTRAL, 1);
-		drawCenterBox();
-	}
-
-	/** Shaft line plus a wireframe cone arrowhead for one axis. */
-	function drawArrow(axis:Int):Void {
-		var direction = gizmoAxis(axis);
-		var headStart = AXIS_LENGTH - HEAD_LENGTH;
-		graphics.moveTo(0, 0, 0);
-		graphics.lineTo(direction.x * headStart, direction.y * headStart,
-			direction.z * headStart);
-		drawCone(axis, headStart, AXIS_LENGTH, HEAD_RADIUS);
-	}
-
-	/** Scale tool shaft: short line ending before the handle box. */
-	function drawScaleShaft(axis:Int):Void {
-		var direction = gizmoAxis(axis);
-		graphics.moveTo(0, 0, 0);
-		graphics.lineTo(direction.x * SHAFT_END, direction.y * SHAFT_END,
-			direction.z * SHAFT_END);
-	}
-
-	/** Wireframe cone from base t0 to tip t1 along one axis. */
-	function drawCone(axis:Int, t0:Float, t1:Float, radius:Float):Void {
-		var direction = gizmoAxis(axis);
-		var u = gizmoDirection(perpendicularU(axis));
-		var v = gizmoDirection(perpendicularV(axis));
-		for (segment in 0...CONE_SEGMENTS) {
-			var angle0 = segment / CONE_SEGMENTS * Math.PI * 2;
-			var angle1 = (segment + 1) / CONE_SEGMENTS * Math.PI * 2;
-			graphics.moveTo(
-				direction.x * t0 + u.x * radius * Math.cos(angle0) + v.x * radius * Math.sin(angle0),
-				direction.y * t0 + u.y * radius * Math.cos(angle0) + v.y * radius * Math.sin(angle0),
-				direction.z * t0 + u.z * radius * Math.cos(angle0) + v.z * radius * Math.sin(angle0));
-			graphics.lineTo(
-				direction.x * t0 + u.x * radius * Math.cos(angle1) + v.x * radius * Math.sin(angle1),
-				direction.y * t0 + u.y * radius * Math.cos(angle1) + v.y * radius * Math.sin(angle1),
-				direction.z * t0 + u.z * radius * Math.cos(angle1) + v.z * radius * Math.sin(angle1));
-			graphics.moveTo(
-				direction.x * t0 + u.x * radius * Math.cos(angle0) + v.x * radius * Math.sin(angle0),
-				direction.y * t0 + u.y * radius * Math.cos(angle0) + v.y * radius * Math.sin(angle0),
-				direction.z * t0 + u.z * radius * Math.cos(angle0) + v.z * radius * Math.sin(angle0));
-			graphics.lineTo(direction.x * t1, direction.y * t1, direction.z * t1);
-		}
-	}
-
-	/** Wireframe box centered at `t` along one active-space axis. */
-	function drawAxisBox(axis:Int):Void {
-		var direction = gizmoAxis(axis);
-		var u = gizmoDirection(perpendicularU(axis));
-		var v = gizmoDirection(perpendicularV(axis));
-		drawBox(direction.x * AXIS_LENGTH, direction.y * AXIS_LENGTH,
-			direction.z * AXIS_LENGTH, direction, u, v,
-			BOX_HALF * 1.4, BOX_HALF, BOX_HALF);
-	}
-
-	/** Wireframe uniform-scale box at the gizmo center. */
-	function drawCenterBox():Void {
-		drawBox(0, 0, 0, new h3d.Vector(1, 0, 0), new h3d.Vector(0, 1, 0),
-			new h3d.Vector(0, 0, 1), CENTER_HALF, CENTER_HALF, CENTER_HALF);
-	}
-
-	/** Screen-facing center square used by free view-plane translation. */
-	function drawViewSquare(half:Float):Void {
-		var basis = cameraBasis();
-		inline function corner(sx:Float, sy:Float):h3d.Vector {
-			return new h3d.Vector(
-				basis.ax.x * half * sx + basis.ay.x * half * sy,
-				basis.ax.y * half * sx + basis.ay.y * half * sy,
-				basis.ax.z * half * sx + basis.ay.z * half * sy);
-		}
-		var p0 = corner(-1, -1);
-		var p1 = corner(1, -1);
-		var p2 = corner(1, 1);
-		var p3 = corner(-1, 1);
-		graphics.moveTo(p0.x, p0.y, p0.z);
-		graphics.lineTo(p1.x, p1.y, p1.z);
-		graphics.lineTo(p2.x, p2.y, p2.z);
-		graphics.lineTo(p3.x, p3.y, p3.z);
-		graphics.lineTo(p0.x, p0.y, p0.z);
-	}
-
-	/** Wireframe box centered at (cx,cy,cz) with half extents along u/v/w. */
-	function drawBox(cx:Float, cy:Float, cz:Float, w:h3d.Vector, u:h3d.Vector,
-			v:h3d.Vector, hw:Float, hu:Float, hv:Float):Void {
-		inline function corner(su:Float, sv:Float, sw:Float):Array<Float> {
-			return [cx + w.x * hw * sw + u.x * hu * su + v.x * hv * sv,
-				cy + w.y * hw * sw + u.y * hu * su + v.y * hv * sv,
-				cz + w.z * hw * sw + u.z * hu * su + v.z * hv * sv];
-		}
-		// Four side rectangles parallel to the axis direction.
-		for (su in [-1, 1]) {
-			for (sv in [-1, 1]) {
-				var a = corner(su, sv, -1);
-				var b = corner(su, sv, 1);
-				graphics.moveTo(a[0], a[1], a[2]);
-				graphics.lineTo(b[0], b[1], b[2]);
-			}
-		}
-		// Two end caps.
-		for (sw in [-1, 1]) {
-			var p00 = corner(-1, -1, sw);
-			var p10 = corner(1, -1, sw);
-			var p11 = corner(1, 1, sw);
-			var p01 = corner(-1, 1, sw);
-			graphics.moveTo(p00[0], p00[1], p00[2]);
-			graphics.lineTo(p10[0], p10[1], p10[2]);
-			graphics.lineTo(p11[0], p11[1], p11[2]);
-			graphics.lineTo(p01[0], p01[1], p01[2]);
-			graphics.lineTo(p00[0], p00[1], p00[2]);
-		}
-	}
-
-	/** Wireframe two-axis plane quad (move/scale plane handle). */
-	function drawPlaneQuad(handle:Int):Void {
-		planeBasis(handle, drawPlaneU, drawPlaneV, drawPlaneN);
-		var cx = PLANE_OFFSET * (drawPlaneU.x + drawPlaneV.x);
-		var cy = PLANE_OFFSET * (drawPlaneU.y + drawPlaneV.y);
-		var cz = PLANE_OFFSET * (drawPlaneU.z + drawPlaneV.z);
-		graphics.moveTo(cx - drawPlaneU.x * PLANE_HALF - drawPlaneV.x * PLANE_HALF,
-			cy - drawPlaneU.y * PLANE_HALF - drawPlaneV.y * PLANE_HALF,
-			cz - drawPlaneU.z * PLANE_HALF - drawPlaneV.z * PLANE_HALF);
-		graphics.lineTo(cx + drawPlaneU.x * PLANE_HALF - drawPlaneV.x * PLANE_HALF,
-			cy + drawPlaneU.y * PLANE_HALF - drawPlaneV.y * PLANE_HALF,
-			cz + drawPlaneU.z * PLANE_HALF - drawPlaneV.z * PLANE_HALF);
-		graphics.lineTo(cx + drawPlaneU.x * PLANE_HALF + drawPlaneV.x * PLANE_HALF,
-			cy + drawPlaneU.y * PLANE_HALF + drawPlaneV.y * PLANE_HALF,
-			cz + drawPlaneU.z * PLANE_HALF + drawPlaneV.z * PLANE_HALF);
-		graphics.lineTo(cx - drawPlaneU.x * PLANE_HALF + drawPlaneV.x * PLANE_HALF,
-			cy - drawPlaneU.y * PLANE_HALF + drawPlaneV.y * PLANE_HALF,
-			cz - drawPlaneU.z * PLANE_HALF + drawPlaneV.z * PLANE_HALF);
-		graphics.lineTo(cx - drawPlaneU.x * PLANE_HALF - drawPlaneV.x * PLANE_HALF,
-			cy - drawPlaneU.y * PLANE_HALF - drawPlaneV.y * PLANE_HALF,
-			cz - drawPlaneU.z * PLANE_HALF - drawPlaneV.z * PLANE_HALF);
-	}
-
-	/** Wireframe ring around one axis in the active world/local space. */
-	function drawAxisRing(axis:Int, radius:Float):Void {
-		drawCircle(gizmoDirection(perpendicularU(axis)),
-			gizmoDirection(perpendicularV(axis)), radius);
-	}
-
-	/** Wireframe screen-facing ring (omni rotation handle). */
-	function drawOmniRing():Void {
-		var basis = cameraBasis();
-		drawCircle(basis.ax, basis.ay, OMNI_RADIUS);
-		// A smaller center guide exposes the actual arc-ball grab region. The
-		// three great circles read as a small wire sphere; the outer ring
-		// remains part of the same virtual trackball.
-		drawCircle(basis.ax, basis.ay, OMNI_CENTER_RADIUS);
-		drawCircle(basis.ax, basis.az, OMNI_CENTER_RADIUS);
-		drawCircle(basis.ay, basis.az, OMNI_CENTER_RADIUS);
-	}
-
-	/** Closed polyline circle in the plane spanned by u/v. */
-	function drawCircle(u:h3d.Vector, v:h3d.Vector, radius:Float):Void {
-		for (segment in 0...RING_SEGMENTS) {
-			var angle0 = segment / RING_SEGMENTS * Math.PI * 2;
-			var angle1 = (segment + 1) / RING_SEGMENTS * Math.PI * 2;
-			graphics.moveTo(
-				u.x * radius * Math.cos(angle0) + v.x * radius * Math.sin(angle0),
-				u.y * radius * Math.cos(angle0) + v.y * radius * Math.sin(angle0),
-				u.z * radius * Math.cos(angle0) + v.z * radius * Math.sin(angle0));
-			graphics.lineTo(
-				u.x * radius * Math.cos(angle1) + v.x * radius * Math.sin(angle1),
-				u.y * radius * Math.cos(angle1) + v.y * radius * Math.sin(angle1),
-				u.z * radius * Math.cos(angle1) + v.z * radius * Math.sin(angle1));
-		}
+		updateSolidHandles();
 	}
 
 	function ringSamples(axis:Int, radius:Float, out:Array<h3d.Vector>):Void {
@@ -1004,32 +1274,6 @@ class TransformGizmo {
 				worldU.x * cos + worldV.x * sin,
 				worldU.y * cos + worldV.y * sin,
 				worldU.z * cos + worldV.z * sin));
-		}
-	}
-
-	function omniRingSamples(out:Array<h3d.Vector>):Void {
-		var basis = cameraBasis();
-		// Pick samples across the visible center ball, not only its outer
-		// circumference. This makes pressing the middle behave like Unreal's
-		// free-rotation arc-ball instead of requiring a ring-edge press.
-		for (ix in [-1, 0, 1]) {
-			for (iy in [-1, 0, 1]) {
-				var x = ix * OMNI_CENTER_RADIUS * 0.5;
-				var y = iy * OMNI_CENTER_RADIUS * 0.5;
-				out.push(pointAt(
-					basis.ax.x * x + basis.ay.x * y,
-					basis.ax.y * x + basis.ay.y * y,
-					basis.ax.z * x + basis.ay.z * y));
-			}
-		}
-		for (segment in 0...RING_SEGMENTS) {
-			var angle = segment / RING_SEGMENTS * Math.PI * 2;
-			var cos = Math.cos(angle) * OMNI_RADIUS;
-			var sin = Math.sin(angle) * OMNI_RADIUS;
-			out.push(pointAt(
-				basis.ax.x * cos + basis.ay.x * sin,
-				basis.ax.y * cos + basis.ay.y * sin,
-				basis.ax.z * cos + basis.ay.z * sin));
 		}
 	}
 
