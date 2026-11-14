@@ -35,8 +35,7 @@ class EditorShell {
     final editorBackgroundHit:h2d.Interactive;
 
     // Title/menu bar and editor toolbar.
-    final brandMark:h2d.Object;
-    final appTitle:h2d.Text;
+    final brandMark:h2d.Bitmap;
     final projectTitle:h2d.Text;
     final menuButtons:Array<UiButton> = [];
     final addObjectButton:UiButton;
@@ -224,12 +223,7 @@ class EditorShell {
         };
 
         // Native title/menu bar.
-        brandMark = new h2d.Object(root);
-        drawBrandMark();
-        appTitle = new UiText(ctx.titleFont, root);
-        appTitle.text = "BOLTSPARK";
-        appTitle.textColor = Theme.TEXT;
-        appTitle.lineBreak = false;
+        brandMark = new h2d.Bitmap(AppIcon.getTitleBarTile(), root);
         projectTitle = new UiText(ctx.font, root);
         projectTitle.text = "Untitled Scene";
         projectTitle.textColor = Theme.MUTED;
@@ -600,14 +594,6 @@ class EditorShell {
         resize();
     }
 
-    function drawBrandMark():Void {
-        brandMark.removeChildren();
-        var outer = new h2d.Graphics(brandMark);
-        UiIcons.draw(outer, BrandOuter, 0, 0, 21, Theme.BRAND);
-        var bolt = new h2d.Graphics(brandMark);
-        UiIcons.draw(bolt, BrandBolt, 0, 0, 21, 0x161A20);
-    }
-
     function fitText(target:h2d.Text, value:String, maxWidth:Float):Void {
         target.lineBreak = false;
         target.maxWidth = null;
@@ -766,12 +752,10 @@ class EditorShell {
     }
 
     function layoutTopBars(width:Float):Void {
-        brandMark.x = 9;
-        brandMark.y = 5;
-        appTitle.x = 37;
-        appTitle.y = 3;
+        brandMark.x = 5;
+        brandMark.y = 3;
 
-        var menuX = 142.0;
+        var menuX = 38.0;
         for (index in 0...menuButtons.length) {
             var button = menuButtons[index];
             button.x = menuX;

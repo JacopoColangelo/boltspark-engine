@@ -1,5 +1,5 @@
 diff --git a/libs/directx/window.c b/libs/directx/window.c
-index 17be432..0f8bce9 100644
+index 17be432..8341bd7 100644
 --- a/libs/directx/window.c
 +++ b/libs/directx/window.c
 @@ -73,6 +73,8 @@ typedef struct {
@@ -21,13 +21,19 @@ index 17be432..0f8bce9 100644
  
  #define TICON _ABSTRACT(dx_icon)
  
-@@ -198,6 +203,13 @@ static LRESULT CALLBACK WndProc( HWND wnd, UINT umsg, WPARAM wparam, LPARAM lpar
+@@ -198,6 +203,19 @@ static LRESULT CALLBACK WndProc( HWND wnd, UINT umsg, WPARAM wparam, LPARAM lpar
  		}
  		addState(Resize);
  		break;
 +	case WM_ENTERSIZEMOVE:
-+		get_events(wnd)->is_interactive_sizing = true;
++		get_events(wnd)->is_interactive_sizing = false;
 +		get_events(wnd)->last_interactive_resize = GetTickCount();
++		break;
++	case WM_SIZING:
++		get_events(wnd)->is_interactive_sizing = true;
++		break;
++	case WM_MOVING:
++		get_events(wnd)->is_interactive_sizing = false;
 +		break;
 +	case WM_EXITSIZEMOVE:
 +		get_events(wnd)->is_interactive_sizing = false;
@@ -35,7 +41,7 @@ index 17be432..0f8bce9 100644
  	case WM_LBUTTONDOWN: addMouse(MouseDown,1); break;
  	case WM_LBUTTONUP: addMouse(MouseUp,1); break;
  	case WM_MBUTTONDOWN: addMouse(MouseDown,2); break;
-@@ -347,6 +359,23 @@ static LRESULT CALLBACK WndProc( HWND wnd, UINT umsg, WPARAM wparam, LPARAM lpar
+@@ -347,6 +365,23 @@ static LRESULT CALLBACK WndProc( HWND wnd, UINT umsg, WPARAM wparam, LPARAM lpar
  			}
  		}
  
@@ -59,10 +65,55 @@ index 17be432..0f8bce9 100644
  		break;
  	case WM_CHAR:
  		e = addEvent(wnd,TextInput);
-@@ -978,6 +1007,14 @@ HL_PRIM void HL_NAME(win_set_icon)(HWND wnd, dx_icon icon) {
+@@ -978,6 +1013,59 @@ HL_PRIM void HL_NAME(win_set_icon)(HWND wnd, dx_icon icon) {
  	SendMessage(wnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
  }
  
++typedef struct {
++	DWORD process_id;
++	HWND window;
++} owner_window_search;
++
++static BOOL CALLBACK find_owner_window(HWND candidate, LPARAM param) {
++	owner_window_search *search = (owner_window_search*)param;
++	DWORD process_id = 0;
++	wchar_t class_name[32];
++	GetWindowThreadProcessId(candidate, &process_id);
++	if( process_id != search->process_id || !IsWindowVisible(candidate) )
++		return TRUE;
++	if( GetWindow(candidate, GW_OWNER) != NULL )
++		return TRUE;
++	if( GetClassNameW(candidate, class_name, sizeof(class_name) / sizeof(wchar_t)) == 0 )
++		return TRUE;
++	if( wcscmp(class_name, USTR("HL_WIN")) != 0 )
++		return TRUE;
++	search->window = candidate;
++	return FALSE;
++}
++
++HL_PRIM bool HL_NAME(win_set_owner_process)(HWND wnd, int process_id) {
++	owner_window_search search;
++	search.process_id = (DWORD)process_id;
++	search.window = NULL;
++	EnumWindows(find_owner_window, (LPARAM)&search);
++	if( search.window == NULL )
++		return false;
++	SetLastError(0);
++	LONG_PTR previous = SetWindowLongPtr(wnd, GWLP_HWNDPARENT, (LONG_PTR)search.window);
++	return previous != 0 || GetLastError() == 0;
++}
++
++HL_PRIM bool HL_NAME(win_activate)(HWND wnd) {
++	if( IsIconic(wnd) )
++		ShowWindow(wnd, SW_RESTORE);
++	else
++		ShowWindow(wnd, SW_SHOW);
++	BringWindowToTop(wnd);
++	SetForegroundWindow(wnd);
++	SetFocus(wnd);
++	return GetForegroundWindow() == wnd;
++}
++
 +HL_PRIM void HL_NAME(win_set_interactive_resize_callback)( vclosure *callback ) {
 +	if( !interactive_resize_callback_rooted ) {
 +		hl_add_root(&interactive_resize_callback);
@@ -74,10 +125,12 @@ index 17be432..0f8bce9 100644
  #define TWIN _ABSTRACT(dx_window)
  DEFINE_PRIM(TWIN, win_create_ex, _I32 _I32 _I32 _I32 _I32);
  DEFINE_PRIM(TWIN, win_create, _I32 _I32);
-@@ -1011,6 +1048,7 @@ DEFINE_PRIM(_DYN, win_get_current_display_setting, _BYTES _BOOL);
+@@ -1011,6 +1099,9 @@ DEFINE_PRIM(_DYN, win_get_current_display_setting, _BYTES _BOOL);
  DEFINE_PRIM(_I32, win_change_display_setting, _BYTES _DYN);
  DEFINE_PRIM(_ARR, win_get_monitors, _NO_ARG);
  DEFINE_PRIM(_BYTES, win_get_monitor_from_window, TWIN);
++DEFINE_PRIM(_BOOL, win_set_owner_process, TWIN _I32);
++DEFINE_PRIM(_BOOL, win_activate, TWIN);
 +DEFINE_PRIM(_VOID, win_set_interactive_resize_callback, _FUN(_VOID,_NO_ARG));
  DEFINE_PRIM(_VOID, win_set_icon, TWIN TICON);
  DEFINE_PRIM(_VOID, win_set_dark_mode, TWIN _BOOL);

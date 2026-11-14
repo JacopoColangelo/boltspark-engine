@@ -2,6 +2,8 @@ package boltspark.ui.windows;
 
 import boltspark.editor.Keybindings;
 import boltspark.platform.InteractiveResize;
+import boltspark.platform.NativeWindow;
+import boltspark.ui.AppIcon;
 import boltspark.ui.InputAdapter;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
@@ -22,7 +24,12 @@ class KeybindingsWindowApp extends hxd.App {
         InteractiveResize.install();
         hxd.Res.initEmbed();
         nativeWindow = hxd.Window.getInstance();
+        AppIcon.applyToWindow(nativeWindow);
         hosted = ApplicationWindowProtocol.isHosted(Sys.args());
+        var ownerProcessId = ApplicationWindowProtocol.ownerProcessId(Sys.args());
+        if (ownerProcessId != null) {
+            NativeWindow.setOwnerProcess(nativeWindow, ownerProcessId);
+        }
         nativeWindow.title = "Editor Keybindings — Boltspark Engine";
         nativeWindow.vsync = true;
         nativeWindow.resize(KeybindingsWindowContent.DEFAULT_WIDTH,
@@ -128,9 +135,9 @@ class KeybindingsWindowApp extends hxd.App {
         @:privateAccess {
             nativeWindow.window.visible = true;
             nativeWindow.window.restore();
-            nativeWindow.window.focus();
         }
         #end
+        NativeWindow.activate(nativeWindow);
         nativeWindow.vsync = true;
         windowVisible = true;
     }

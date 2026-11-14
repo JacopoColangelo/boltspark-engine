@@ -8,6 +8,8 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] Windows 11 x64 machine and GPU/driver recorded (`docs/TOOLCHAIN_VERSIONS.md`).
 - [x] Haxe compilation succeeds with the pinned toolchain using `compile.hxml` (`tools\build.ps1`).
 - [x] Native release build links HashLink/C into `release\Boltspark.exe` and stages the required runtime modules beside it.
+- [x] The packaged `release\Boltspark.exe` uses the Windows GUI subsystem and launches without a command window; development runs through `hl.exe` retain their diagnostics console.
+- [x] The multi-resolution Boltspark ICO is embedded in `release\Boltspark.exe`, and both development and native-release HWNDs expose non-null small/large window icons (`bin/app-icon-executable.png`, `bin/app-icon-runtime.log`, `bin/app-icon-release.log`).
 - [x] `compile.hxml` selects `-lib hldx`, explicitly defines `-D dx12`, and pins `-D hl_ver=1.16.0`.
 - [x] HashLink VM starts the compiled `.hl` file through `tools/build.ps1 -Run`, with `bin/freetype.hdll` available in the bytecode working directory.
 - [x] HashLink native module `directx.hdll` (window/input/event services) is present and loads at runtime (window opens, input works).
@@ -24,6 +26,7 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] 3D cube appears in the 3D scene using the Heaps DX12 driver (`bin/m0_window.png`, `bin/m0_input_test.png`).
 - [x] The editor cube is a stable, static orange primitive by default; rotation and color are no longer driven by sample/demo behavior.
 - [x] H2D editor chrome appears over the bounded 3D viewport (top bar, hierarchy, inspector, console, status bar).
+- [x] The embedded Boltspark artwork is rendered in the main editor title strip in place of the procedural placeholder and `BOLTSPARK` text (`bin/app-icon-editor.png`).
 - [x] Compact flat editor styling renders in the native DX12 window with square-edged controls, continuous inspector sections, and no legacy rounded-surface texture (`bin/ui-compact-editor.png`).
 - [x] The native release keeps the compact hierarchy, viewport, inspector, and console aligned after a live resize to 1280x800 (`bin/ui-compact-release-1280.png`).
 - [x] 3D content is clipped to the viewport rectangle by the render zone, aligned with the editor panels.
@@ -38,6 +41,7 @@ Evidence files are under `bin/` unless noted otherwise.
 - [x] Text is legible at baseline window size (1440x900 default; verified at 1296x900 after resize).
 - [x] Inter Regular, SemiBold, and Bold are rasterized from embedded TTF data by FreeType at exact 11/13/15px sizes, using native face hinting and correct pen advances; un-preloaded characters are cached on demand (`bin/ui-freetype-native-hint.png`, `bin/ui-freetype-release.png`, `bin/freetype-runtime-repro.log`). The already-legible console mono path is preserved.
 - [x] Resize behavior: chrome redraws to the new client size (`bin/m0_input_test.png` was captured at a resized 1296x900 window with correct layout). Maximize/restore re-uses the same `resize()` path.
+- [x] Native title-bar movement does not run the full vsynced interactive-resize renderer. The packaged-release Win32 probe measured move-loop timer dispatch at 8.381 ms average versus 23.609 ms while the resize callback was deliberately active; live rendering remains enabled for `WM_SIZING` only (`bin/verify-move-loop.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] No Direct3D 12 device/runtime errors during the test (no exception dialogs, clean run log).
 
 ## Input
@@ -77,6 +81,7 @@ Executed on 2026-11-14 with window-scoped native key/mouse events against the Ha
 - [x] V cannot stick when modifiers change or focus is lost: the sequence V-down, Ctrl-down, V-up, Ctrl-up emitted one suspend and one resume transition (`bin/keybindings-evidence.txt`).
 - [x] The main editor and Editor Keybindings HWNDs use the Windows immersive-dark-mode title bar (`bin/main-dark-titlebar.png`, `bin/keybindings-native-window.png`).
 - [x] File → Editor Settings → Editor Keybindings opens a separate, responsive native top-level HWND with a task-switchable lifecycle, retained-H2D client area, and DX12 swap chain in both development and native-release builds. Opening File prepares the host while hidden; OS-close/Escape hides the HWND, and reopening restores the same child PID/HWND without rebuilding its DX12 device or font cache. Closing the main editor terminates the cached host (`bin/native-window-evidence.txt`).
+- [x] The keybindings HWND is assigned the launching editor as its native owner before its first show, then explicitly restored/raised/activated. A first-open menu probe confirmed `GW_OWNER == editor HWND`, preventing the settings window from opening behind the editor (`bin/verify-first-keybindings-open.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] Rebind capture ignores modifier-only events: Ctrl then T captured `Ctrl+T` for Rotate in the separate window, persisted a complete versioned JSON map, synchronized into the already-running main editor, and immediately selected Rotate there (`bin/keybindings-native-window-rebound.png`, `bin/native-window-evidence.txt`). Duplicate chords are rejected and malformed/partial persisted maps leave the complete live/default map intact in `Keybindings.hx`.
 - [x] Shortcut commands, hold snapping, snap-to-grid, and Delete remain suppressed while an inspector/search text control owns keyboard capture.
 

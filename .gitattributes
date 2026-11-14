@@ -7,6 +7,7 @@
 *.txt    text
 *.json   text
 *.ps1    text
+*.patch  text eol=lf
 *.xml    text
 
 # Windows batch files must keep CRLF.
@@ -20,6 +21,7 @@
 *.lib    binary
 *.pdb    binary
 *.png    binary
+*.ico    binary
 *.jpg    binary
 *.dds    binary
 *.fbx    binary

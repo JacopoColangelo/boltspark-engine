@@ -3,6 +3,7 @@ import boltspark.editor.Keybindings;
 import boltspark.editor.SceneObject;
 import boltspark.editor.TransformGizmo;
 import boltspark.platform.InteractiveResize;
+import boltspark.ui.AppIcon;
 import boltspark.ui.BoltUI;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
@@ -74,6 +75,7 @@ class Main extends hxd.App {
         // required beside Boltspark.exe.
         hxd.Res.initEmbed();
         nativeWindow = hxd.Window.getInstance();
+        AppIcon.applyToWindow(nativeWindow);
         nativeWindow.title = "Boltspark Engine";
         nativeWindow.vsync = true;
         #if hldx

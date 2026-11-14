@@ -310,6 +310,67 @@ function Apply-HashLinkPatch([string]$SourceRoot, [string]$PatchPath, [string]$D
     Write-Host "$Description patch is already applied." -ForegroundColor DarkGray
 }
 
+function Add-NativeApplicationIcon([string]$ProjectPath, [string]$BuildRoot, [string]$IconPath) {
+    $projectIcon = Join-Path $BuildRoot 'Boltspark.ico'
+    $resourceFile = Join-Path $BuildRoot 'Boltspark.rc'
+    Copy-Item -LiteralPath $IconPath -Destination $projectIcon -Force
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $resourceText = @'
+#define IDI_BOLTSPARK_ICON 101
+IDI_BOLTSPARK_ICON ICON "Boltspark.ico"
+'@
+    [System.IO.File]::WriteAllText($resourceFile, $resourceText, $utf8NoBom)
+
+    $projectText = [System.IO.File]::ReadAllText($ProjectPath)
+    if ($projectText -notmatch '<ResourceCompile Include="Boltspark\.rc"') {
+        $closingProject = $projectText.LastIndexOf('</Project>')
+        if ($closingProject -lt 0) {
+            throw "Generated native project is missing its closing Project element: $ProjectPath"
+        }
+        $resourceItem = @'
+  <ItemGroup>
+    <ResourceCompile Include="Boltspark.rc" />
+  </ItemGroup>
+'@
+        $projectText = $projectText.Insert($closingProject, $resourceItem)
+        [System.IO.File]::WriteAllText($ProjectPath, $projectText, $utf8NoBom)
+    }
+}
+
+function Set-NativeReleaseGuiSubsystem([string]$ProjectPath) {
+    $projectText = [System.IO.File]::ReadAllText($ProjectPath)
+    $releaseGroupPattern = '(?s)<ItemDefinitionGroup(?=[^>]*Condition="[^"]*Release\|[^"]*")[^>]*>.*?</ItemDefinitionGroup>'
+    $releaseGroups = [regex]::Matches($projectText, $releaseGroupPattern)
+    if ($releaseGroups.Count -eq 0) {
+        throw "Generated native project has no Release item definition groups: $ProjectPath"
+    }
+
+    foreach ($releaseGroup in @($releaseGroups)) {
+        $updatedGroup = $releaseGroup.Value
+        if (-not $updatedGroup.Contains('<SubSystem>Console</SubSystem>')) {
+            throw "Generated native Release configuration is not console-based: $ProjectPath"
+        }
+        if (-not $updatedGroup.Contains('_CONSOLE;')) {
+            throw "Generated native Release configuration is missing the _CONSOLE definition: $ProjectPath"
+        }
+
+        # HashLink's generated hlc_main.c supplies wWinMain when _CONSOLE is
+        # absent. Keep Debug console-based, but package Release as a GUI app so
+        # starting Boltspark.exe does not create a command window.
+        $updatedGroup = $updatedGroup.Replace(
+            '<SubSystem>Console</SubSystem>',
+            '<SubSystem>Windows</SubSystem>')
+        $updatedGroup = $updatedGroup.Replace('_CONSOLE;', '')
+        $projectText = $projectText.Replace($releaseGroup.Value, $updatedGroup)
+    }
+
+    [System.IO.File]::WriteAllText(
+        $ProjectPath,
+        $projectText,
+        (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Test-Environment {
     Write-Host 'Boltspark Windows 11 / DirectX 12 environment check' -ForegroundColor Cyan
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
@@ -418,6 +479,8 @@ function New-NativeRelease {
         'Build the native FreeType module before creating a release.'
     $freeTypeImportLibrary = Get-RequiredFile (Join-Path $repoRoot 'bin\freetype.lib') `
         'Build the native FreeType import library before creating a release.'
+    $appIcon = Get-RequiredFile (Join-Path $repoRoot 'src\res\boltspark.ico') `
+        'The Boltspark application icon is required for native release branding.'
 
     $hashLinkSource = Join-Path $env:HAXELIB_PATH 'hashlink\git'
     if (-not (Test-Path (Join-Path $hashLinkSource 'libs\directx\window.c'))) {
@@ -425,7 +488,7 @@ function New-NativeRelease {
     }
 
     $resizePatch = Join-Path $repoRoot 'tools\patches\hashlink-directx-live-resize.patch'
-    Apply-HashLinkPatch $hashLinkSource $resizePatch 'Interactive resize'
+    Apply-HashLinkPatch $hashLinkSource $resizePatch 'Interactive resize and native window behavior'
     $vswherePatch = Join-Path $repoRoot 'tools\patches\hashlink-vswhere-path.patch'
     Apply-HashLinkPatch $hashLinkSource $vswherePatch 'Visual Studio locator path'
     if ($vsTemplate -eq 'vs2026') {
@@ -481,7 +544,7 @@ function New-NativeRelease {
     }
     Copy-Item -LiteralPath $directXImportLibrary -Destination $directXImportLibraryBackup -Force
     Copy-Item -LiteralPath $patchedDirectXModule -Destination (Join-Path $hashLinkDir 'directx.hdll') -Force
-    Write-Host 'Patched DirectX module built for interactive window resizing.' -ForegroundColor Green
+    Write-Host 'Patched DirectX module built for interactive resizing and auxiliary-window activation.' -ForegroundColor Green
 
     $buildRoot = Join-Path $repoRoot 'bin\native-release'
     $nativeSource = Join-Path $buildRoot 'Boltspark.c'
@@ -552,6 +615,8 @@ function New-NativeRelease {
     if ($expectedMsbuildLookupFailure) {
         Write-Warning 'HashLink generated the C source and project, but its helper could not locate MSBuild. Building the generated project directly.'
     }
+    Set-NativeReleaseGuiSubsystem $nativeProject
+    Add-NativeApplicationIcon $nativeProject $buildRoot $appIcon
 
     $nativeConfig = Get-Content $nativeConfigPath -Raw | ConvertFrom-Json
     $nativeModules = @(

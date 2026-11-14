@@ -1,5 +1,6 @@
 package boltspark.ui.windows;
 
+import boltspark.platform.NativeWindow;
 import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.Process;
@@ -64,7 +65,11 @@ class ApplicationWindowManager {
 
         var program = Sys.programPath();
         var command = program;
-        var arguments = [kind.commandArgument(), ApplicationWindowProtocol.HOST_ARGUMENT];
+        var arguments = [
+            kind.commandArgument(),
+            ApplicationWindowProtocol.HOST_ARGUMENT,
+            ApplicationWindowProtocol.ownerProcessArgument(NativeWindow.currentProcessId())
+        ];
         // In development Sys.programPath() is the .hl bytecode. Native builds
         // return Boltspark.exe directly. The child therefore uses the current
         // HashLink VM only when this process is itself running bytecode.
