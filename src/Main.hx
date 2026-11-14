@@ -1,3 +1,5 @@
+import boltspark.editor.GridSnapping;
+import boltspark.editor.Keybindings;
 import boltspark.editor.SceneObject;
 import boltspark.editor.TransformGizmo;
 import boltspark.ui.BoltUI;
@@ -24,6 +26,10 @@ class Main extends hxd.App {
     var nextObjectId:Int = 1;
     var selectedObjectId:Int = -1;
     var gizmo:TransformGizmo;
+    /** Unreal-style snap manager driving the toolbar, gizmo drags, and inspector commits. */
+    var snap:GridSnapping;
+    /** Rebindable editor keybindings registry (also persisted to disk). */
+    var keybindings:Keybindings;
     var currentTool:Int = 0;
     var localTransformSpace:Bool = false;
     var scaleProportionsLinked:Bool = false;
@@ -32,6 +38,11 @@ class Main extends hxd.App {
     var dragStartScaleX:Float = 1;
     var dragStartScaleY:Float = 1;
     var dragStartScaleZ:Float = 1;
+    // Transform captured when a gizmo drag begins. Incremental snapping
+    // re-applies quantized deltas to these values, so enabling snapping or
+    // starting a drag never jumps the object onto the grid.
+    var dragStartPos:h3d.Vector;
+    var dragStartQuat:h3d.Quat;
     // Gizmo drag pointer tracking. During a drag the window enters
     // relative mouse mode: the OS cursor is hidden and locked while raw
     // hardware deltas drive a virtual pointer, so drags continue
@@ -43,10 +54,6 @@ class Main extends hxd.App {
     var dragVirtualX:Float = 0;
     var dragVirtualY:Float = 0;
     var dragRelative:Bool = false;
-    // Window-client position to restore the cursor to when the drag ends
-    // (Heaps' hldx path unbars the cursor but does not restore position).
-    var dragRestoreX:Int = 0;
-    var dragRestoreY:Int = 0;
     // Synthetic-input verification probes drive drags with WM_MOUSEMOVE,
     // which relative mode ignores; probes keep Absolute mode.
     var inputProbeMode:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null;
@@ -104,7 +111,9 @@ class Main extends hxd.App {
         // else defaults to pixel-exact sampling; procedural icons perform
         // analytic shader anti-aliasing.
         s2d.defaultSmooth = false;
-        boltUI = new BoltUI(s2d, nativeWindow);
+        snap = new GridSnapping();
+        keybindings = new Keybindings();
+        boltUI = new BoltUI(s2d, nativeWindow, snap, keybindings);
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreateObject = createCube;
         boltUI.onCreateObjectAt = createCubeAtViewport;
@@ -121,8 +130,19 @@ class Main extends hxd.App {
         boltUI.onViewportPush = onViewportPush;
         boltUI.onViewportDrag = onViewportDrag;
         boltUI.onViewportRelease = onViewportRelease;
+        boltUI.onSnapChanged = onSnapChanged;
+        boltUI.onSnapToGrid = snapSelectionToGrid;
+        boltUI.onSnapHoldChanged = function(active:Bool) {
+            snap.holdTranslationOff = active;
+            boltUI.log(active
+                ? "snapping: translation snapping suspended (key held)"
+                : "snapping: translation snapping resumed");
+        };
         boltUI.log('renderer driver: ${driverName}');
         boltUI.log("editor shell ready — hierarchy, inspector, console live");
+        if (keybindings.lastError != "") {
+            boltUI.log("keybindings: " + keybindings.lastError);
+        }
         refreshHierarchy();
         selectSceneObject(sceneObjects[0].id);
 
@@ -218,6 +238,9 @@ class Main extends hxd.App {
     function applyTransformChange(axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
+        // Inspector commits are deliberate typed values, so they are never
+        // snapped (matching Unreal's details panel); only gizmo drags snap,
+        // incrementally, and Ctrl+End performs an explicit absolute snap.
         switch (axis) {
             case 0: selected.mesh.x = value;
             case 1: selected.mesh.y = value;
@@ -349,10 +372,10 @@ class Main extends hxd.App {
         dragStartScaleX = selected.mesh.scaleX;
         dragStartScaleY = selected.mesh.scaleY;
         dragStartScaleZ = selected.mesh.scaleZ;
-        // Use Heaps' authoritative client coordinates rather than rebuilding
-        // them from layout floats; this is the exact OS position to restore.
-        dragRestoreX = nativeWindow.mouseX;
-        dragRestoreY = nativeWindow.mouseY;
+        // Capture the full starting transform for incremental snapping.
+        dragStartPos = new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z);
+        dragStartQuat = new h3d.Quat();
+        dragStartQuat.load(selected.mesh.getRotationQuat());
         gizmo.beginDrag(handle, selected.mesh, viewportRay(x, y), pointer.x, pointer.y);
         // Capture all gizmo anchors before raw input can invoke its callback.
         beginRelativeDrag();
@@ -387,7 +410,8 @@ class Main extends hxd.App {
      * locked while raw hardware deltas drive the virtual drag pointer, so
      * drags keep going however far the hand moves - no stalls, no cursor
      * wrapping. Switching back to Absolute on drag end unhides the cursor
-     * and restores it to where it was when the drag started.
+     * and parks it where the drag ended (Unreal-style): the release point
+     * in virtual pointer space, not the drag-start position.
      */
     function beginRelativeDrag():Void {
         dragRelative = false;
@@ -412,9 +436,15 @@ class Main extends hxd.App {
         dragRelative = false;
         try {
             nativeWindow.mouseMode = hxd.impl.MouseMode.Absolute;
-            // The hldx path of set_mouseMode skips the position restore,
-            // so warp the cursor back to where the drag started by hand.
-            nativeWindow.setCursorPos(dragRestoreX, dragRestoreY);
+            // The hldx path of set_mouseMode skips the position restore, so
+            // park the cursor by hand. Unreal-style: it stays where the
+            // drag ended rather than snapping back to the drag start. The
+            // virtual drag pointer is viewport-local, so convert it back to
+            // window client coordinates before warping.
+            var rect = boltUI.getViewportRect();
+            nativeWindow.setCursorPos(
+                Math.round(dragVirtualX + rect.x),
+                Math.round(dragVirtualY + rect.y));
         } catch (error:Dynamic) {
             Sys.println('[gizmo] mouse mode restore failed: ${Std.string(error)}');
         }
@@ -452,22 +482,68 @@ class Main extends hxd.App {
         if (next == null) return;
         switch (next) {
             case MovePosition(nx, ny, nz):
-                selected.mesh.setPosition(nx, ny, nz);
+                // Unreal-style incremental snapping: the drag delta is
+                // quantized onto step multiples relative to the drag-start
+                // position, so enabling snapping or starting a drag never
+                // teleports the object onto the grid. In Local space the
+                // delta quantizes along the object's own axes (the captured
+                // drag-start rotation); in World space it uses the grid axes.
+                var snapped = snap.snapPositionIncremental(dragStartPos,
+                    new h3d.Vector(nx, ny, nz),
+                    localTransformSpace ? dragStartQuat : null);
+                selected.mesh.setPosition(snapped.x, snapped.y, snapped.z);
             case RotateQuat(q):
-                selected.mesh.setRotationQuat(q);
+                // Unreal-style incremental rotation snapping: per-axis Euler
+                // deltas quantized against the rotation grid and re-applied
+                // to the drag-start orientation.
+                selected.mesh.setRotationQuat(snap.snapQuatIncremental(dragStartQuat, q));
             case ScaleValues(sx, sy, sz):
                 if (scaleProportionsLinked) {
                     var ratio = linkedGizmoScaleRatio(sx, sy, sz);
-                    selected.mesh.scaleX = clampedScale(dragStartScaleX * ratio);
-                    selected.mesh.scaleY = clampedScale(dragStartScaleY * ratio);
-                    selected.mesh.scaleZ = clampedScale(dragStartScaleZ * ratio);
-                } else {
-                    selected.mesh.scaleX = sx;
-                    selected.mesh.scaleY = sy;
-                    selected.mesh.scaleZ = sz;
+                    sx = dragStartScaleX * ratio;
+                    sy = dragStartScaleY * ratio;
+                    sz = dragStartScaleZ * ratio;
                 }
+                // Unreal-style incremental scale snapping: per-axis deltas
+                // quantized against the scale step, floored so a step can
+                // never collapse a mesh.
+                var snapped = snap.snapScaleIncremental(
+                    dragStartScaleX, dragStartScaleY, dragStartScaleZ, sx, sy, sz);
+                selected.mesh.scaleX = clampedScale(snapped.x);
+                selected.mesh.scaleY = clampedScale(snapped.y);
+                selected.mesh.scaleZ = clampedScale(snapped.z);
         }
         pushInspectorTransform(selected);
+    }
+
+    /**
+     * Ctrl+End: the one absolute snap. Round the selected object's world
+     * position onto the nearest translation grid point, independent of the
+     * translation enable flag — this is an explicit user command.
+     */
+    function snapSelectionToGrid():Void {
+        var selected = getSelectedObject();
+        if (selected == null || gizmoDragging) return;
+        var step = snap.translationStep;
+        var grid = snap.snapPositionToGrid(
+            new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z));
+        if (grid.x == selected.mesh.x && grid.y == selected.mesh.y
+                && grid.z == selected.mesh.z) {
+            boltUI.log('snapping: ${selected.name} already on the ${round2(step)} grid');
+            return;
+        }
+        selected.mesh.setPosition(grid.x, grid.y, grid.z);
+        pushInspectorTransform(selected);
+        boltUI.log('snapping: ${selected.name} to grid (step ${round2(step)}) '
+            + 'position = (${round2(grid.x)}, ${round2(grid.y)}, ${round2(grid.z)})');
+    }
+
+    /** Viewport snap toolbar feedback: reflect toggle/preset changes in the console. */
+    function onSnapChanged(mode:Int):Void {
+        var modeNames = ["translation", "rotation", "scale"];
+        var enabled = snap.isEnabled(mode);
+        boltUI.log('snapping: ${modeNames[mode]} ${enabled ? "enabled" : "disabled"}'
+            + ' · step ${round2(snap.stepFor(mode))}');
     }
 
     /** Ratio represented by the active scale handle's unlinked result. */
@@ -698,7 +774,11 @@ class Main extends hxd.App {
 
         selectionOutline = new h3d.scene.Graphics(s3d);
         selectionOutline.name = "SelectionOutline";
+        // X-ray outline: disable both depth write and depth test so the
+        // selected object's silhouette stays visible through any geometry
+        // in front of it, not just through the object's own faces.
         selectionOutline.material.mainPass.depthWrite = false;
+        selectionOutline.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
         selectionOutline.material.mainPass.layer = 10;
     }
 

@@ -1,5 +1,7 @@
 package boltspark.ui;
 
+import boltspark.editor.GridSnapping;
+import boltspark.editor.Keybindings;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
@@ -10,10 +12,13 @@ import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.GameObjectPalette;
 import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
+import boltspark.ui.widgets.KeybindingsWindow;
+import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
 import boltspark.ui.widgets.TextInputField;
 import boltspark.ui.widgets.UiButton;
+import boltspark.ui.widgets.ViewportSnapBar;
 
 /**
  * Retained native editor shell. All controls are Heaps H2D objects rendered in
@@ -85,6 +90,7 @@ class EditorShell {
     final viewportHintIcon:h2d.Graphics;
     final viewportHintText:h2d.Text;
     final viewportHintHit:h2d.Interactive;
+    final snapBar:ViewportSnapBar;
     final console:ConsolePanel;
     final statusDot:h2d.Graphics;
     final statusText:h2d.Text;
@@ -97,6 +103,8 @@ class EditorShell {
     final dockLayout:DockLayout;
     final layoutStore:DockLayoutStore;
     final palette:GameObjectPalette;
+    final menuDropdown:MenuDropdown;
+    final keybindingsWindow:KeybindingsWindow;
 
     public var onCreateObject:Null<Void->Void>;
     public var onCreateObjectAt:Null<Float->Float->Void>;
@@ -113,6 +121,12 @@ class EditorShell {
     public var onToolChanged:Null<Int->Void>;
     /** `true` selects Local axes; `false` selects World axes. */
     public var onTransformSpaceChanged:Null<Bool->Void>;
+    /** Fired when the viewport snap bar toggles or changes a preset. */
+    public var onSnapChanged:Null<Int->Void>;
+    /** Ctrl+End: snap the primary selection onto the translation grid. */
+    public var onSnapToGrid:Null<Void->Void>;
+    /** Hold key (default V): true while held to suspend translation snapping. */
+    public var onSnapHoldChanged:Null<Bool->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
@@ -131,8 +145,11 @@ class EditorShell {
     var localTransformSpace:Bool = false;
     var transformSpaceHovered:Bool = false;
     var scaleLinked:Bool = false;
+    /** Whether a hold-to-disable press was actually forwarded past the text guard. */
+    var snapHoldForwarded:Bool = false;
 
-    public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter) {
+    public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter,
+            snapping:GridSnapping, keybindings:Keybindings) {
         this.ctx = ctx;
         this.input = input;
         root = new h2d.Object(parent);
@@ -155,6 +172,10 @@ class EditorShell {
         };
         viewportHit.onPush = function(event) {
             if (event.button != 0) return;
+            // Any viewport press dismisses the snap preset dropdown and the
+            // File menu before the press is processed.
+            snapBar.closePopup();
+            menuDropdown.close();
             var gizmoConsumed = onViewportPush != null
                 && onViewportPush(event.relX, event.relY);
             if (!gizmoConsumed) return;
@@ -220,7 +241,34 @@ class EditorShell {
             };
             var button = new UiButton(ctx, menuName, menuWidth, 24, root);
             button.setQuiet();
-            button.onClick = function() log(menuName + " menu: command surface reserved");
+            var capturedButton = button;
+            var capturedMenuName = menuName;
+            if (menuName == "File") {
+                button.onClick = function() {
+                    if (menuDropdown.isOpen) {
+                        menuDropdown.close();
+                        return;
+                    }
+                    closePaletteIfOpen();
+                    // Drop straight down from the button into the body area.
+                    menuDropdown.open(capturedButton.x, Theme.TITLE_BAR_HEIGHT,
+                        [{
+                            label: "Editor Settings",
+                            submenu: [{
+                                label: "Editor Keybindings…",
+                                onClick: function() {
+                                    input.clearFocus();
+                                    keybindingsWindow.open();
+                                }
+                            }]
+                        }]);
+                };
+            } else {
+                button.onClick = function() {
+                    closePaletteIfOpen();
+                    log(capturedMenuName + " menu: command surface reserved");
+                };
+            }
             menuButtons.push(button);
         }
 
@@ -434,6 +482,20 @@ class EditorShell {
             event.propagate = false;
         };
 
+        // Unreal-style snap toolbar: toggle/value pairs for translation,
+        // rotation, and scale, sitting next to the view-mode control.
+        snapBar = new ViewportSnapBar(ctx, snapping, viewportHud);
+        snapBar.onSnapChanged = function(mode) {
+            closePaletteIfOpen();
+            if (onSnapChanged != null) onSnapChanged(mode);
+        };
+        // Ctrl+End routes from the window-level input adapter, which sees key
+        // events even when full-window interactives consume pointer input.
+        input.onSnapToGridPressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onSnapToGrid != null) onSnapToGrid();
+        };
+
         console = new ConsolePanel(ctx, root);
         console.onBackgroundClick = closePaletteIfOpen;
 
@@ -452,20 +514,44 @@ class EditorShell {
         inputStatus.lineBreak = false;
         // Input diagnostics are intentionally not surfaced in the shipped status bar.
         input.onDeletePressed = function() {
-            if (objectNameField.isFocused() || hierarchySearch.isFocused()) return;
-            for (field in transformFields) if (field.isEditing()) return;
-            for (field in rotationFields) if (field.isEditing()) return;
-            for (field in scaleFields) if (field.isEditing()) return;
+            if (anyTextCaptureActive()) return;
             deleteSelection();
         };
-        // Number-row tool shortcuts (1/2/3) share the Delete guard: text
-        // capture must not hijack the keypress.
+        // Tool shortcuts (1 Move / E Rotate / R Scale by default) share the
+        // text-capture guard: typing in a field must not hijack the keypress.
         input.onShortcutPressed = function(tool:Int) {
-            if (objectNameField.isFocused() || hierarchySearch.isFocused()) return;
-            for (field in transformFields) if (field.isEditing()) return;
-            for (field in rotationFields) if (field.isEditing()) return;
-            for (field in scaleFields) if (field.isEditing()) return;
+            if (anyTextCaptureActive()) return;
             selectTool(tool);
+        };
+        // Hold-to-suspend translation snapping: engage only outside text
+        // capture, but always release on key-up so the state never sticks.
+        input.onSnapHoldChanged = function(active:Bool) {
+            if (active) {
+                if (anyTextCaptureActive()) return;
+                snapHoldForwarded = true;
+                if (onSnapHoldChanged != null) onSnapHoldChanged(true);
+                snapBar.refresh();
+                return;
+            }
+            // A press rejected by the text guard has no matching state to
+            // release (and should not emit a misleading "resumed" log line).
+            if (!snapHoldForwarded) return;
+            snapHoldForwarded = false;
+            if (onSnapHoldChanged != null) onSnapHoldChanged(false);
+            snapBar.refresh();
+        };
+        // Escape closes the most specific popup first: settings window, then
+        // the File menu, then palette and snap presets.
+        input.onEscapePressed = function() {
+            if (keybindingsWindow.isOpen) {
+                keybindingsWindow.close();
+                return;
+            }
+            if (menuDropdown.isOpen) {
+                menuDropdown.close();
+                return;
+            }
+            closePaletteIfOpen();
         };
 
         dockLayout = new DockLayout();
@@ -493,6 +579,10 @@ class EditorShell {
         };
         consoleSplitter.onDragEnd = saveLayout;
 
+        // Popup layers are created after dock content/splitters so their
+        // surfaces and hit targets cannot end up behind the viewport or panel
+        // interactives. Ordering is menu < palette < settings window.
+        menuDropdown = new MenuDropdown(ctx, root);
         palette = new GameObjectPalette(ctx, root);
         palette.onCreateCube = function() {
             if (onCreateObject != null) onCreateObject();
@@ -500,6 +590,9 @@ class EditorShell {
         palette.onDropCube = function(x, y) {
             if (onCreateObjectAt != null) onCreateObjectAt(x, y);
         };
+
+        // Editor Settings > Editor Keybindings window; floats above all chrome.
+        keybindingsWindow = new KeybindingsWindow(ctx, keybindings, root);
 
         if (layoutError != null) log("layout: " + layoutError);
         selectionStatus.text = selectionStatusValue;
@@ -597,6 +690,18 @@ class EditorShell {
         viewportHintText.y = 4;
         viewportHintHit.x = viewportHintSurface.x;
         viewportHintHit.y = 0;
+
+        // Snap toolbar sits right of the 134px view-mode strip and before the
+        // right-aligned World/Local control; hidden on very narrow viewports.
+        snapBar.x = 142;
+        snapBar.y = 0;
+        snapBar.visible = viewportHud.visible
+            && geometry.viewport.width >= 142 + 248 + 96;
+        // Real, splitter-aware container height for popup clamping: the
+        // console splitter can shrink the viewport at any time, so the popup
+        // bounds are derived from the live layout, never a fixed estimate.
+        snapBar.setContainerHeight(Math.max(0, geometry.viewport.height - 16));
+        keybindingsWindow.clampToWindow();
 
         var statusY = height - Theme.STATUS_BAR_HEIGHT;
         statusDot.x = 8;
@@ -1029,8 +1134,19 @@ class EditorShell {
         event.propagate = false;
     }
 
+    /** True while any text-entry control owns the keyboard. */
+    function anyTextCaptureActive():Bool {
+        if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
+        for (field in transformFields) if (field.isEditing()) return true;
+        for (field in rotationFields) if (field.isEditing()) return true;
+        for (field in scaleFields) if (field.isEditing()) return true;
+        return false;
+    }
+
     function closePaletteIfOpen():Void {
         if (palette.visible) palette.close();
+        snapBar.closePopup();
+        menuDropdown.close();
     }
 
     /** Redraw the clickable viewport World/Local axis-space control. */

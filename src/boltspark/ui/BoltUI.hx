@@ -1,5 +1,7 @@
 package boltspark.ui;
 
+import boltspark.editor.GridSnapping;
+import boltspark.editor.Keybindings;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.HierarchyEntry;
 
@@ -43,11 +45,18 @@ class BoltUI {
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
     public var onViewportRelease:Null<Float->Float->Void>;
+    /** Fired when the viewport snap bar toggles or changes a preset. */
+    public var onSnapChanged:Null<Int->Void>;
+    /** Ctrl+End: snap the primary selection onto the translation grid. */
+    public var onSnapToGrid:Null<Void->Void>;
+    /** Hold key (default V): true while held to suspend translation snapping. */
+    public var onSnapHoldChanged:Null<Bool->Void>;
 
-    public function new(parent:h2d.Scene, window:hxd.Window) {
+    public function new(parent:h2d.Scene, window:hxd.Window, snapping:GridSnapping,
+            keybindings:Keybindings) {
         ctx = new UiContext(window);
-        var input = new InputAdapter(parent);
-        shell = new EditorShell(parent, ctx, input);
+        var input = new InputAdapter(parent, keybindings);
+        shell = new EditorShell(parent, ctx, input, snapping, keybindings);
         shell.onCreateObject = function() if (onCreateObject != null) onCreateObject();
         shell.onCreateObjectAt = function(x, y) if (onCreateObjectAt != null) onCreateObjectAt(x, y);
         shell.onDeleteObjects = function(ids) if (onDeleteObjects != null) onDeleteObjects(ids);
@@ -73,6 +82,11 @@ class BoltUI {
         };
         shell.onViewportDrag = function(x, y) if (onViewportDrag != null) onViewportDrag(x, y);
         shell.onViewportRelease = function(x, y) if (onViewportRelease != null) onViewportRelease(x, y);
+        shell.onSnapChanged = function(mode) if (onSnapChanged != null) onSnapChanged(mode);
+        shell.onSnapToGrid = function() if (onSnapToGrid != null) onSnapToGrid();
+        shell.onSnapHoldChanged = function(active) {
+            if (onSnapHoldChanged != null) onSnapHoldChanged(active);
+        };
     }
 
     /** Editor console access. */
