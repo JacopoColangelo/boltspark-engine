@@ -29,7 +29,7 @@ Environment: user-level env vars point at the project toolchain (`HAXEPATH`, `HA
 
 ### Application
 - `src/Main.hx`: `hxd.App` bootstrap; sets window title/vsync; logs the actual renderer driver class (`h3d.impl.DX12Driver`); builds a static orange sample cube; wires BoltUI object and transform commands to engine objects; maintains camera aspect on resize.
-- Gizmo drags enter hldx-backed `MouseMode.Relative`, consume Windows Raw Input deltas through a hidden/clipped cursor, and restore the press-time client position on release. Transform solving uses press-time screen Jacobians/tangents rather than off-screen camera rays, keeping move/rotate/scale response linear across arbitrary accumulated motion.
+- Gizmo drags enter hldx-backed `MouseMode.Relative`, consume Windows Raw Input deltas through a hidden/clipped cursor, and park the restored cursor at the virtual drag endpoint on release. Transform solving uses press-time screen Jacobians/tangents rather than off-screen camera rays, keeping move/rotate/scale response linear across arbitrary accumulated motion.
 - `compile.hxml`: `-lib heaps -lib format -lib hldx -D dx12 -D hl_ver=1.16.0 -debug -hl bin/boltspark.hl`.
 
 ### BoltUI framework slice (`src/boltspark/ui/`)
@@ -37,6 +37,7 @@ Environment: user-level env vars point at the project toolchain (`HAXEPATH`, `HA
 - Editor shell: compact square-edged top bar and toolbar, searchable hierarchy (clickable `sampleCube` item), **transparent 3D viewport** (starter bug fixed: it used to fill the whole window with an opaque background, hiding `s3d`), continuous Object/Transform inspector groups, row resets, ratio-preserving linked Scale, timestamped editor console, and a slim status bar. Resize-aware layout.
 - UI edge quality: embedded Inter Regular, SemiBold, and Bold TTF faces are rasterized by FreeType at each exact requested UI size (11/13/15px), with native TrueType hinting, correct pen advances and an on-demand internal glyph atlas. This preserves font identity and weight without the previous blur/sharpen or supersampling tradeoffs; the console keeps its existing mono rendering. Small icons and symbols remain analytic signed-distance shader shapes with physical-pixel anti-aliasing.
 - Command flow: widgets → shell callbacks → `Main` → engine objects (no direct widget→engine mutation).
+- Viewport transform snapping now has independent translation/rotation/scale toggles and preset ramps. V temporarily bypasses translation snapping, Ctrl+End performs an explicit absolute grid snap, and File → Editor Settings → Editor Keybindings opens a separate native top-level hldx/DX12 application window for persisted, conflict-checked shortcuts with defaults 1/E/R for Move/Rotate/Scale. Changes synchronize back to the running editor. Both HWNDs use native dark title bars; close/reopen hides and restores the same keybindings host rather than rebuilding its process, device, and font cache.
 
 ### Build tools
 - The initial M0 scripts were consolidated into `tools/build.ps1`. It supports environment validation (`-Check`), explicit dependency installation (`-InstallDependencies`), development/release builds (default), and running the development build (`-Run`).
@@ -85,6 +86,7 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 | Add-object palette outside dismissal | `bin/palette-dismiss-open.png`, `bin/palette-dismiss-viewport.png`, `bin/palette-dismiss-inspector-selected-open.png`, `bin/palette-dismiss-inspector-selected.png`, `bin/palette-dismiss-console.png`, `bin/palette-dismiss-hierarchy.png` (an open hierarchy context palette closes on left-clicked empty viewport, visible inspector content, console, and hierarchy space) |
 | Hierarchy background focus/selection | `bin/hierarchy-empty-body-deselect.png`, `bin/hierarchy-empty-header-deselect.png`, `bin/hierarchy-search-preserves-selection.png` (empty hierarchy chrome blurs and deselects; actual controls preserve selection) |
 | Numeric property interaction | `bin/numeric-drag-fields.png`, `bin/numeric-axis-scrub-right.png`, `bin/numeric-click-edit-focus.png`, `bin/transform-linked-scale.png` (compact up/down arrows, transform scrubbing, click-to-edit, and ratio-preserving scale linkage) |
+| Grid snapping + keybindings | `bin/keybindings-native-window.png`, `bin/keybindings-native-window-rebound.png`, `bin/main-dark-titlebar.png`, `bin/native-window-evidence.txt`, `bin/keybindings-v-held.png`, `bin/keybindings-evidence.txt`, `bin/snap-hold-on.log`, `bin/snap-hold-bypass.log` (dark native title bars, separate HWND in development and release, same-PID/HWND cached reopen, live Ctrl+T synchronization/command routing, persistence, modifier-safe V release, and snapped `x=1` versus held-V unsnapped `x=0.8`) |
 | Environment check | `tools/build.ps1 -Check` exit 0 |
 | Build | `tools/build.ps1` creates the development build and `release\Boltspark.exe` |
 | Clean shutdown | run exit code 0 on window close |

@@ -20,6 +20,7 @@ This document describes the architecture as implemented at M0, on Windows 11 x64
 | BoltUI (src/boltspark/ui) — native H2D editor chrome           |
 |   BoltUI facade -> EditorShell -> widgets (button/number/...)  |
 |   InputAdapter (scene-level keyboard/focus/pointer reporting)  |
+|   windows/ (separate top-level HWND process per editor dialog) |
 +---------------------------------------------------------------+
 | Main.hx — boot + command wiring (UI commands -> engine objects)|
 +---------------------------------------------------------------+
@@ -30,7 +31,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 ## Startup flow
 
 1. `tools/build.ps1 -Run` starts `hl` with `bin/` as the working directory. HashLink loads `boltspark.hl`, resolves the project-local `freetype.hdll` from `bin/`, and resolves the locked DirectX/Heaps modules from the HashLink runtime path.
-2. `Main.main()` constructs `Main extends hxd.App`; Heaps creates the native window, 3D scene (`s3d`), 2D scene (`s2d`), and the render engine.
+2. `Main.main()` normally constructs `Main extends hxd.App`; Heaps creates the native window, 3D scene (`s3d`), 2D scene (`s2d`), and the render engine. A `--boltspark-window=...` route instead starts the requested application-level editor window with its own native HWND and DX12 swap chain.
 3. `h3d.Engine` selects `h3d.impl.DX12Driver` because `compile.hxml` defines `-D dx12` (with `-D hl_ver=1.16.0` required by the driver's `hl.CArray` usage).
 4. `Main.init()`:
    - logs the actual driver class name (`Type.getClassName(Type.getClass(engine.driver))`) — M0's positive driver evidence;
@@ -50,6 +51,8 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | `UiIcons.hx` / `shaders/UiIconShader.hx` | Analytic icon shapes with no icon-image sampling and a one-physical-pixel anti-aliased edge. |
 | `InputAdapter.hx` | One scene-level `addEventListener` hook recording keyboard (name + counts), focus transitions, and pointer movement. Purely observational — reports to the status bar; no behavior. |
 | `EditorShell.hx` | Owns chrome geometry: draws top bar, side panels, console area, status bar into one `h2d.Graphics`; positions widgets; exposes editor command callbacks upward. Rebuilds static geometry only on resize. |
+| `windows/ApplicationWindowManager.hx` | Starts and owns one reusable native host process per application-level editor window. This is the safe multi-window boundary for the locked Heaps 2.1 DX12 driver, whose swap chain is process-window scoped. Opening the relevant parent menu prepares a hidden host; parent/host show/quit commands travel over a private stdin pipe. |
+| `windows/KeybindingsWindowApp.hx` / `KeybindingsWindowContent.hx` | Native top-level Editor Keybindings window and its retained-H2D content. Close/Escape hides the hosted HWND; reopening reuses its existing DX12 device and font cache. Persisted changes synchronize to the running editor through the validated keybinding store. |
 | `widgets/UiButton.hx` | `h2d.Interactive` hit region + centered label; hover/push/release-outside color states; click callback. |
 | `widgets/NumericDragField.hx` / `AxisValue.hx` | DCC-style numeric transform editing through text, arrow steps, and horizontal scrubbing. |
 | `widgets/ConsolePanel.hx` | Bounded append-only log (timestamped, up to 9 complete visible lines) rendered as one clipped multiline `h2d.Text`. |
@@ -63,6 +66,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 5. **Toolchain as a locked set.** Compiler/runtime/bindings are pinned together (see `docs/TOOLCHAIN_VERSIONS.md`); `tools/build.ps1 -Check` enforces the pins.
 6. **Runtime font identity.** Inter Regular, SemiBold, and Bold remain separate TTF faces. FreeType uses each face's native TrueType hinting and pen advances instead of resizing a pre-rasterized font or synthesizing weight.
 7. **Editor rotation convention.** Rotation X/Z are converted to Heaps Z/X at the command boundary; numeric fields, colored rings, picking, and gizmo quaternion application all use the same mapping while Y is unchanged.
+8. **Application windows are real OS windows.** Editor dialogs and future detached panels do not emulate title bars inside the main render surface. Each gets a native hldx HWND/DX12 surface with a Windows dark title bar; transient menus and dropdowns remain in-window popups. A closed auxiliary HWND is hidden and cached until editor shutdown, avoiding repeat process, device, and font initialization.
 
 ## Deliberately out of scope at M0
 
