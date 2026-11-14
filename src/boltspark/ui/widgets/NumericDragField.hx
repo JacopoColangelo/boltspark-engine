@@ -3,6 +3,7 @@ package boltspark.ui.widgets;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiText;
+import boltspark.ui.UiTextInput;
 import boltspark.ui.UiIcons;
 
 /**
@@ -40,6 +41,9 @@ class NumericDragField extends h2d.Object {
     var widthValue:Float;
     var focused:Bool = false;
     var dragging:Bool = false;
+    var nativeCaptureActive:Bool = false;
+    var unboundedScrub:Bool = false;
+    var endingCapture:Bool = false;
     var skipFocusCommit:Bool = false;
     var scrubStartX:Float = 0;
     var scrubStartValue:Float = 0;
@@ -67,8 +71,7 @@ class NumericDragField extends h2d.Object {
         prefix.textColor = prefixColor;
         prefix.lineBreak = false;
 
-        input = new h2d.TextInput(ctx.monoFont, this);
-        input.smooth = true;
+        input = new UiTextInput(ctx.monoFont, this);
         input.text = format(value);
         input.textColor = Theme.TEXT;
         input.lineBreak = false;
@@ -164,7 +167,10 @@ class NumericDragField extends h2d.Object {
             switch (captured.kind) {
                 case EMove:
                     var delta = context.window.mouseX - scrubStartX;
-                    if (!dragging && Math.abs(delta) >= SCRUB_THRESHOLD) dragging = true;
+                    if (!dragging && Math.abs(delta) >= SCRUB_THRESHOLD) {
+                        dragging = true;
+                        beginUnboundedScrub();
+                    }
                     if (dragging) {
                         var steps = Math.round(delta / PIXELS_PER_STEP);
                         applyValue(scrubStartValue + steps * step, true);
@@ -174,7 +180,7 @@ class NumericDragField extends h2d.Object {
                     var pointerInside = captured.relX >= 0 && captured.relX < scrubHit.width
                         && captured.relY >= 0 && captured.relY < scrubHit.height;
                     var wasDragging = dragging;
-                    scrubHit.stopCapture();
+                    endScrubCapture();
                     dragging = false;
                     if (!wasDragging && pointerInside) {
                         focusInput();
@@ -184,14 +190,77 @@ class NumericDragField extends h2d.Object {
                     captured.propagate = false;
                 case EFocusLost:
                     dragging = false;
-                    scrubHit.stopCapture();
+                    endScrubCapture();
                     context.restoreArrowCursor();
                     captured.propagate = false;
                 case _:
                     captured.propagate = false;
             }
-        });
+        }, onScrubCaptureCancelled);
+        // Heaps capture above redirects scene events, while native capture
+        // makes Win32 continue sending those events outside a windowed client.
+        context.setMouseCapture(true);
+        nativeCaptureActive = true;
         event.propagate = false;
+    }
+
+    function endScrubCapture():Void {
+        endUnboundedScrub();
+        endingCapture = true;
+        scrubHit.stopCapture();
+        endingCapture = false;
+        releaseNativeCapture();
+    }
+
+    function onScrubCaptureCancelled():Void {
+        endUnboundedScrub();
+        releaseNativeCapture();
+        if (endingCapture) return;
+        dragging = false;
+        context.restoreArrowCursor();
+    }
+
+    function releaseNativeCapture():Void {
+        if (!nativeCaptureActive) return;
+        nativeCaptureActive = false;
+        context.setMouseCapture(false);
+    }
+
+    /** Switch from finite screen coordinates to hldx raw mouse deltas. */
+    function beginUnboundedScrub():Void {
+        unboundedScrub = false;
+        try {
+            // AbsoluteUnbound keeps feeding virtual absolute EMove positions
+            // into the existing h2d capture while hldx hides/clips the OS
+            // cursor and obtains motion from Windows Raw Input. This is the
+            // same edge-independent input path used by viewport gizmo drags.
+            context.window.mouseMode = hxd.impl.MouseMode.AbsoluteUnbound(true);
+            unboundedScrub = switch (context.window.mouseMode) {
+                case AbsoluteUnbound(_): true;
+                case _: false;
+            };
+            if (!unboundedScrub) {
+                Sys.println('[numeric] unbounded mouse mode was rejected; using absolute fallback');
+            }
+        } catch (error:Dynamic) {
+            Sys.println('[numeric] unbounded mouse mode unavailable: ${Std.string(error)}');
+        }
+    }
+
+    function endUnboundedScrub():Void {
+        if (!unboundedScrub) return;
+        // Preserve the virtual endpoint before Absolute mode stops consuming
+        // raw deltas. The locked hldx path does not restore this position, so
+        // park the visible cursor explicitly just like the transform gizmo.
+        var endX = context.window.mouseX;
+        var endY = context.window.mouseY;
+        unboundedScrub = false;
+        try {
+            context.window.mouseMode = hxd.impl.MouseMode.Absolute;
+            context.window.setCursorPos(Math.round(endX), Math.round(endY));
+        } catch (error:Dynamic) {
+            Sys.println('[numeric] mouse mode restore failed: ${Std.string(error)}');
+        }
     }
 
     function focusInput():Void {
@@ -207,11 +276,21 @@ class NumericDragField extends h2d.Object {
         var clamped = clamp(next);
         // Keep repeated fractional steps stable enough for exact display and
         // command comparisons without changing the configured step itself.
-        clamped = Math.round(clamped * 1000000) / 1000000;
+        // Round only the fractional remainder: multiplying the complete value
+        // by 1,000,000 overflowed HashLink's 32-bit Math.round result above
+        // 2147.483647 and could turn a large positive transform negative.
+        clamped = stableRound(clamped);
         var changed = Math.abs(clamped - value) > 0.0000001;
         value = clamped;
         input.text = format(value);
-        if (notify && changed && onValueChanged != null) onValueChanged(value);
+        if (notify && changed && onValueChanged != null) {
+            onValueChanged(value);
+            // Command handlers can synchronously constrain a transform and
+            // push the applied value back through setValue(). Reflect that
+            // result immediately instead of leaving the requested value in a
+            // focused field until it is selected again.
+            input.text = format(value);
+        }
     }
 
     function commitEdit():Void {
@@ -222,6 +301,11 @@ class NumericDragField extends h2d.Object {
             return;
         }
         var parsed = Std.parseFloat(entered);
+        if (!Math.isFinite(parsed)) {
+            input.text = format(value);
+            if (onEditRejected != null) onEditRejected("Enter a finite number.");
+            return;
+        }
         if (parsed < min || parsed > max) {
             input.text = format(value);
             if (onEditRejected != null) onEditRejected('Value must be between ${min} and ${max}.');
@@ -249,6 +333,12 @@ class NumericDragField extends h2d.Object {
         if (next < min) return min;
         if (next > max) return max;
         return next;
+    }
+
+    static function stableRound(value:Float):Float {
+        if (!Math.isFinite(value) || Math.abs(value) >= 1000000) return value;
+        var whole = value < 0 ? Math.ceil(value) : Math.floor(value);
+        return whole + Math.round((value - whole) * 1000000) / 1000000;
     }
 
     function refreshLayout():Void {

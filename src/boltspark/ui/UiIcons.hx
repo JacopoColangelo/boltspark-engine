@@ -31,27 +31,38 @@ enum abstract UiIconKind(Int) from Int to Int {
     var Reset = 25;
 }
 
-/** Analytic single-color editor icons; no icon font or bitmap asset. */
+/** Exact-size analytic editor icons with pixel-grid-fitted strokes. */
 class UiIcons {
     public static function draw(target:h2d.Graphics, kind:UiIconKind, x:Float, y:Float,
             size:Float, color:Int, alpha:Float = 1):Void {
         target.removeChildren();
         if (kind == None || size <= 0) return;
 
+        // Like a hinted font glyph, each icon is rasterized at the exact size
+        // it occupies. Integer quad bounds keep the analytic coverage stable;
+        // the shader then fits one- and two-pixel stems to the pixel grid.
+        var pixelSize = Math.max(1, Math.round(size));
+
         // The one-pixel white texture only supplies a quad. Icon coverage is
         // calculated analytically in UiIconShader; no icon bitmap is sampled.
         var bitmap = new h2d.Bitmap(h2d.Tile.fromColor(0xFFFFFF), target);
-        bitmap.x = x;
-        bitmap.y = y;
-        bitmap.width = size;
-        bitmap.height = size;
+        bitmap.x = Math.round(x);
+        bitmap.y = Math.round(y);
+        bitmap.width = pixelSize;
+        bitmap.height = pixelSize;
         bitmap.smooth = false;
         bitmap.color.setColor(color);
         bitmap.color.a = Math.max(0, Math.min(1, alpha));
 
         var shader = new UiIconShader();
         shader.iconKind = kind;
-        shader.stroke = Math.max(1.0, size * 0.075) / size;
+        shader.iconSize = pixelSize;
+        // Small controls retain a single-pixel stem. Header icons use a
+        // grayscale-hinted 1.5 px optical weight, while 16 px toolbar glyphs
+        // use two full pixels to match Inter SemiBold. Unlike the old
+        // size*0.075 rule, each supported size now has a deliberate weight.
+        var strokePixels = pixelSize >= 16 ? 2.0 : (pixelSize >= 14 ? 1.5 : 1.0);
+        shader.stroke = strokePixels / pixelSize;
         bitmap.addShader(shader);
     }
 }

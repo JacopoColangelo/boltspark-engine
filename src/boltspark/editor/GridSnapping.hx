@@ -17,11 +17,12 @@ package boltspark.editor;
  *    absolute snap and is an explicit Ctrl+End command.
  *  - Translation deltas snap componentwise against the translation grid
  *    (units, matching Unreal's centimeter-based uu).
- *  - Rotation deltas snap per Euler axis (degrees) — Unreal snaps the
+ *  - Rotation-ring deltas snap per Euler axis (degrees) — Unreal snaps the
  *    per-axis rotation values shown in the details panel, so quaternions are
- *    converted to Euler, delta-snapped, and rebuilt.
- *  - Scale deltas snap componentwise against the scale step, guarded by the
- *    editor's scale floor so a step boundary can never round a mesh to zero.
+ *    converted to Euler, delta-snapped, and rebuilt. The omni arc-ball is
+ *    deliberately freeform and bypasses this manager.
+ *  - Scale deltas snap componentwise against the scale step. A signed dead
+ *    zone prevents singular zero scale while still allowing mirrored values.
  */
 class GridSnapping {
     /** Mode identifiers shared by the manager and the viewport toolbar. */
@@ -57,8 +58,8 @@ class GridSnapping {
     public var rotationIndex:Int = 4;
     public var scaleIndex:Int = 3;
 
-    /** Smallest scale magnitude the editor allows (mirrors clampedScale). */
-    public var scaleMinimum:Float = 0.01;
+    /** Smallest signed scale magnitude the editor allows. */
+    public var scaleMinimum:Float = ScalePolicy.MIN_MAGNITUDE;
 
     /**
      * Hold-key override: while true, incremental translation snapping is
@@ -242,17 +243,21 @@ class GridSnapping {
 
     /**
      * Incremental scale snapping: quantize each per-axis scale delta onto the
-     * scale step and re-apply it to the drag-start scale, floored by the
-     * editor's scale minimum.
+     * scale step and re-apply it to the drag-start scale. Results preserve
+     * their sign; values snapped onto zero use the unsnapped target's side of
+     * the origin and are moved to the editor's minimum magnitude.
      */
     public function snapScaleIncremental(startX:Float, startY:Float, startZ:Float,
             targetX:Float, targetY:Float, targetZ:Float):h3d.Vector {
         if (!enableScale) return new h3d.Vector(targetX, targetY, targetZ);
         var step = scaleStep;
+        var snappedX = startX + snapValue(targetX - startX, step);
+        var snappedY = startY + snapValue(targetY - startY, step);
+        var snappedZ = startZ + snapValue(targetZ - startZ, step);
         return new h3d.Vector(
-            Math.max(scaleMinimum, startX + snapValue(targetX - startX, step)),
-            Math.max(scaleMinimum, startY + snapValue(targetY - startY, step)),
-            Math.max(scaleMinimum, startZ + snapValue(targetZ - startZ, step)));
+            ScalePolicy.clamp(snappedX, targetX == 0 ? startX : targetX, scaleMinimum),
+            ScalePolicy.clamp(snappedY, targetY == 0 ? startY : targetY, scaleMinimum),
+            ScalePolicy.clamp(snappedZ, targetZ == 0 ? startZ : targetZ, scaleMinimum));
     }
 
     /** Wrap a signed Euler delta in degrees into (-180, 180]. */

@@ -37,5 +37,34 @@ class FreeTypeRuntimeRepro {
             + 'runtime=${runtimeVersion} font=${font.name} '
             + 'size=${font.size}px omegaAdvance=${first.width}');
         font.dispose();
+
+        // The console and numeric controls migrated from the generated bitmap
+        // atlas to this embedded face. Keep its previous 12px layout contract
+        // while FreeType supplies native hinting and dynamic glyph coverage.
+        var mono = FreeTypeFont.dynamicFromBytes(
+            File.getBytes("src/res/fonts/jetbrains_mono.ttf"),
+            12,
+            {
+                antiAliasing: true,
+                atlasWidth: 128,
+                chars: "0?",
+                kerning: false,
+                padding: 2,
+                uploadTexture: false
+            },
+            "JetBrains Mono runtime repro");
+        var zero = mono.getChar("0".code);
+        if (mono.size != 12 || mono.lineHeight != 17 || mono.baseLine != 13) {
+            throw 'Unexpected JetBrains Mono metrics: size=${mono.size} '
+                + 'lineHeight=${mono.lineHeight} baseLine=${mono.baseLine}';
+        }
+        if (zero == null || zero.width != 7) {
+            var actualAdvance = zero == null ? "null" : Std.string(zero.width);
+            throw 'Expected JetBrains Mono 12px digit advance 7, got ${actualAdvance}';
+        }
+        Sys.println('[freetype] JetBrains Mono layout preserved: '
+            + 'size=${mono.size}px lineHeight=${mono.lineHeight} '
+            + 'baseLine=${mono.baseLine} digitAdvance=${zero.width}');
+        mono.dispose();
     }
 }

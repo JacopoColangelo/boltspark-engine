@@ -176,8 +176,8 @@ press; drawing uses separate scratch vectors so per-frame redraws cannot corrupt
 an active drag. The inspector shows Position/Rotation/Scale rows and updates all
 nine values live during gizmo drags; rotation/scale fields commit through the
 same command flow. The selection outline traces the object's true transformed
-silhouette (12 mesh edges through rotation/scale, inflated about center) and
-redraws per frame.
+silhouette (12 exact mesh edges through rotation/scale) at a fixed two-pixel
+screen-space width, clips camera-crossing segments, and redraws per frame.
 
 **Exit criteria**
 - [x] All three tools show their gizmo at the selection with hover highlighting and screen-space picking (`bin/gizmo-runlog-*.txt`).

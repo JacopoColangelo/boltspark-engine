@@ -12,14 +12,16 @@ pixel size requested by the editor and caches glyphs internally at runtime.
 
 ## JetBrains Mono
 
-BoltUI's console bitmap-font atlas is generated from **JetBrains Mono** by
-JetBrains s.r.o.
+BoltUI embeds **JetBrains Mono Regular** by JetBrains s.r.o. FreeType rasterizes
+it at the existing exact 12px size for console lines and numeric values, with
+fixed-width advances and an on-demand glyph cache.
 
 - Source: <https://github.com/JetBrains/JetBrainsMono>
 - License: SIL Open Font License 1.1
 - Full license text: `tools/font-source/JetBrainsMono-LICENSE.txt`
 
-The fixed console atlas can be regenerated with `tools/generate-fonts.ps1`.
+The runtime resource can be restored byte-for-byte from the pinned source with
+`tools/generate-fonts.ps1`.
 
 ## hlfreetype
 

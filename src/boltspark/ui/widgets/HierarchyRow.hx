@@ -60,18 +60,21 @@ class HierarchyRow extends h2d.Object {
         disclosure = new h2d.Graphics(this);
         UiIcons.draw(disclosure, ChevronRight, 0, 0, 11, Theme.MUTED);
         disclosure.x = 5;
-        disclosure.y = 5.5;
+        disclosure.y = 6;
         objectIcon = new h2d.Graphics(this);
         UiIcons.draw(objectIcon, Cube, 0, 0, 13, Theme.TEXT_SECONDARY);
         objectIcon.x = 21;
-        objectIcon.y = 4.5;
+        objectIcon.y = 5;
 
         label = new UiText(ctx.font, this);
         label.x = 41;
-        label.y = 4;
         label.textColor = Theme.TEXT;
         label.lineBreak = false;
         setName(name);
+        // The exact-size Inter face has a 22px line box, matching this row.
+        // Center from the font metrics instead of retaining the old 4px offset
+        // that placed the visible glyphs below the cube icon.
+        ctx.centerY(label, 0, background.height);
     }
 
     public function setName(name:String):Void {

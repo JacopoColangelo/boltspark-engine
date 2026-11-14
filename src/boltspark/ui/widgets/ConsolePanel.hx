@@ -59,10 +59,7 @@ class ConsolePanel extends h2d.Object {
         scrollHit.onClick = function(event) {
             if (event.button == 0 && onBackgroundClick != null) onBackgroundClick();
         };
-        text = new h2d.Text(ctx.monoFont, contentMask);
-        // Preserve the console's existing mono rendering; it was already
-        // legible and does not need the proportional-font coverage shader.
-        text.smooth = true;
+        text = new UiText(ctx.monoFont, contentMask);
         text.textColor = Theme.TEXT_SECONDARY;
         text.x = 8;
         text.y = 5;

@@ -4,8 +4,9 @@ package boltspark.ui.shaders;
  * Analytic, texture-free coverage for BoltUI's small editor icons.
  *
  * Every icon is evaluated as a signed-distance shape in the fragment shader.
- * Screen-space derivatives keep the edge transition one physical pixel wide,
- * including on diagonal strokes and when an icon lands between pixel centers.
+ * Axis-aligned stems and curve extrema are fitted to the physical pixel grid,
+ * while screen-space derivatives retain a one-pixel transition on diagonals
+ * and curves. This is the icon equivalent of hinting an exact-size font glyph.
  */
 class UiIconShader extends hxsl.Shader {
     static var SRC = {
@@ -16,11 +17,31 @@ class UiIconShader extends hxsl.Shader {
         var pixelColor:Vec4;
 
         @param var iconKind:Int;
+        @param var iconSize:Float;
         @param var stroke:Float;
 
+        function hintCoordinate(value:Float):Float {
+            // Single-pixel stems live on pixel centers. The 1.5 px optical
+            // weight and two-pixel stems are centered on pixel boundaries for
+            // balanced grayscale or whole-pixel coverage on both sides.
+            var strokePixels = stroke * iconSize;
+            var phase = strokePixels < 1.5 ? 0.5 : 0.0;
+            return (floor(value * iconSize - phase + 0.5) + phase) / iconSize;
+        }
+
+        function hintPoint(value:Vec2):Vec2 {
+            return vec2(hintCoordinate(value.x), hintCoordinate(value.y));
+        }
+
+        function hintRadius(value:Float):Float {
+            return max(1.0, floor(value * iconSize + 0.5)) / iconSize;
+        }
+
         function segment(p:Vec2, a:Vec2, b:Vec2):Float {
-            var pa = p - a;
-            var ba = b - a;
+            var hintedA = hintPoint(a);
+            var hintedB = hintPoint(b);
+            var pa = p - hintedA;
+            var ba = hintedB - hintedA;
             var h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
             return length(pa - ba * h) - stroke * 0.5;
         }
@@ -30,13 +51,16 @@ class UiIconShader extends hxsl.Shader {
         }
 
         function triangle(p:Vec2, a:Vec2, b:Vec2, c:Vec2):Float {
-            var orientation = cross2(b - a, c - a) >= 0.0 ? 1.0 : -1.0;
-            var sideA = cross2(b - a, p - a) * orientation;
-            var sideB = cross2(c - b, p - b) * orientation;
-            var sideC = cross2(a - c, p - c) * orientation;
+            var hintedA = hintPoint(a);
+            var hintedB = hintPoint(b);
+            var hintedC = hintPoint(c);
+            var orientation = cross2(hintedB - hintedA, hintedC - hintedA) >= 0.0 ? 1.0 : -1.0;
+            var sideA = cross2(hintedB - hintedA, p - hintedA) * orientation;
+            var sideB = cross2(hintedC - hintedB, p - hintedB) * orientation;
+            var sideC = cross2(hintedA - hintedC, p - hintedC) * orientation;
             var edgeDistance = min(
-                segment(p, a, b),
-                min(segment(p, b, c), segment(p, c, a))
+                segment(p, hintedA, hintedB),
+                min(segment(p, hintedB, hintedC), segment(p, hintedC, hintedA))
             ) + stroke * 0.5;
             return min(sideA, min(sideB, sideC)) >= 0.0
                 ? -edgeDistance
@@ -48,7 +72,7 @@ class UiIconShader extends hxsl.Shader {
         }
 
         function circleStroke(p:Vec2, center:Vec2, radius:Float):Float {
-            return abs(circle(p, center, radius)) - stroke * 0.5;
+            return abs(circle(p, hintPoint(center), hintRadius(radius))) - stroke * 0.5;
         }
 
         function box(p:Vec2, center:Vec2, halfSize:Vec2):Float {
@@ -62,7 +86,12 @@ class UiIconShader extends hxsl.Shader {
         }
 
         function boxStroke(p:Vec2, center:Vec2, halfSize:Vec2, radius:Float):Float {
-            return abs(roundedBox(p, center, halfSize, radius)) - stroke * 0.5;
+            var minimum = hintPoint(center - halfSize);
+            var maximum = hintPoint(center + halfSize);
+            var hintedCenter = (minimum + maximum) * 0.5;
+            var hintedHalfSize = max((maximum - minimum) * 0.5, vec2(stroke * 0.5));
+            var hintedRadius = radius <= 0.0 ? 0.0 : hintRadius(radius);
+            return abs(roundedBox(p, hintedCenter, hintedHalfSize, hintedRadius)) - stroke * 0.5;
         }
 
         function playTriangle(p:Vec2):Float {

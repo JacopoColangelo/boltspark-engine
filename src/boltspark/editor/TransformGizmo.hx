@@ -1,5 +1,6 @@
 ﻿package boltspark.editor;
 
+import boltspark.editor.shaders.GizmoFrontHemisphereShader;
 import boltspark.ui.Theme;
 import h2d.BlendMode;
 
@@ -70,6 +71,8 @@ class TransformGizmo {
 	static inline var SHAFT_PICK_START:Float = 0.2;
 	static inline var PICK_PIXELS:Float = 14;
 	static inline var RING_SEGMENTS:Int = 48;
+	/** Tiny overlap at the silhouette avoids precision-sized gaps in the arcs. */
+	static inline var RING_VISIBILITY_PADDING:Float = 0.001;
 	static inline var OMNI_MIN_RADIUS:Float = 4;
 	/** Local projection sample used to build stable pixels-per-world mappings. */
 	static inline var SCREEN_PROJECTION_STEP:Float = 0.1;
@@ -84,6 +87,7 @@ class TransformGizmo {
 	final movePlanes:Array<h3d.scene.Mesh> = [];
 	var moveCenter:h3d.scene.Mesh;
 	final rotateRings:Array<h3d.scene.Mesh> = [];
+	final rotateRingMasks:Array<GizmoFrontHemisphereShader> = [];
 	final scaleShafts:Array<h3d.scene.Mesh> = [];
 	final scaleHeads:Array<h3d.scene.Mesh> = [];
 	final scalePlanes:Array<h3d.scene.Mesh> = [];
@@ -144,7 +148,7 @@ class TransformGizmo {
 	final omniCenterPx:h3d.Vector = new h3d.Vector();
 	var omniRadiusPx:Float = 100;
 	var omniPrevS:h3d.Vector;
-	/** Raw previous pointer, used for the past-the-rim continuation. */
+	/** Raw previous pointer paired with `omniPrevS`. */
 	var omniPrevPx:Float = 0;
 	var omniPrevPy:Float = 0;
 	final omniQuat:h3d.Quat = new h3d.Quat();
@@ -385,7 +389,7 @@ class TransformGizmo {
 				projectToScreen(dragStartPos, omniCenterPx);
 				// The trackball radius in engine pixels matches the projected
 				// gizmo size, so a drag anywhere inside the rings maps onto
-				// the virtual sphere and the rim clamps to the equator.
+				// the virtual sphere with a continuous outside-rim continuation.
 				omniRadiusPx = projectedGizmoRadius();
 				omniPrevS = new h3d.Vector();
 				storeOmniPrev(px, py);
@@ -487,72 +491,81 @@ class TransformGizmo {
 
 	function dragRotateOmni(px:Float, py:Float):Null<GizmoResult> {
 		if (omniPrevS == null) return null;
-		var prevDx = (omniPrevPx - omniCenterPx.x) / omniRadiusPx;
-		var prevDy = -(omniPrevPy - omniCenterPx.y) / omniRadiusPx;
-		var curDx = (px - omniCenterPx.x) / omniRadiusPx;
-		var curDy = -(py - omniCenterPx.y) / omniRadiusPx;
-		var prevR = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
-		var r = Math.sqrt(curDx * curDx + curDy * curDy);
-		var cx:Float;
-		var cy:Float;
-		var cz:Float;
-		var angle:Float;
-		if (r <= 1 && prevR <= 1) {
-			// True trackball: both pointers are on the front hemisphere, so
-			// rotate about the axis that carries the previous surface point
-			// into the current one. s x prev (not prev x s) makes the near
-			// surface of the ball follow the pointer.
-			var s = omniScreenVector(px, py, tmpA);
-			cx = s.y * omniPrevS.z - s.z * omniPrevS.y;
-			cy = s.z * omniPrevS.x - s.x * omniPrevS.z;
-			cz = s.x * omniPrevS.y - s.y * omniPrevS.x;
-			var crossLength = Math.sqrt(cx * cx + cy * cy + cz * cz);
-			if (crossLength < 1e-6) {
-				storeOmniPrev(px, py);
-				return null;
-			}
-			angle = Math.atan2(crossLength, omniPrevS.dot(s));
-			if (angle < 1e-6) {
-				storeOmniPrev(px, py);
-				return null;
-			}
-		} else {
-			// Past the rim the sphere map saturates (the mapped point stops
-			// moving outward), which read as a clamp and then an inversion.
-			// Continue instead with the same surface rate about the in-plane
-			// axis perpendicular to the pointer motion, so the tumble keeps
-			// going the same way however far the cursor travels.
-			var mx = curDx - prevDx;
-			var my = curDy - prevDy;
-			var motion = Math.sqrt(mx * mx + my * my);
-			if (motion < 1e-6) {
-				storeOmniPrev(px, py);
-				return null;
-			}
-			cx = my;
-			cy = -mx;
-			cz = 0;
-			angle = motion;
-		}
-		// Map the view-space trackball axis into the world through the
-		// camera basis (right, up, toward-scene).
+		// Raw-input events can coalesce a fast movement into one large delta.
+		// Solving only its endpoints can make near-antipodal sphere points have
+		// an almost-zero cross product and incorrectly look stationary. Follow
+		// the actual screen segment in bounded steps instead.
+		var startPx = omniPrevPx;
+		var startPy = omniPrevPy;
+		var normalizedDx = (px - startPx) / omniRadiusPx;
+		var normalizedDy = (py - startPy) / omniRadiusPx;
+		var substeps = ArcballRotation.segmentSubsteps(
+			normalizedDx, normalizedDy);
 		var basis = cameraBasis();
-		var worldAxis = tmpB;
-		worldAxis.set(
-			basis.ax.x * cx + basis.ay.x * cy + basis.az.x * cz,
-			basis.ax.y * cx + basis.ay.y * cy + basis.az.y * cz,
-			basis.ax.z * cx + basis.ay.z * cy + basis.az.z * cz);
-		worldAxis.normalize();
-		var quat = new h3d.Quat();
-		quat.initRotateAxis(worldAxis.x, worldAxis.y, worldAxis.z, angle);
-		omniQuat.multiply(quat, omniQuat);
-		storeOmniPrev(px, py);
+		var changed = false;
+		for (step in 1...substeps + 1) {
+			var t = step / substeps;
+			if (applyOmniStep(
+					startPx + (px - startPx) * t,
+					startPy + (py - startPy) * t,
+					basis)) {
+				changed = true;
+			}
+		}
+		if (!changed) return null;
 		var result = new h3d.Quat();
 		result.load(omniQuat);
 		return RotateQuat(result);
 	}
 
-	/** Cache the mapped ball point and raw pointer for the next step. */
+	/**
+	 * Apply one bounded virtual-sphere pointer step.
+	 *
+	 * Absolute pointer positions map to successive points on the same Bell
+	 * surface, preserving the view-axis component of off-centre/tangential
+	 * motion. ArcballRotation uses normalized pointer travel for the angle so
+	 * the flattened outside sheet cannot damp or bound a long raw-input drag.
+	 */
+	function applyOmniStep(px:Float, py:Float,
+			basis:{ax:h3d.Vector, ay:h3d.Vector, az:h3d.Vector}):Bool {
+		var previousX = (omniPrevPx - omniCenterPx.x) / omniRadiusPx;
+		var previousY = -(omniPrevPy - omniCenterPx.y) / omniRadiusPx;
+		var currentX = (px - omniCenterPx.x) / omniRadiusPx;
+		var currentY = -(py - omniCenterPx.y) / omniRadiusPx;
+		var currentSurface = omniScreenVector(px, py, tmpA);
+		var cameraAxis = tmpC;
+		var angle = ArcballRotation.cameraStep(
+			omniPrevS, currentSurface,
+			previousX, previousY, currentX, currentY, cameraAxis);
+		if (angle <= 0) {
+			storeOmniPrev(px, py);
+			return false;
+		}
+		return applyOmniRotation(cameraAxis.x, cameraAxis.y, cameraAxis.z,
+			angle, px, py, basis);
+	}
+
+	/** Map one camera-space arcball axis into world space and accumulate it. */
+	function applyOmniRotation(cx:Float, cy:Float, cz:Float, angle:Float,
+			px:Float, py:Float,
+			basis:{ax:h3d.Vector, ay:h3d.Vector, az:h3d.Vector}):Bool {
+		var worldAxis = tmpB;
+		if (!ArcballRotation.worldAxis(
+				cx, cy, cz, basis.ax, basis.ay, basis.az, worldAxis)) {
+			storeOmniPrev(px, py);
+			return false;
+		}
+		var quat = new h3d.Quat();
+		quat.initRotateAxis(worldAxis.x, worldAxis.y, worldAxis.z, angle);
+		omniQuat.multiply(quat, omniQuat);
+		// Keep long freeform drags on the unit sphere; accumulated floating-point
+		// drift must never leak into transform or Euler extraction.
+		omniQuat.normalize();
+		storeOmniPrev(px, py);
+		return true;
+	}
+
+	/** Cache the paired Bell-surface point and raw pointer for the next step. */
 	function storeOmniPrev(px:Float, py:Float):Void {
 		omniPrevS.load(omniScreenVector(px, py, tmpA));
 		omniPrevPx = px;
@@ -560,24 +573,16 @@ class TransformGizmo {
 	}
 
 	/**
-	 * Map an engine-space pointer to a unit point on the front hemisphere of
-	 * the virtual ball in view space (used for the trackball cross products
-	 * while both pointer positions stay inside the projected disc). Points
-	 * beyond the disc are clamped to the horizon and never drive rotation:
-	 * past-the-rim drags are handled by the explicit motion-based
-	 * continuation in dragRotateOmni, so they neither clamp nor invert.
+	 * Map an engine-space pointer to the virtual trackball vector in camera
+	 * space (right, up, toward-scene). Uses a continuous Bell trackball
+	 * surface (hemisphere inside r^2 <= 0.5, hyperbolic sheet outside) so the
+	 * response is C1-smooth across the entire viewport and never clamps,
+	 * stalls, or inverts. Camera-facing hemisphere points have z <= 0.
 	 */
 	function omniScreenVector(px:Float, py:Float, out:h3d.Vector):h3d.Vector {
 		var x = (px - omniCenterPx.x) / omniRadiusPx;
 		var y = -(py - omniCenterPx.y) / omniRadiusPx;
-		var rSq = x * x + y * y;
-		if (rSq > 1) {
-			var inv = 1 / Math.sqrt(rSq);
-			out.set(x * inv, y * inv, 0);
-			return out;
-		}
-		out.set(x, y, Math.sqrt(Math.max(0, 1 - rSq)));
-		return out;
+		return ArcballRotation.surface(x, y, out);
 	}
 
 	function dragScaleAxis(px:Float, py:Float):Null<GizmoResult> {
@@ -587,28 +592,25 @@ class TransformGizmo {
 		var axisDelta = (dx * dragScreenAxis.x + dy * dragScreenAxis.y)
 			/ dragScreenAxisLengthSq;
 		var ratio = (scaleAxisT0 + axisDelta) / scaleAxisT0;
-		if (ratio <= 0) return null;
 		return scaleResult(dragHandle, ratio);
 	}
 
 	function dragScalePlane(px:Float, py:Float):Null<GizmoResult> {
 		var ratio = screenScaleRatio(px, py);
 		if (ratio == null) return null;
-		if (ratio <= 0) return null;
 		return scaleResult(dragHandle, ratio);
 	}
 
 	function dragScaleUniform(px:Float, py:Float):Null<GizmoResult> {
 		var ratio = screenScaleRatio(px, py);
 		if (ratio == null) return null;
-		if (ratio <= 0) return null;
 		return scaleResult(HANDLE_CENTER, ratio);
 	}
 
 	/** Build a scale result applying `ratio` to the handle's axes. */
 	function scaleResult(handle:Int, ratio:Float):GizmoResult {
 		inline function scaled(start:Float):Float {
-			return Math.max(0.01, Math.min(1000, start * ratio));
+			return ScalePolicy.clamp(start * ratio, start);
 		}
 		return switch (handle) {
 			case HANDLE_AXIS_X:
@@ -1014,10 +1016,15 @@ class TransformGizmo {
 			movePlanes.push(createSolid(quad, 'MovePlane${axis}'));
 			// Editor rotation X/Z map to engine Z/X. Build each colored ring on
 			// that mapped axis so its rendering and transform semantics agree.
-			rotateRings.push(createSolid(
+			var rotateRing = createSolid(
 				makeAxisTorus(rotationEngineAxis(axis), RING_RADIUS, RING_TUBE,
 					RING_SEGMENTS, 10),
-				'RotateRing${axis}'));
+				'RotateRing${axis}');
+			rotateRings.push(rotateRing);
+			var mask = new GizmoFrontHemisphereShader();
+			mask.visibilityPadding = RING_VISIBILITY_PADDING;
+			rotateRing.material.mainPass.addShader(mask);
+			rotateRingMasks.push(mask);
 			scaleShafts.push(createSolid(shaft, 'ScaleAxis${axis}Shaft'));
 			scaleHeads.push(createSolid(cube, 'ScaleAxis${axis}Head'));
 			scalePlanes.push(createSolid(quad, 'ScalePlane${axis}'));
@@ -1125,6 +1132,10 @@ class TransformGizmo {
 					: new h3d.Quat();
 				for (axisIndex in 0...3) {
 					var active = axisIndex == hoverHandle || axisIndex == dragHandle;
+					var ringAxis = gizmoDirection(axisVector(rotationEngineAxis(axisIndex)));
+					var mask = rotateRingMasks[axisIndex];
+					mask.gizmoCenter.set(attached.x, attached.y, attached.z);
+					mask.ringAxis.load(ringAxis);
 					rotateRings[axisIndex].setPosition(0, 0, 0);
 					rotateRings[axisIndex].setRotationQuat(localRotation.clone());
 					rotateRings[axisIndex].setScale(1);
@@ -1286,14 +1297,22 @@ class TransformGizmo {
 		var engineAxis = rotationEngineAxis(axis);
 		var worldU = gizmoDirection(perpendicularU(engineAxis));
 		var worldV = gizmoDirection(perpendicularV(engineAxis));
+		var center = pointAt(0, 0, 0);
+		var viewDirection = scene.camera.pos.sub(center);
+		viewDirection.normalize();
 		for (segment in 0...RING_SEGMENTS) {
 			var angle = segment / RING_SEGMENTS * Math.PI * 2;
 			var cos = Math.cos(angle) * radius;
 			var sin = Math.sin(angle) * radius;
+			var x = worldU.x * cos + worldV.x * sin;
+			var y = worldU.y * cos + worldV.y * sin;
+			var z = worldU.z * cos + worldV.z * sin;
+			// Keep hit testing aligned with the shader: hidden rear arcs must
+			// not steal hover or drag input from visible handles/the arc-ball.
+			if (x * viewDirection.x + y * viewDirection.y + z * viewDirection.z
+					< -RING_VISIBILITY_PADDING) continue;
 			out.push(pointAt(
-				worldU.x * cos + worldV.x * sin,
-				worldU.y * cos + worldV.y * sin,
-				worldU.z * cos + worldV.z * sin));
+				x, y, z));
 		}
 	}
 

@@ -66,7 +66,10 @@ class KeybindingsWindowApp extends hxd.App {
             return true;
         };
         if (hosted) startControlReader();
-        Sys.println("[window] Editor Keybindings native window ready");
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null
+                || Sys.getEnv("BOLTSPARK_VERBOSE_LOGS") != null) {
+            Sys.println("[window] Editor Keybindings native window ready");
+        }
     }
 
     override function update(dt:Float):Void {

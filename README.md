@@ -7,14 +7,15 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - A native Windows 11 x64 desktop window ("Boltspark Engine") booted by the HashLink VM, rendering through the **DirectX 12** Heaps driver (positively identified at runtime as `h3d.impl.DX12Driver`).
 - A static orange editor cube in `s3d` behind a native `h2d` editor chrome overlay.
 - A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
-- A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter, analytic anti-aliased icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics.
-- The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
-- All three transform tools drive viewport gizmos: Move offers axis, two-axis plane, and center free-view-plane drags; Rotate offers axis rings plus a true virtual-sphere omni arc-ball; Scale offers axis/plane/uniform scaling. A clickable WORLD/LOCAL viewport control changes the shared axis frame (WORLD is the default), all changes flow through the editor command path with live inspector updates, and the default shortcuts are **1** (Move), **E** (Rotate), and **R** (Scale).
-- Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
+- A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter and JetBrains Mono, exact-size pixel-grid-fitted analytic icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics. The Output Log stays focused on actionable warnings and errors instead of echoing routine selections, tool switches, and transform edits; launch with `BOLTSPARK_VERBOSE_LOGS` set to restore detailed interaction telemetry for diagnosis.
+- The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and scale-invariant two-pixel selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
+- All three transform tools drive viewport gizmos: Move offers axis, two-axis plane, and center free-view-plane drags; Rotate offers axis rings plus a true virtual-sphere omni arc-ball; Scale offers axis/plane/uniform scaling. Arc-ball motion keeps the same response and rotation axis when the pointer enters or exits its virtual sphere, while large coalesced pointer deltas are subdivided so fast rim crossings cannot collapse. Successive Bell-surface points preserve off-center view-axis roll, while a linear pointer-travel angle keeps long relative-mode drags unbounded. Its accumulated quaternion remains untouched and normalized during long drags; an internal per-object Euler hint selects a stable equivalent branch, while the Inspector presents Unreal-style Rotator values in `(-180°, 180°]`. A clickable WORLD/LOCAL viewport control changes the shared axis frame (WORLD is the default), all changes flow through the editor command path with live inspector updates, and the default shortcuts are **1** (Move), **E** (Rotate), and **R** (Scale).
+- Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Rotation snapping applies to the axis rings while the omni arc-ball always remains freeform. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
 - The release executable, taskbar, native windows, and main editor title strip share the embedded multi-resolution Boltspark icon. The main editor and auxiliary application windows use native Windows dark title bars. Opening the File menu prepares the small keybindings host in the background; closing its window hides it while retaining the HWND, DX12 device, and font cache, so subsequent opens do not launch or initialize another process.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
 - Inspector numeric fields support compact up/down stepping, horizontal drag scrubbing, and keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
-- Position, Rotation, and Scale rows have one-click canonical resets; Scale can link its axes to preserve the current X/Y/Z proportions across field edits and gizmo drags.
+- Position, Rotation, and Scale rows have one-click canonical resets; Scale can link its axes to preserve the current X/Y/Z proportions across field edits and gizmo drags, while signed values and pivot-crossing gizmo drags support mirrored transforms without singular zero scale.
+- The editor world is bounded to ±8 km from the origin on every axis. Every transform path constrains complete transformed geometry instead of deleting objects or imposing an arbitrary scale-factor cap; the viewport far plane covers the bounded world, and camera-enclosing meshes remain visible from inside while editing.
 - Editor commands flow UI → command → engine object (widgets never mutate engine state directly).
 
 ## Hard platform policy
@@ -76,19 +77,19 @@ src/
     Theme.hx                  — modern dark-editor color/size tokens
     UiContext.hx              — embedded fonts, native cursors, window state
     AppIcon.hx                — shared ICO decoding for HWND and title-strip branding
-    UiSurface.hx / UiIcons.hx — square-edged surfaces and analytic icon primitives
-    UiText*.hx / shaders/     — runtime FreeType text wrappers and analytic icon coverage
+    UiSurface.hx / UiIcons.hx — square-edged surfaces and exact-size icon primitives
+    UiText*.hx / shaders/     — runtime FreeType text wrappers and pixel-fitted icon coverage
     InputAdapter.hx           — central keyboard/focus/pointer reporting
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
     windows/                  — native top-level editor-window routing and H2D content
-  res/fonts/                  — embedded Inter TTF faces + fixed console mono atlas
+  res/fonts/                  — embedded Inter and JetBrains Mono TTF faces
 tests/
   native-foundation-acceptance.md
   repro/DxCArrayRepro.hx      — isolation repro for the DX12/CArray root cause
 tools/
   build.ps1                   — install dependencies, check, build, and run
-  generate-fonts.ps1          — deterministically regenerate the fixed console mono atlas
+  generate-fonts.ps1          — sync the pinned JetBrains Mono runtime TTF resource
   font-source/                — JetBrains Mono source + OFL font license texts
 third_party/hlfreetype/       — pinned runtime TTF/OTF rasterizer and Heaps glyph cache
 ```

@@ -39,7 +39,11 @@ class UiContext {
         captionFont = prepareFont(hxd.Res.fonts.inter_semibold.toDynamicFont(11, fontOptions()));
         labelFont = prepareFont(hxd.Res.fonts.inter_semibold.toDynamicFont(12, fontOptions()));
         titleFont = prepareFont(hxd.Res.fonts.inter_bold.toDynamicFont(15, fontOptions()));
-        monoFont = prepareFont(hxd.Res.fonts.mono_12.toFont());
+        // Preserve the existing JetBrains Mono Regular face, 12px size, and
+        // fixed-width advances while moving its glyphs to FreeType's native
+        // exact-size hinting and on-demand cache.
+        monoFont = prepareFont(hxd.Res.fonts.jetbrains_mono.toDynamicFont(
+            12, fontOptions(false)));
         #if hldx
         arrowCursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.Arrow);
         sizeWECursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.SizeWE);
@@ -52,12 +56,12 @@ class UiContext {
         #end
     }
 
-    function fontOptions():FreeTypeFontOptions {
+    function fontOptions(kerning:Bool = true):FreeTypeFontOptions {
         return {
             antiAliasing: true,
             atlasWidth: 256,
             chars: UI_PRELOAD_CHARS,
-            kerning: true,
+            kerning: kerning,
             padding: 2,
             uploadTexture: true
         };
@@ -77,6 +81,16 @@ class UiContext {
         arrowCursor.set();
         #else
         hxd.System.setCursor(hxd.Cursor.Default);
+        #end
+    }
+
+    /** Route mouse events to this window until the active drag finishes. */
+    public function setMouseCapture(enabled:Bool):Void {
+        #if hldx
+        // h2d capture only redirects events that reach Heaps. Win32 capture is
+        // also required for a windowed drag to keep receiving pointer motion
+        // and the button release after the cursor leaves the client area.
+        @:privateAccess window.window.captureMouseEvents(enabled);
         #end
     }
 

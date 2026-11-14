@@ -1,7 +1,10 @@
 import boltspark.editor.GridSnapping;
 import boltspark.editor.Keybindings;
+import boltspark.editor.RotationEuler;
+import boltspark.editor.ScalePolicy;
 import boltspark.editor.SceneObject;
 import boltspark.editor.TransformGizmo;
+import boltspark.editor.WorldBounds;
 import boltspark.platform.InteractiveResize;
 import boltspark.ui.AppIcon;
 import boltspark.ui.BoltUI;
@@ -41,6 +44,7 @@ class Main extends hxd.App {
     var localTransformSpace:Bool = false;
     var scaleProportionsLinked:Bool = false;
     var gizmoDragging:Bool = false;
+    var gizmoWorldBounded:Bool = false;
     var gizmoHandle:Int = -1;
     var dragStartScaleX:Float = 1;
     var dragStartScaleY:Float = 1;
@@ -64,9 +68,10 @@ class Main extends hxd.App {
     // Synthetic-input verification probes drive drags with WM_MOUSEMOVE,
     // which relative mode ignores; probes keep Absolute mode.
     var inputProbeMode:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null;
-
-    static inline var OUTLINE_INFLATE:Float = 1.015;
-    static inline var OUTLINE_LIFT:Float = 0.008;
+    // Routine interaction telemetry is useful to automated probes and during
+    // focused diagnosis, but it should not flood the user's Output Log.
+    var verboseLogging:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null
+        || Sys.getEnv("BOLTSPARK_VERBOSE_LOGS") != null;
 
     override function init():Void {
         InteractiveResize.install();
@@ -105,16 +110,20 @@ class Main extends hxd.App {
 
         s3d.camera.pos.set(5.8, 4.2, 6.4);
         s3d.camera.target.set(0, 0, 0);
+        // The transform boundary is ±8 km on every axis. Extend the default
+        // Heaps far plane so every corner remains renderable from the current
+        // near-origin editor camera.
+        s3d.camera.zFar = WorldBounds.CAMERA_FAR;
         // Boltspark's scene editing logic is Y-up (ground placement intersects
         // y = 0), while Heaps defaults its camera to Z-up.
         s3d.camera.up.set(0, 1, 0);
 
         // BoltUI is a native H2D overlay rendered by Heaps. It is not HTML,
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
-        // Proportional UI fonts are rasterized from their embedded TTF faces by
-        // FreeType at the exact requested size and cached on demand. Everything
-        // else defaults to pixel-exact sampling; procedural icons perform
-        // analytic shader anti-aliasing.
+        // Inter and JetBrains Mono UI fonts are rasterized from their embedded
+        // TTF faces by FreeType at the exact requested size and cached on
+        // demand. Everything else defaults to pixel-exact sampling;
+        // procedural icons perform analytic shader anti-aliasing.
         s2d.defaultSmooth = false;
         snap = new GridSnapping();
         keybindings = new Keybindings();
@@ -138,7 +147,12 @@ class Main extends hxd.App {
         boltUI.onSnapChanged = onSnapChanged;
         boltUI.onSnapToGrid = snapSelectionToGrid;
         boltUI.onOpenApplicationWindow = function(kind) {
-            boltUI.log(applicationWindows.open(kind));
+            var message = applicationWindows.open(kind);
+            if (message.indexOf("could not") >= 0) {
+                boltUI.log(message);
+            } else {
+                logActivity(message);
+            }
         };
         boltUI.onPrepareApplicationWindow = function(kind) {
             var error = applicationWindows.prepare(kind);
@@ -146,12 +160,12 @@ class Main extends hxd.App {
         };
         boltUI.onSnapHoldChanged = function(active:Bool) {
             snap.holdTranslationOff = active;
-            boltUI.log(active
+            logActivity(active
                 ? "snapping: translation snapping suspended (key held)"
                 : "snapping: translation snapping resumed");
         };
-        boltUI.log('renderer driver: ${driverName}');
-        boltUI.log("editor shell ready — hierarchy, inspector, console live");
+        logActivity('renderer driver: ${driverName}');
+        logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
             boltUI.log("keybindings: " + keybindings.lastError);
         }
@@ -169,17 +183,21 @@ class Main extends hxd.App {
             }
             selected.name = trimmedName;
             refreshHierarchy();
-            boltUI.log("command: object name = " + trimmedName);
+            logActivity("command: object name = " + trimmedName);
         };
     }
 
     override function update(dt:Float):Void {
         applicationWindows.update();
         if (keybindings.pollExternalChanges()) {
-            boltUI.log("keybindings: synchronized changes from the settings window");
+            logActivity("keybindings: synchronized changes from the settings window");
         }
         boltUI.update(dt);
         gizmo.follow();
+        // A very large object can enclose the editor camera. Render that mesh
+        // two-sided only while inside it so it remains visibly present rather
+        // than looking as though it was deleted by a transform command.
+        for (sceneObject in sceneObjects) refreshScaleRendering(sceneObject);
         // The selection outline tracks transform edits and gizmo drags.
         refreshSelectionOutline();
     }
@@ -245,10 +263,18 @@ class Main extends hxd.App {
      * Editor Euler degrees read from an engine quaternion. Boltspark's editor
      * rotation convention maps editor X/Z to Heaps Z/X; Y is shared.
      */
-    function rotationDegrees(mesh:h3d.scene.Object):h3d.Vector {
-        var engineEuler = mesh.getRotationQuat().toEuler();
-        return new h3d.Vector(radToDeg(engineEuler.z), radToDeg(engineEuler.y),
-            radToDeg(engineEuler.x));
+    function rotationDegrees(sceneObject:SceneObject):h3d.Vector {
+        var reference = sceneObject.rotationHintValid
+            ? sceneObject.rotationHint
+            : null;
+        var result = RotationEuler.degrees(
+            sceneObject.mesh.getRotationQuat(), reference);
+        // Retain the continuous representation only as an internal branch
+        // hint. Match Unreal's Details panel by presenting wrapped Rotator
+        // values while leaving the accumulated quaternion untouched.
+        sceneObject.rotationHint.load(result);
+        sceneObject.rotationHintValid = true;
+        return RotationEuler.normalized(result);
     }
 
     function applyTransformChange(axis:Int, value:Float):Void {
@@ -257,18 +283,35 @@ class Main extends hxd.App {
         // Inspector commits are deliberate typed values, so they are never
         // snapped (matching Unreal's details panel); only gizmo drags snap,
         // incrementally, and Ctrl+End performs an explicit absolute snap.
+        var targetX = selected.mesh.x;
+        var targetY = selected.mesh.y;
+        var targetZ = selected.mesh.z;
         switch (axis) {
-            case 0: selected.mesh.x = value;
-            case 1: selected.mesh.y = value;
-            default: selected.mesh.z = value;
+            case 0: targetX = value;
+            case 1: targetY = value;
+            default: targetZ = value;
         }
-        boltUI.log('command: ${selected.name} position.${axisName(axis)} = ${round2(value)}');
+        var placed = WorldBounds.placeInside(selected.mesh, targetX, targetY, targetZ);
+        if (!placed) {
+            boltUI.log('world bounds: ${selected.name} is too large to reposition');
+        }
+        var actual = axis == 0 ? selected.mesh.x
+            : axis == 1 ? selected.mesh.y : selected.mesh.z;
+        if (placed && different(actual, value)) logWorldBound(selected);
+        pushInspectorTransform(selected);
+        logActivity('command: ${selected.name} position.${axisName(axis)} = ${round2(actual)}');
     }
 
     function applyRotationChange(axis:Int, degrees:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
-        var current = rotationDegrees(selected.mesh);
+        var previousPosition = new h3d.Vector(
+            selected.mesh.x, selected.mesh.y, selected.mesh.z);
+        var previousRotation = new h3d.Quat();
+        previousRotation.load(selected.mesh.getRotationQuat());
+        var previousHint = selected.rotationHint.clone();
+        var previousHintValid = selected.rotationHintValid;
+        var current = rotationDegrees(selected);
         switch (axis) {
             case 0: current.x = degrees;
             case 1: current.y = degrees;
@@ -277,39 +320,76 @@ class Main extends hxd.App {
         var quat = new h3d.Quat();
         quat.initRotation(degToRad(current.z), degToRad(current.y), degToRad(current.x));
         selected.mesh.setRotationQuat(quat);
-        boltUI.log('command: ${selected.name} rotation.${axisName(axis)} = ${round2(degrees)} deg');
+        selected.rotationHint.load(current);
+        selected.rotationHintValid = true;
+        var beforeContainX = selected.mesh.x;
+        var beforeContainY = selected.mesh.y;
+        var beforeContainZ = selected.mesh.z;
+        if (!WorldBounds.contain(selected.mesh)) {
+            selected.mesh.setPosition(
+                previousPosition.x, previousPosition.y, previousPosition.z);
+            selected.mesh.setRotationQuat(previousRotation);
+            selected.rotationHint.load(previousHint);
+            selected.rotationHintValid = previousHintValid;
+            logWorldBound(selected);
+        } else if (different(beforeContainX, selected.mesh.x)
+                || different(beforeContainY, selected.mesh.y)
+                || different(beforeContainZ, selected.mesh.z)) {
+            logWorldBound(selected);
+        }
+        pushInspectorTransform(selected);
+        var applied = rotationDegrees(selected);
+        var actual = axis == 0 ? applied.x : axis == 1 ? applied.y : applied.z;
+        logActivity('command: ${selected.name} rotation.${axisName(axis)} = ${round2(actual)} deg');
     }
 
     function applyScaleChange(axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
-        // Guard against zero/negative scale which collapses the mesh.
-        var clamped = Math.max(0.01, value);
+        var previous = switch (axis) {
+            case 0: selected.mesh.scaleX;
+            case 1: selected.mesh.scaleY;
+            default: selected.mesh.scaleZ;
+        };
+        // Signed scale mirrors geometry. Keep only a tiny dead zone around
+        // zero because an exactly singular transform cannot be inverted.
+        var clamped = clampedScale(value, previous);
+        var targetX = selected.mesh.scaleX;
+        var targetY = selected.mesh.scaleY;
+        var targetZ = selected.mesh.scaleZ;
         if (scaleProportionsLinked) {
-            var previous = switch (axis) {
-                case 0: selected.mesh.scaleX;
-                case 1: selected.mesh.scaleY;
-                default: selected.mesh.scaleZ;
-            };
-            var ratio = clamped / Math.max(0.01, previous);
-            selected.mesh.scaleX = clampedScale(selected.mesh.scaleX * ratio);
-            selected.mesh.scaleY = clampedScale(selected.mesh.scaleY * ratio);
-            selected.mesh.scaleZ = clampedScale(selected.mesh.scaleZ * ratio);
-            boltUI.log('command: ${selected.name} proportional scale = '
-                + scaleDescription(selected.mesh));
+            var ratio = clamped / ScalePolicy.nonZero(previous, clamped);
+            targetX = clampedScale(targetX * ratio, targetX);
+            targetY = clampedScale(targetY * ratio, targetY);
+            targetZ = clampedScale(targetZ * ratio, targetZ);
         } else {
             switch (axis) {
-                case 0: selected.mesh.scaleX = clamped;
-                case 1: selected.mesh.scaleY = clamped;
-                default: selected.mesh.scaleZ = clamped;
+                case 0: targetX = clamped;
+                case 1: targetY = clamped;
+                default: targetZ = clamped;
             }
-            boltUI.log('command: ${selected.name} scale.${axisName(axis)} = ${round2(clamped)}');
         }
+        var bounded = WorldBounds.fitScale(
+            selected.mesh, targetX, targetY, targetZ);
+        selected.mesh.scaleX = bounded.x;
+        selected.mesh.scaleY = bounded.y;
+        selected.mesh.scaleZ = bounded.z;
+        if (different(bounded.x, targetX) || different(bounded.y, targetY)
+                || different(bounded.z, targetZ)) logWorldBound(selected);
+        refreshScaleRendering(selected);
         pushInspectorTransform(selected);
+        if (scaleProportionsLinked) {
+            logActivity('command: ${selected.name} proportional scale = '
+                + scaleDescription(selected.mesh));
+        } else {
+            var actual = axis == 0 ? selected.mesh.scaleX
+                : axis == 1 ? selected.mesh.scaleY : selected.mesh.scaleZ;
+            logActivity('command: ${selected.name} scale.${axisName(axis)} = ${round2(actual)}');
+        }
     }
 
-    static inline function clampedScale(value:Float):Float {
-        return Math.max(0.01, Math.min(1000, value));
+    static inline function clampedScale(value:Float, fallbackSign:Float = 1):Float {
+        return ScalePolicy.clamp(value, fallbackSign);
     }
 
     function scaleDescription(mesh:h3d.scene.Object):String {
@@ -318,7 +398,7 @@ class Main extends hxd.App {
 
     function setScaleProportionsLinked(linked:Bool):Void {
         scaleProportionsLinked = linked;
-        boltUI.log('inspector: scale proportions ${linked ? "linked" : "unlinked"}');
+        logActivity('inspector: scale proportions ${linked ? "linked" : "unlinked"}');
     }
 
     /** Reset Position/Rotation/Scale to their canonical transform values. */
@@ -328,23 +408,46 @@ class Main extends hxd.App {
         var rowName:String;
         switch (row) {
             case 0:
-                selected.mesh.setPosition(0, 0, 0);
+                WorldBounds.placeInside(selected.mesh, 0, 0, 0);
                 rowName = "position";
             case 1:
                 selected.mesh.setRotationQuat(new h3d.Quat());
+                selected.rotationHint.set(0, 0, 0);
+                selected.rotationHintValid = true;
+                WorldBounds.contain(selected.mesh);
                 rowName = "rotation";
             default:
                 selected.mesh.scaleX = 1;
                 selected.mesh.scaleY = 1;
                 selected.mesh.scaleZ = 1;
+                WorldBounds.contain(selected.mesh);
                 rowName = "scale";
         }
+        if (row == 2) refreshScaleRendering(selected);
         pushInspectorTransform(selected);
-        boltUI.log('command: ${selected.name} reset ${rowName}');
+        logActivity('command: ${selected.name} reset ${rowName}');
     }
 
     static function axisName(axis:Int):String {
         return axis == 0 ? "x" : axis == 1 ? "y" : "z";
+    }
+
+    static inline function different(a:Float, b:Float):Bool {
+        return !Math.isFinite(a) || !Math.isFinite(b) || Math.abs(a - b) > 0.0001;
+    }
+
+    /** Routine command telemetry, disabled in normal editor sessions. */
+    function logActivity(message:String):Void {
+        if (verboseLogging) boltUI.log(message);
+    }
+
+    /** Process-level diagnostic telemetry paired with logActivity(). */
+    function printActivity(message:String):Void {
+        if (verboseLogging) Sys.println(message);
+    }
+
+    function logWorldBound(selected:SceneObject):Void {
+        boltUI.log('world bounds: ${selected.name} constrained to ±8 km');
     }
 
     /** Toolbar/shortcut tool switch: every tool drives its viewport gizmo. */
@@ -353,18 +456,22 @@ class Main extends hxd.App {
         gizmo.setTool(tool);
         var selected = getSelectedObject();
         gizmo.attach(selected == null ? null : selected.mesh);
-        var toolNames = ["Move", "Rotate", "Scale"];
-        boltUI.log('viewport tool: ${toolNames[tool]} gizmo active');
+        if (verboseLogging) {
+            var toolNames = ["Move", "Rotate", "Scale"];
+            logActivity('viewport tool: ${toolNames[tool]} gizmo active');
+        }
     }
 
     /** Apply the viewport World/Local axis-space toggle through Main. */
     function setTransformSpace(local:Bool):Void {
         localTransformSpace = local;
         gizmo.setSpace(local ? TransformGizmo.SPACE_LOCAL : TransformGizmo.SPACE_WORLD);
-        boltUI.log('viewport transform space: ${local ? "Local" : "World"}');
-        var xAxis = gizmo.getAxisDirection(TransformGizmo.HANDLE_AXIS_X);
-        Sys.println('[gizmo] transform space=${local ? "Local" : "World"}'
-            + ' xAxis=(${round2(xAxis.x)}, ${round2(xAxis.y)}, ${round2(xAxis.z)})');
+        if (verboseLogging) {
+            logActivity('viewport transform space: ${local ? "Local" : "World"}');
+            var xAxis = gizmo.getAxisDirection(TransformGizmo.HANDLE_AXIS_X);
+            printActivity('[gizmo] transform space=${local ? "Local" : "World"}'
+                + ' xAxis=(${round2(xAxis.x)}, ${round2(xAxis.y)}, ${round2(xAxis.z)})');
+        }
     }
 
     function onViewportHover(x:Float, y:Float):Void {
@@ -381,6 +488,7 @@ class Main extends hxd.App {
         if (handle < 0) return false;
         gizmoHandle = handle;
         gizmoDragging = true;
+        gizmoWorldBounded = false;
         dragLastX = x;
         dragLastY = y;
         dragVirtualX = x;
@@ -395,12 +503,14 @@ class Main extends hxd.App {
         gizmo.beginDrag(handle, selected.mesh, viewportRay(x, y), pointer.x, pointer.y);
         // Capture all gizmo anchors before raw input can invoke its callback.
         beginRelativeDrag();
-        var handleName = gizmo.describe(handle);
-        boltUI.log('gizmo: drag ${selected.name} ${handleName}');
-        Sys.println('[gizmo] drag start object=${selected.name} handle=${handleName}'
-            + ' space=${localTransformSpace ? "Local" : "World"}'
-            + ' at=(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
-            + ' ${round2(selected.mesh.z)})');
+        if (verboseLogging) {
+            var handleName = gizmo.describe(handle);
+            logActivity('gizmo: drag ${selected.name} ${handleName}');
+            printActivity('[gizmo] drag start object=${selected.name} handle=${handleName}'
+                + ' space=${localTransformSpace ? "Local" : "World"}'
+                + ' at=(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
+                + ' ${round2(selected.mesh.z)})');
+        }
         return true;
     }
 
@@ -487,6 +597,7 @@ class Main extends hxd.App {
     function cancelGizmoDrag():Void {
         gizmoDragging = false;
         gizmoHandle = -1;
+        gizmoWorldBounded = false;
         endRelativeDrag();
         gizmo.endDrag();
     }
@@ -507,12 +618,39 @@ class Main extends hxd.App {
                 var snapped = snap.snapPositionIncremental(dragStartPos,
                     new h3d.Vector(nx, ny, nz),
                     localTransformSpace ? dragStartQuat : null);
-                selected.mesh.setPosition(snapped.x, snapped.y, snapped.z);
+                if (!WorldBounds.placeInside(
+                        selected.mesh, snapped.x, snapped.y, snapped.z)
+                        || different(selected.mesh.x, snapped.x)
+                        || different(selected.mesh.y, snapped.y)
+                        || different(selected.mesh.z, snapped.z)) {
+                    gizmoWorldBounded = true;
+                }
             case RotateQuat(q):
-                // Unreal-style incremental rotation snapping: per-axis Euler
-                // deltas quantized against the rotation grid and re-applied
-                // to the drag-start orientation.
-                selected.mesh.setRotationQuat(snap.snapQuatIncremental(dragStartQuat, q));
+                // Axis rings use Unreal-style incremental degree snapping.
+                // The center arc-ball is intentionally freeform even while
+                // rotation snapping is enabled: quantizing its three Euler
+                // components would make a camera-space tumble feel stepped.
+                var previousPosition = new h3d.Vector(
+                    selected.mesh.x, selected.mesh.y, selected.mesh.z);
+                var previousRotation = new h3d.Quat();
+                previousRotation.load(selected.mesh.getRotationQuat());
+                var targetRotation = gizmoHandle == TransformGizmo.HANDLE_CENTER
+                    ? q
+                    : snap.snapQuatIncremental(dragStartQuat, q);
+                selected.mesh.setRotationQuat(targetRotation);
+                var beforeContainX = selected.mesh.x;
+                var beforeContainY = selected.mesh.y;
+                var beforeContainZ = selected.mesh.z;
+                if (!WorldBounds.contain(selected.mesh)) {
+                    selected.mesh.setPosition(previousPosition.x,
+                        previousPosition.y, previousPosition.z);
+                    selected.mesh.setRotationQuat(previousRotation);
+                    gizmoWorldBounded = true;
+                } else if (different(beforeContainX, selected.mesh.x)
+                        || different(beforeContainY, selected.mesh.y)
+                        || different(beforeContainZ, selected.mesh.z)) {
+                    gizmoWorldBounded = true;
+                }
             case ScaleValues(sx, sy, sz):
                 if (scaleProportionsLinked) {
                     var ratio = linkedGizmoScaleRatio(sx, sy, sz);
@@ -521,13 +659,23 @@ class Main extends hxd.App {
                     sz = dragStartScaleZ * ratio;
                 }
                 // Unreal-style incremental scale snapping: per-axis deltas
-                // quantized against the scale step, floored so a step can
-                // never collapse a mesh.
+                // quantized against the scale step. Signed dead-zone clamping
+                // allows mirror crossing without a singular zero transform.
                 var snapped = snap.snapScaleIncremental(
                     dragStartScaleX, dragStartScaleY, dragStartScaleZ, sx, sy, sz);
-                selected.mesh.scaleX = clampedScale(snapped.x);
-                selected.mesh.scaleY = clampedScale(snapped.y);
-                selected.mesh.scaleZ = clampedScale(snapped.z);
+                var targetX = clampedScale(snapped.x, dragStartScaleX);
+                var targetY = clampedScale(snapped.y, dragStartScaleY);
+                var targetZ = clampedScale(snapped.z, dragStartScaleZ);
+                var bounded = WorldBounds.fitScale(
+                    selected.mesh, targetX, targetY, targetZ);
+                selected.mesh.scaleX = bounded.x;
+                selected.mesh.scaleY = bounded.y;
+                selected.mesh.scaleZ = bounded.z;
+                if (different(bounded.x, targetX) || different(bounded.y, targetY)
+                        || different(bounded.z, targetZ)) {
+                    gizmoWorldBounded = true;
+                }
+                refreshScaleRendering(selected);
         }
         pushInspectorTransform(selected);
     }
@@ -543,22 +691,30 @@ class Main extends hxd.App {
         var step = snap.translationStep;
         var grid = snap.snapPositionToGrid(
             new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z));
-        if (grid.x == selected.mesh.x && grid.y == selected.mesh.y
-                && grid.z == selected.mesh.z) {
-            boltUI.log('snapping: ${selected.name} already on the ${round2(step)} grid');
+        var previousX = selected.mesh.x;
+        var previousY = selected.mesh.y;
+        var previousZ = selected.mesh.z;
+        var placed = WorldBounds.placeInside(selected.mesh, grid.x, grid.y, grid.z);
+        var constrained = !placed || different(selected.mesh.x, grid.x)
+            || different(selected.mesh.y, grid.y) || different(selected.mesh.z, grid.z);
+        if (selected.mesh.x == previousX && selected.mesh.y == previousY
+                && selected.mesh.z == previousZ) {
+            logActivity('snapping: ${selected.name} already on the ${round2(step)} grid');
             return;
         }
-        selected.mesh.setPosition(grid.x, grid.y, grid.z);
         pushInspectorTransform(selected);
-        boltUI.log('snapping: ${selected.name} to grid (step ${round2(step)}) '
-            + 'position = (${round2(grid.x)}, ${round2(grid.y)}, ${round2(grid.z)})');
+        if (constrained) logWorldBound(selected);
+        logActivity('snapping: ${selected.name} to grid (step ${round2(step)}) '
+            + 'position = (${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
+            + ' ${round2(selected.mesh.z)})');
     }
 
-    /** Viewport snap toolbar feedback: reflect toggle/preset changes in the console. */
+    /** Optional diagnostic feedback for viewport snap toggle/preset changes. */
     function onSnapChanged(mode:Int):Void {
+        if (!verboseLogging) return;
         var modeNames = ["translation", "rotation", "scale"];
         var enabled = snap.isEnabled(mode);
-        boltUI.log('snapping: ${modeNames[mode]} ${enabled ? "enabled" : "disabled"}'
+        logActivity('snapping: ${modeNames[mode]} ${enabled ? "enabled" : "disabled"}'
             + ' · step ${round2(snap.stepFor(mode))}');
     }
 
@@ -566,17 +722,17 @@ class Main extends hxd.App {
     function linkedGizmoScaleRatio(sx:Float, sy:Float, sz:Float):Float {
         return switch (gizmoHandle) {
             case TransformGizmo.HANDLE_AXIS_Y, TransformGizmo.HANDLE_PLANE_YZ:
-                sy / Math.max(0.01, dragStartScaleY);
+                sy / ScalePolicy.nonZero(dragStartScaleY, sy);
             case TransformGizmo.HANDLE_AXIS_Z, TransformGizmo.HANDLE_PLANE_ZX:
-                sz / Math.max(0.01, dragStartScaleZ);
+                sz / ScalePolicy.nonZero(dragStartScaleZ, sz);
             default:
-                sx / Math.max(0.01, dragStartScaleX);
+                sx / ScalePolicy.nonZero(dragStartScaleX, sx);
         };
     }
 
     /** Live inspector values while a gizmo drag is in progress. */
     function pushInspectorTransform(selected:SceneObject):Void {
-        var rotation = rotationDegrees(selected.mesh);
+        var rotation = rotationDegrees(selected);
         boltUI.updateTransformValues(
             selected.mesh.x, selected.mesh.y, selected.mesh.z,
             rotation.x, rotation.y, rotation.z,
@@ -591,24 +747,30 @@ class Main extends hxd.App {
         gizmoHandle = -1;
         gizmo.endDrag();
         var selected = getSelectedObject();
-        if (selected == null || handle < 0) return;
+        if (selected == null || handle < 0) {
+            gizmoWorldBounded = false;
+            return;
+        }
+        if (gizmoWorldBounded) logWorldBound(selected);
+        gizmoWorldBounded = false;
+        if (!verboseLogging) return;
         var handleName = gizmo.describe(handle);
         var at = '(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
             + ' ${round2(selected.mesh.z)})';
-        var rotation = rotationDegrees(selected.mesh);
+        var rotation = rotationDegrees(selected);
         var rot = '(${round2(rotation.x)}, ${round2(rotation.y)}, ${round2(rotation.z)} deg)';
         var scl = '(${round2(selected.mesh.scaleX)}, ${round2(selected.mesh.scaleY)},'
             + ' ${round2(selected.mesh.scaleZ)})';
         switch (currentTool) {
             case TransformGizmo.TOOL_MOVE:
-                boltUI.log('command: ${selected.name} ${handleName} position = ' + at);
-                Sys.println('[gizmo] drag end object=${selected.name} handle=${handleName} at=' + at);
+                logActivity('command: ${selected.name} ${handleName} position = ' + at);
+                printActivity('[gizmo] drag end object=${selected.name} handle=${handleName} at=' + at);
             case TransformGizmo.TOOL_ROTATE:
-                boltUI.log('command: ${selected.name} ${handleName} rotation = ' + rot);
-                Sys.println('[gizmo] drag end object=${selected.name} handle=${handleName} rotation=' + rot);
+                logActivity('command: ${selected.name} ${handleName} rotation = ' + rot);
+                printActivity('[gizmo] drag end object=${selected.name} handle=${handleName} rotation=' + rot);
             default:
-                boltUI.log('command: ${selected.name} ${handleName} scale = ' + scl);
-                Sys.println('[gizmo] drag end object=${selected.name} handle=${handleName} scale=' + scl);
+                logActivity('command: ${selected.name} ${handleName} scale = ' + scl);
+                printActivity('[gizmo] drag end object=${selected.name} handle=${handleName} scale=' + scl);
         }
     }
 
@@ -627,24 +789,52 @@ class Main extends hxd.App {
         }
         if (nearestObject == null) {
             selectSceneObject(-1);
-            boltUI.log("viewport: no object at pointer");
+            logActivity("viewport: no object at pointer");
         } else {
             selectSceneObject(nearestObject.id);
-            boltUI.log('viewport: selected ${nearestObject.name}');
+            logActivity('viewport: selected ${nearestObject.name}');
         }
     }
 
     function addSceneObject(name:String, x:Float, z:Float = 0):SceneObject {
         var mesh = new h3d.scene.Mesh(cubePrimitive, s3d);
         mesh.name = name;
-        mesh.setPosition(x, 0, z);
+        if (!WorldBounds.placeInside(mesh, x, 0, z)) mesh.setPosition(0, 0, 0);
         mesh.material.color.setColor(Theme.CUBE_ORANGE);
         mesh.material.shadows = false;
         mesh.material.specularAmount = 0.18;
         mesh.material.specularPower = 24;
         var sceneObject = new SceneObject(nextObjectId++, mesh);
+        refreshScaleRendering(sceneObject);
         sceneObjects.push(sceneObject);
         return sceneObject;
+    }
+
+    /** Keep back-face culling aligned with a reflected transform's winding. */
+    function refreshScaleRendering(sceneObject:SceneObject):Void {
+        var mesh = sceneObject.mesh;
+        var mirrored = ScalePolicy.isMirrored(mesh.scaleX, mesh.scaleY, mesh.scaleZ);
+        // A camera inside a closed one-sided mesh sees only back faces. Draw
+        // both sides in that editor-only condition so extreme but valid scale
+        // values cannot make an object appear to have been deleted.
+        var culling = cameraInsideMesh(mesh)
+            ? h3d.mat.Data.Face.None
+            : sceneObject.cullingForScale(mirrored);
+        mesh.material.mainPass.culling = culling;
+        var shadowPass = mesh.material.getPass("shadow");
+        if (shadowPass != null) shadowPass.culling = culling;
+    }
+
+    function cameraInsideMesh(mesh:h3d.scene.Mesh):Bool {
+        if (mesh.primitive == null) return false;
+        var bounds = mesh.primitive.getBounds();
+        if (bounds == null) return false;
+        var point = new h3d.col.Point(
+            s3d.camera.pos.x, s3d.camera.pos.y, s3d.camera.pos.z);
+        mesh.globalToLocal(point);
+        return point.x >= bounds.xMin && point.x <= bounds.xMax
+            && point.y >= bounds.yMin && point.y <= bounds.yMax
+            && point.z >= bounds.zMin && point.z <= bounds.zMax;
     }
 
     function createCube():Void {
@@ -670,7 +860,7 @@ class Main extends hxd.App {
         var sceneObject = addSceneObject(name, x, z);
         refreshHierarchy();
         selectSceneObject(sceneObject.id);
-        boltUI.log("scene: created " + name);
+        logActivity("scene: created " + name);
     }
 
     function deleteSceneObjects(ids:Array<Int>):Void {
@@ -693,7 +883,7 @@ class Main extends hxd.App {
         refreshHierarchy();
         var nextSelection = sceneObjects.length == 0 ? -1 : sceneObjects[sceneObjects.length - 1].id;
         selectSceneObject(nextSelection);
-        for (name in deletedNames) boltUI.log("scene: deleted " + name);
+        for (name in deletedNames) logActivity("scene: deleted " + name);
     }
 
     function selectSceneObject(id:Int):Void {
@@ -721,7 +911,7 @@ class Main extends hxd.App {
             boltUI.setSelectedObjects(selectedObjectIds, -1, "");
             return;
         }
-        var rotation = rotationDegrees(selected.mesh);
+        var rotation = rotationDegrees(selected);
         boltUI.setSelectedObjects(selectedObjectIds, selected.id,
             selected.name, selected.mesh.x, selected.mesh.y, selected.mesh.z,
             rotation.x, rotation.y, rotation.z,
@@ -790,6 +980,10 @@ class Main extends hxd.App {
 
         selectionOutline = new h3d.scene.Graphics(s3d);
         selectionOutline.name = "SelectionOutline";
+        // Keep the line shader in its default screen-space mode so outline
+        // thickness is a constant number of pixels at every object scale and
+        // camera distance.
+        selectionOutline.is3D = false;
         // X-ray outline: disable both depth write and depth test so the
         // selected object's silhouette stays visible through any geometry
         // in front of it, not just through the object's own faces.
@@ -814,22 +1008,18 @@ class Main extends hxd.App {
      * a rotated object is outlined by its true shape rather than an
      * axis-aligned boundary cube.
      *
-     * The outline is inflated slightly about the object center and lifted a
-     * little on Y so it never z-fights with the object's own faces or the
-     * ground grid beneath it.
+     * Edges are drawn at their exact transformed positions. The Graphics line
+     * shader supplies the fixed two-pixel screen-space width; no world-space
+     * inflation is applied, so scaling an object cannot scale its outline.
+     * Segments are clipped to the camera near/far range before they reach the
+     * line shader, avoiding oversized quads when a large edge crosses behind
+     * the camera.
      */
     function drawSelectionEdges(graphic:h3d.scene.Graphics, mesh:h3d.scene.Mesh):Void {
         var transform = mesh.getTransform();
-        var center = new h3d.Vector(mesh.x, mesh.y, mesh.z);
         inline function corner(sx:Float, sy:Float, sz:Float):h3d.Vector {
-            var point = new h3d.Vector(sx * 0.5, sy * 0.5, sz * 0.5)
+            return new h3d.Vector(sx * 0.5, sy * 0.5, sz * 0.5)
                 .transformed(transform);
-            // Inflate about the center, then lift clear of the grid plane.
-            point.x = center.x + (point.x - center.x) * OUTLINE_INFLATE;
-            point.y = center.y + (point.y - center.y) * OUTLINE_INFLATE
-                + OUTLINE_LIFT;
-            point.z = center.z + (point.z - center.z) * OUTLINE_INFLATE;
-            return point;
         }
         var corners = [
             corner(-1, -1, -1), corner(1, -1, -1), corner(1, 1, -1), corner(-1, 1, -1),
@@ -841,11 +1031,64 @@ class Main extends hxd.App {
             4, 5, 5, 6, 6, 7, 7, 4, // front face
             0, 4, 1, 5, 2, 6, 3, 7  // connecting edges
         ];
+        var camera = s3d.camera;
+        var forwardX = camera.target.x - camera.pos.x;
+        var forwardY = camera.target.y - camera.pos.y;
+        var forwardZ = camera.target.z - camera.pos.z;
+        var forwardLength = Math.sqrt(forwardX * forwardX
+            + forwardY * forwardY + forwardZ * forwardZ);
+        if (forwardLength <= 0.000001) return;
+        forwardX /= forwardLength;
+        forwardY /= forwardLength;
+        forwardZ /= forwardLength;
+        // Stay just inside the clip planes. An endpoint exactly on zNear has
+        // zero projected depth in Heaps' line shader and cannot retain width.
+        var nearDepth = camera.zNear * 1.01;
+        var farDepth = camera.zFar * 0.999999;
         for (index in 0...(edges.length >> 1)) {
             var a = corners[edges[index * 2]];
             var b = corners[edges[index * 2 + 1]];
-            graphic.moveTo(a.x, a.y, a.z);
-            graphic.lineTo(b.x, b.y, b.z);
+            var ax = a.x;
+            var ay = a.y;
+            var az = a.z;
+            var bx = b.x;
+            var by = b.y;
+            var bz = b.z;
+            var aDepth = (ax - camera.pos.x) * forwardX
+                + (ay - camera.pos.y) * forwardY
+                + (az - camera.pos.z) * forwardZ;
+            var bDepth = (bx - camera.pos.x) * forwardX
+                + (by - camera.pos.y) * forwardY
+                + (bz - camera.pos.z) * forwardZ;
+            if ((aDepth < nearDepth && bDepth < nearDepth)
+                    || (aDepth > farDepth && bDepth > farDepth)) continue;
+
+            if (aDepth < nearDepth) {
+                var ratio = (nearDepth - aDepth) / (bDepth - aDepth);
+                ax += (bx - ax) * ratio;
+                ay += (by - ay) * ratio;
+                az += (bz - az) * ratio;
+                aDepth = nearDepth;
+            } else if (bDepth < nearDepth) {
+                var ratio = (nearDepth - bDepth) / (aDepth - bDepth);
+                bx += (ax - bx) * ratio;
+                by += (ay - by) * ratio;
+                bz += (az - bz) * ratio;
+                bDepth = nearDepth;
+            }
+            if (aDepth > farDepth) {
+                var ratio = (aDepth - farDepth) / (aDepth - bDepth);
+                ax += (bx - ax) * ratio;
+                ay += (by - ay) * ratio;
+                az += (bz - az) * ratio;
+            } else if (bDepth > farDepth) {
+                var ratio = (bDepth - farDepth) / (bDepth - aDepth);
+                bx += (ax - bx) * ratio;
+                by += (ay - by) * ratio;
+                bz += (az - bz) * ratio;
+            }
+            graphic.moveTo(ax, ay, az);
+            graphic.lineTo(bx, by, bz);
         }
     }
 
