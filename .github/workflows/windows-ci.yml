@@ -1,0 +1,17 @@
+name: Windows portable checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  compile-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile project and run portable tests
+        shell: powershell
+        run: .\tools\test.ps1 -Portable

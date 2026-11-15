@@ -1,6 +1,7 @@
 package boltspark.ui;
 
 import freetype.heaps.types.FontTypes.FreeTypeFontOptions;
+import boltspark.ui.core.UiFrame;
 
 /**
  * Shared BoltUI context handed to widgets and panels.
@@ -22,6 +23,8 @@ class UiContext {
     public final monoFont:h2d.Font;
     public final resizeHorizontal:hxd.Cursor;
     public final resizeVertical:hxd.Cursor;
+    /** Backend-independent frame/input/state core shared by all BoltUI views. */
+    public final frame:UiFrame = new UiFrame();
 
     #if hldx
     final arrowCursor:dx.Cursor;
@@ -55,6 +58,10 @@ class UiContext {
         resizeVertical = hxd.Cursor.Move;
         #end
     }
+
+    public inline function beginFrame():Void frame.begin(width, height);
+
+    public inline function endFrame():Array<String> return frame.end();
 
     function fontOptions(kerning:Bool = true):FreeTypeFontOptions {
         return {

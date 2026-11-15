@@ -79,6 +79,8 @@ From the repository root:
 
 ```powershell
 .\tools\build.ps1
+.\tools\test.ps1 -Portable
+.\tools\test.ps1 -Build -NativeSmoke -WindowLifecycle -DpiProbe -DeviceReset
 ```
 
 The default action builds both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files). Use `.\tools\build.ps1 -Run` to launch the bytecode build; launch the native release directly from `release\Boltspark.exe`.
@@ -102,6 +104,8 @@ Pop-Location
 ```
 
 The development output is HashLink bytecode (`bin/boltspark.hl`); the native Windows release is packaged separately in `release\Boltspark.exe`.
+See [`TESTING.md`](TESTING.md) for the portable/native test split and the
+remaining physical hardware gates.
 
 ## What you should see
 
@@ -117,9 +121,17 @@ Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C supp
 
 ## Important scope boundary
 
-This is a foundation proof, not a complete editor and not yet the final immediate-mode API. It intentionally does not introduce docking, panels as plugins, a retained document model, asset import, custom render passes, PBR, or HIDE code. Prove the native DX12 boot/render/input/resize loop first.
+The repository has advanced beyond the original one-window proof: it now has
+resizable persisted panel regions, bounded picking, hierarchy/Inspector editing,
+three transform gizmos, native application windows, and reusable BoltUI/data
+foundations. It is still not a complete editor or the final immediate-mode API.
+Integrated project open/save, asset import, plugins, custom render passes, PBR,
+and HIDE migration remain outside the current implementation boundary.
 
-The current BoltUI prototype holds a small set of H2D objects and rebuilds only static geometry on resize. That is a performance-conscious seed. The planned public API can later become immediate-mode (`beginFrame`, `beginPanel`, `label`, `button`, `endPanel`) while preserving stable widget IDs and reusing render objects rather than allocating a new scene tree every frame.
+The current BoltUI hybrid keeps retained H2D controls while using explicit frame
+boundaries, scoped stable IDs, persistent state, deterministic layout, and a
+pooled draw-command path for static chrome. Future public immediate-mode APIs can
+build on those contracts without allocating a new scene tree every frame.
 
 ## Acceptance checks
 

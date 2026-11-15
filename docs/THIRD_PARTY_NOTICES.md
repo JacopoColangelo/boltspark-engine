@@ -1,5 +1,20 @@
 # Third-party notices
 
+## Build-tool-only Haxe runtime libraries
+
+The project-local pinned Haxe development compiler is accompanied by the
+official Windows binary distribution's `libmbedcrypto`, `libmbedtls`,
+`libmbedx509`, PCRE2, and zlib runtime DLLs. They are needed only to start
+`toolchain/haxe-dev/haxe.exe` (including on hosted CI) and are not staged into
+`release/Boltspark.exe` or shipped as Boltspark runtime dependencies.
+
+- Haxe compiler distribution: <https://build.haxe.org/builds/haxe/windows64/>
+- Mbed TLS: Apache License 2.0, <https://github.com/Mbed-TLS/mbedtls>
+- PCRE2: BSD 3-Clause license, <https://github.com/PCRE2Project/pcre2>
+- zlib: zlib license, <https://zlib.net/>
+
+Exact file hashes are recorded in `docs/TOOLCHAIN_VERSIONS.md`.
+
 ## Inter
 
 BoltUI embeds **Inter 4.1** TTF faces by Rasmus Andersson and the Inter Project

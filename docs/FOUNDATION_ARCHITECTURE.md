@@ -53,13 +53,13 @@ Boltspark Editor Process (Windows 11 x64)
     │   └── editor viewport content (meshes, cameras, lights)
     └── 2D scene (s2d)
         └── BoltUI root
-            ├── Dock/layout model (future)
-            ├── Widget state + stable IDs (future)
-            ├── Input/focus/capture routing (future)
-            └── H2D renderer (graphics, text, hit regions)
+            ├── Persisted dock layout + splitters
+            ├── Frame state + scoped stable IDs + diagnostics
+            ├── Input/focus/capture routing
+            └── Pooled commands + retained H2D renderer/widgets
 ```
 
-## 3. Suggested source layout after the first proof
+## 3. Current source direction after the first proof
 
 ```text
 src/
@@ -74,26 +74,25 @@ src/
     ui/
       BoltUI.hx
       UiContext.hx
-      UiInputState.hx
-      UiStyle.hx
+      core/ (UiFrame, UiInputState, UiId, diagnostics)
+      Theme.hx
       layout/
-        Rect.hx
-        DockNode.hx
-        SplitLayout.hx
+        LayoutRect.hx
+        BoxLayout.hx
+        DockLayout.hx
       widgets/
         Button.hx
         Label.hx
         Panel.hx
       render/
-        H2DRenderer.hx
-        DrawCommand.hx
-        TextCommand.hx
-    editor/
-      EditorState.hx
-      SelectionState.hx
+        H2dDrawRenderer.hx
+        UiDrawCommand.hx
+    editor/ (scene objects, viewport, gizmos, command history)
+    project/ (versioned documents, validation, atomic storage)
 ```
 
-Do not create all of these modules before the native proof passes. Split them out when a concrete implementation needs them.
+The native proof has passed. Modules are split out when a tested responsibility
+exists; speculative engine-wide abstractions remain deferred.
 
 ## 4. BoltUI design recommendation
 
@@ -106,7 +105,8 @@ Use a **hybrid immediate-mode API with retained rendering resources**:
 - The H2D backend reuses/pools `h2d.Graphics`, `h2d.Text`, and hit regions. Do not create/destroy a large H2D object tree on every frame.
 - The document/scene model is independent of the UI tree. UI controls dispatch editor commands; they do not own engine objects.
 
-Proposed surface API (design target, not implemented in this starter):
+The low-level contracts are implemented; this remains the design target for a
+future public convenience API:
 
 ```haxe
 ui.beginFrame(input);
@@ -123,7 +123,10 @@ The API should not expose H2D implementation classes to editor tools. Keep the r
 
 The editor clips `s3d` rendering to the computed viewport rectangle with Heaps' `Engine.setRenderZone`, then resets the render zone before drawing H2D chrome. The camera projection is centered on that rectangle; viewport-local clicks are converted to window coordinates and unprojected into collider rays. This path keeps the proven DX12 scene renderer and avoids introducing a separate render-target lifecycle.
 
-The scissored viewport, coordinate conversion, resize, and selection path are implemented. Validate high-DPI scaling, repeated window/dock resizing, and actual device-loss recovery on a Windows target before declaring Gate 5 complete.
+The scissored viewport, unified coordinate conversion, repeated window/dock
+resize, selection path, current-monitor DPI awareness, and Heaps forced-context
+reset are implemented and tracked by native probes. Physical mixed-DPI monitor
+transitions and a genuine driver-triggered DXGI removal remain hardware gates.
 
 ## 6. Input model
 
@@ -150,6 +153,8 @@ Use H2D `Interactive` for the first button proof. Before implementing docking, a
 - Batch static geometry where practical; minimize texture switches.
 - Separate layout invalidation from drawing; resize or content changes should not force unrelated panels to rebuild.
 - Never keep stale GPU resources across device loss/reset; add a device-loss/recreate test before custom render targets.
-- Do not hardcode physical pixels as the long-term unit. Introduce logical UI units and a DPI scale after the first window proof.
+- Continue migrating hardcoded physical metrics toward logical UI units. The
+  native DPI scale is now observable and tested on the current monitor, but
+  full mixed-DPI rendering requires physical monitor validation.
 - Keep rendering state and editor domain state separate.
 - No agent may alter the native backend or add a new UI library without an ADR and passing the acceptance suite.

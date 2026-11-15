@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "22222222222222222222222222222222",
+  "name": "Main",
+  "entities": [
+    {
+      "id": "33333333333333333333333333333333",
+      "name": "Fixture Cube",
+      "parentId": null,
+      "transform": {
+        "position": [1, 2, 3],
+        "rotation": [10, 20, 30],
+        "scale": [1, -2, 1]
+      },
+      "components": [
+        {
+          "type": "meshRenderer",
+          "version": 1,
+          "data": {
+            "primitive": "cube"
+          },
+          "fixtureComponentNote": "preserve me"
+        }
+      ],
+      "fixtureEntityNote": "preserve me"
+    }
+  ],
+  "fixtureSceneNote": "preserve me"
+}

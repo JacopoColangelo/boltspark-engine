@@ -9,6 +9,13 @@
 - Haxe (`haxe --version`): **5.0.0-preview.1+dcda605** (pinned development build, dated 2025-10-23) — installed at `toolchain/haxe-dev`
   - **Why a dev build:** Haxe 4.3.7 (latest stable) has **no** native `hl_carray` codegen (`genhl.ml` has zero `ACArray` support; verified from 4.3.7 source). Heaps 2.1.0's DX12 driver (`h3d/impl/DX12Driver.hx`) requires `hl.CArray` element access that 4.3.7 cannot compile correctly, and 4.3.7's stdlib declares `carray_get`/`carray_length` primitives that no released HashLink exports (verified against HashLink 1.16.0 `libhl.dll` PE exports: only `alloc_carray` + `carray_blit`). Dev builds 2024-12-20 through 2025-10-23 compile and run the full project; 2025-10-25+ is broken by Haxe commit `70820f1` ("Refactor event loops" — removes `EventLoop.progress` called by Heaps 2.1.0 `hxd/System.hl.hx:157`). The 2025-10-23 build is therefore the **newest working** compiler for Heaps 2.1.0 + HashLink 1.16 + DX12.
   - Ratified by the user on 2026-11-11.
+  - The adjacent compiler runtime DLLs are tracked so the pinned compiler can
+    start on a clean hosted Windows worker: `libmbedcrypto.dll`
+    `C66623ED439BC779C09BECF76278EB6615C05D42374AA75CB0592B86D4C9AD62`,
+    `libmbedtls.dll` `6E329DB9D8B65B859D89D295D37A2ECCB93EE09E4A3AE17B203EBB14F1DEF18B`,
+    `libmbedx509.dll` `1248D18B14471D606AA11A97039252CFDADB8D1712CA18D49A36A76317F683C3`,
+    `libpcre2-8-0.dll` `A794A85AEBE6784AB3491F7EFF353CCE7AF2CB799619E635B49E0C55276A0911`,
+    and `zlib1.dll` `A9ADF9FEFE5CA7F283A3BF0488C99AB845B74310C32C6F64025F324676743660`.
 - Haxe stable reference (not used to build): 4.3.7 at `toolchain/haxe` (kept for reference only; DX12 is not functional with it)
 - HashLink (`hl --version`): **1.16.0** — official win64 binary release, at `toolchain/hashlink`
 - HashLink distribution source/release asset/commit: `hashlink-1.16-win64.zip` from https://github.com/HaxeFoundation/hashlink/releases/tag/1.16 (official binary, no Agility-specific build)

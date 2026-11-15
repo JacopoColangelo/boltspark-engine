@@ -41,3 +41,9 @@ Rules for AI agents (and humans) working in this repository. Read this before ma
 16. Run `tools/build.ps1 -Check` before diagnosing "environment" issues — it validates OS, pins, native modules, and build config in one pass. Install third-party build dependencies only when required with `tools/build.ps1 -InstallDependencies`.
 17. Keep the DX12/CArray regression repro (`tests/repro/DxCArrayRepro.hx`) compiling and passing whenever toolchain changes are ever approved.
 18. Keep `tests/repro/FreeTypeRuntimeRepro.hx` passing when changing fonts, hlfreetype, FreeType, glyph metrics, or atlas behavior.
+19. Run `tools/test.ps1 -Portable` for every source change. Before claiming a
+    native integration complete, run `tools/test.ps1 -Build -NativeSmoke` plus
+    the relevant `-WindowLifecycle`, `-DpiProbe`, or `-DeviceReset` switch.
+20. Keep reusable probes under `tests/native/`, never only under ignored `bin/`.
+    Generated evidence belongs in `bin/test-results/`; document the exact probe
+    and machine instead of committing transient bytecode or screenshots.

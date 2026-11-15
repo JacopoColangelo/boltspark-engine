@@ -17,6 +17,15 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - Position, Rotation, and Scale rows have one-click canonical resets; Scale can link its axes to preserve the current X/Y/Z proportions across field edits and gizmo drags, while signed values and pivot-crossing gizmo drags support mirrored transforms without singular zero scale.
 - The editor world is bounded to ±8 km from the origin on every axis. Every transform path constrains complete transformed geometry instead of deleting objects or imposing an arbitrary scale-factor cap; the viewport far plane covers the bounded world, and camera-enclosing meshes remain visible from inside while editing.
 - Editor commands flow UI → command → engine object (widgets never mutate engine state directly).
+- The reusable BoltUI seed now has explicit frame boundaries, scoped stable IDs,
+  persistent widget state, backend-independent input snapshots, duplicate-ID and
+  invalid-layout diagnostics, deterministic row/column/stack geometry, and a
+  pooled draw-command path used by the editor chrome.
+- Versioned project/scene serialization foundations are in place with durable
+  IDs, strict relative paths, generic versioned component envelopes, reference
+  validation, unknown-field preservation, atomic save + backup, fixtures, and a
+  bounded undo/redo command history. These are tested foundations; project
+  open/save and asset-browser UI are still later integration work.
 
 ## Hard platform policy
 
@@ -49,6 +58,8 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -InstallDependencies # install missing pinned dependencies (optional)
 .\tools\build.ps1 -Check              # validate the Windows build environment
 .\tools\build.ps1 -Run                # run the development HashLink build
+.\tools\test.ps1 -Portable            # clean-worker compile + headless tests
+.\tools\test.ps1 -Build -NativeSmoke  # full local build/tests + DX12 smoke
 ```
 
 The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library, PIX runtime, and verified FreeType source only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable, `freetype.hdll`, licenses, and its other required runtime files.
@@ -64,6 +75,9 @@ The development build runs through `hl.exe` and retains its command window for l
 - [`docs/AI_AGENT_GUIDELINES.md`](docs/AI_AGENT_GUIDELINES.md) — rules for AI agents working on this repo
 - [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) — licenses for fonts, hlfreetype, and FreeType
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — master development plan (do not modify)
+- [`docs/TESTING.md`](docs/TESTING.md) — tracked portable/native test matrix and commands
+- [`docs/PROJECT_FORMAT.md`](docs/PROJECT_FORMAT.md) — initial versioned project/scene contracts
+- [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) — measured 15-minute idle/resize baseline
 - [`tests/native-foundation-acceptance.md`](tests/native-foundation-acceptance.md) — acceptance checklist with executed results
 
 ## Source layout
@@ -73,7 +87,9 @@ src/
   Main.hx                     — entry point (hxd.App), wires editor commands to engine objects
   boltspark/ui/
     BoltUI.hx                 — facade: theme + input adapter + editor shell
+    core/                     — frame lifecycle, stable IDs, input state, diagnostics
     layout/                   — reusable dock geometry and local layout persistence
+    render/                   — pooled draw commands + retained H2D executor
     Theme.hx                  — modern dark-editor color/size tokens
     UiContext.hx              — embedded fonts, native cursors, window state
     AppIcon.hx                — shared ICO decoding for HWND and title-strip branding
@@ -83,12 +99,17 @@ src/
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
     windows/                  — native top-level editor-window routing and H2D content
+  boltspark/project/          — versioned project/scene data, validation, atomic storage
+  boltspark/editor/commands/  — bounded execute/undo/redo command history
   res/fonts/                  — embedded Inter and JetBrains Mono TTF faces
 tests/
   native-foundation-acceptance.md
-  repro/DxCArrayRepro.hx      — isolation repro for the DX12/CArray root cause
+  repro/                      — headless math, UI-core, command, serialization, and native repros
+  native/                     — tracked HWND, layout, DPI, reset, and performance probes
 tools/
   build.ps1                   — install dependencies, check, build, and run
+  test.ps1                    — portable CI and full native regression entry point
+  check-policy.ps1            — native-only backend/dependency policy guard
   generate-fonts.ps1          — sync the pinned JetBrains Mono runtime TTF resource
   font-source/                — JetBrains Mono source + OFL font license texts
 third_party/hlfreetype/       — pinned runtime TTF/OTF rasterizer and Heaps glyph cache

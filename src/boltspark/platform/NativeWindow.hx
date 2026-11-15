@@ -46,6 +46,16 @@ class NativeWindow {
         #end
     }
 
+    /** Per-monitor scale reported by the locked hldx Win32 window wrapper. */
+    public static function displayScale(window:hxd.Window):Float {
+        #if hldx
+        var scale:Float = @:privateAccess window.window.displayScale;
+        return scale > 0 && Math.isFinite(scale) ? scale : 1;
+        #else
+        return 1;
+        #end
+    }
+
     /** Show, raise, and request foreground focus for a user-opened window. */
     public static function activate(window:hxd.Window):Bool {
         #if hldx

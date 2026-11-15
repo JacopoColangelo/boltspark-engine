@@ -2,6 +2,7 @@ package boltspark.ui;
 
 import boltspark.editor.EditorAction;
 import boltspark.editor.Keybindings;
+import boltspark.ui.core.UiInputState;
 
 /**
  * Central input adapter (Gate 3).
@@ -35,6 +36,7 @@ class InputAdapter {
 
     final scene:h2d.Scene;
     final keybindings:Keybindings;
+    final state:UiInputState;
     var report:h2d.Text;
     // Store the physical key that activated each action. Key-up must release
     // the action even if Ctrl was pressed/released in the meantime; matching
@@ -44,9 +46,11 @@ class InputAdapter {
     var snapToGridKeyDown:Int = -1;
     var snapHoldKeyDown:Int = -1;
 
-    public function new(scene:h2d.Scene, keybindings:Keybindings) {
+    public function new(scene:h2d.Scene, keybindings:Keybindings,
+            ?state:UiInputState) {
         this.scene = scene;
         this.keybindings = keybindings;
+        this.state = state == null ? new UiInputState() : state;
         // Listen at the window level so full-window editor interactives (which
         // consume events before scene listeners run) cannot starve the adapter.
         hxd.Window.getInstance().addEventTarget(onSceneEvent);
@@ -67,13 +71,15 @@ class InputAdapter {
     /** Compact status line for the editor status bar. */
     public function statusLine():String {
         return 'key ${lastKey} | d${keyDownCount} u${keyUpCount} mv${pointerMoves} '
-            + 'focus ${focusGotCount}/${focusLostCount}';
+            + 'focus ${focusGotCount}/${focusLostCount}'
+            + (state.orphanKeyUps == 0 ? "" : ' orphanUp ${state.orphanKeyUps}');
     }
 
     function onSceneEvent(event:hxd.Event):Void {
         switch (event.kind) {
             case EKeyDown:
                 keyDownCount++;
+                state.keyDown(event.keyCode);
                 lastKey = hxd.Key.getKeyName(event.keyCode);
                 // Rebind capture takes priority: the key being bound must not
                 // also fire the shortcut it is replacing.
@@ -130,6 +136,7 @@ class InputAdapter {
                 refresh();
             case EKeyUp:
                 keyUpCount++;
+                state.keyUp(event.keyCode);
                 if (event.keyCode == deleteKeyDown) deleteKeyDown = -1;
                 if (event.keyCode == shortcutKeyDown) shortcutKeyDown = -1;
                 if (event.keyCode == snapToGridKeyDown) snapToGridKeyDown = -1;
@@ -141,8 +148,16 @@ class InputAdapter {
             case EMove:
                 pointerMoves++;
                 pointerInsideWindow = true;
+                state.movePointer(event.relX, event.relY);
+            case EPush:
+                state.pressPointer(event.relX, event.relY);
+            case ERelease, EReleaseOutside:
+                state.releasePointer(event.relX, event.relY);
+            case EWheel:
+                state.addWheel(event.wheelDelta);
             case EFocusLost:
                 focusLostCount++;
+                state.focusLost();
                 deleteKeyDown = -1;
                 shortcutKeyDown = -1;
                 snapToGridKeyDown = -1;
@@ -153,6 +168,7 @@ class InputAdapter {
                 refresh();
             case EFocus:
                 focusGotCount++;
+                state.focusGained();
                 refresh();
             case EOut:
                 pointerInsideWindow = false;

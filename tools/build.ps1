@@ -13,6 +13,13 @@ $nekoDir = Join-Path $toolchain 'neko'
 $haxeExe = Join-Path $haxeDevDir 'haxe.exe'
 $haxelibExe = Join-Path $haxeDevDir 'haxelib.exe'
 $hlExe = Join-Path $hashLinkDir 'hl.exe'
+$haxeRuntimeHashes = [ordered]@{
+    'libmbedcrypto.dll' = 'C66623ED439BC779C09BECF76278EB6615C05D42374AA75CB0592B86D4C9AD62'
+    'libmbedtls.dll' = '6E329DB9D8B65B859D89D295D37A2ECCB93EE09E4A3AE17B203EBB14F1DEF18B'
+    'libmbedx509.dll' = '1248D18B14471D606AA11A97039252CFDADB8D1712CA18D49A36A76317F683C3'
+    'libpcre2-8-0.dll' = 'A794A85AEBE6784AB3491F7EFF353CCE7AF2CB799619E635B49E0C55276A0911'
+    'zlib1.dll' = 'A9ADF9FEFE5CA7F283A3BF0488C99AB845B74310C32C6F64025F324676743660'
+}
 $pixVersion = '1.0.240308001'
 $pixPackageHash = '726ACC93D6968E2146261A1E415521747D50AD69894C2B42B5D0D4C29FD66EC4'
 $pixRuntimeHash = '81ADCFD8253C3489BE720DA7E30F16004DC9A1F02A8B418C6C3AEF4993032E6D'
@@ -387,6 +394,14 @@ function Test-Environment {
 
     $compiler = Get-RequiredFile $haxeExe `
         'Restore the pinned Haxe dev compiler (2025-10-23, dcda605) into toolchain/haxe-dev.'
+    foreach ($runtimeName in $haxeRuntimeHashes.Keys) {
+        $runtimePath = Get-RequiredFile (Join-Path $haxeDevDir $runtimeName) `
+            "Restore the pinned Haxe compiler runtime $runtimeName."
+        $runtimeHash = (Get-FileHash $runtimePath -Algorithm SHA256).Hash
+        if ($runtimeHash -ne $haxeRuntimeHashes[$runtimeName]) {
+            throw "Unexpected pinned Haxe compiler runtime hash for ${runtimeName}: $runtimeHash"
+        }
+    }
     $runtime = Get-RequiredFile $hlExe 'Restore the HashLink 1.16.0 runtime into toolchain/hashlink.'
     Get-RequiredFile $haxelibExe 'The pinned Haxe distribution must include haxelib.exe.' | Out-Null
 

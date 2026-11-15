@@ -5,6 +5,8 @@ import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
 import boltspark.ui.layout.LayoutRect;
+import boltspark.ui.layout.BoxLayout;
+import boltspark.ui.core.UiFrame;
 import boltspark.ui.windows.ApplicationWindowKind;
 import boltspark.ui.widgets.AxisValue;
 import boltspark.ui.widgets.ConsolePanel;
@@ -32,6 +34,7 @@ class EditorShell {
     final input:InputAdapter;
     final root:h2d.Object;
     final chrome:h2d.Graphics;
+    final chromeRenderer:EditorChromeRenderer;
     final editorBackgroundHit:h2d.Interactive;
 
     // Title/menu bar and editor toolbar.
@@ -148,6 +151,7 @@ class EditorShell {
     var scaleLinked:Bool = false;
     /** Whether a hold-to-disable press was actually forwarded past the text guard. */
     var snapHoldForwarded:Bool = false;
+    var lastGeometry:Null<DockLayoutGeometry>;
 
     public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter,
             snapping:GridSnapping) {
@@ -155,6 +159,7 @@ class EditorShell {
         this.input = input;
         root = new h2d.Object(parent);
         chrome = new h2d.Graphics(root);
+        chromeRenderer = new EditorChromeRenderer();
 
         // Lowest interactive layer: catches otherwise uncovered editor chrome
         // without taking clicks away from controls created above it.
@@ -626,6 +631,7 @@ class EditorShell {
         var height = ctx.height;
         var bodyTop = Theme.TOP_BAR_HEIGHT;
         var geometry = dockLayout.calculate(width, height);
+        lastGeometry = geometry;
         viewportRect = geometry.viewport;
         var leftWidth = geometry.leftPanel.width;
         var rightWidth = Math.max(0, geometry.rightPanel.width);
@@ -698,57 +704,7 @@ class EditorShell {
     }
 
     function drawChrome(width:Float, height:Float, geometry:DockLayoutGeometry):Void {
-        chrome.clear();
-        chrome.beginFill(Theme.TITLE_BAR);
-        chrome.drawRect(0, 0, width, Theme.TITLE_BAR_HEIGHT);
-        chrome.endFill();
-        chrome.beginFill(Theme.TOOLBAR);
-        chrome.drawRect(0, Theme.TITLE_BAR_HEIGHT, width, Theme.TOOLBAR_HEIGHT);
-        chrome.endFill();
-        chrome.beginFill(Theme.PANEL);
-        chrome.drawRect(geometry.leftPanel.x, geometry.leftPanel.y,
-            geometry.leftPanel.width, geometry.leftPanel.height);
-        chrome.drawRect(geometry.rightPanel.x, geometry.rightPanel.y,
-            geometry.rightPanel.width, geometry.rightPanel.height);
-        chrome.drawRect(geometry.console.x, geometry.console.y,
-            geometry.console.width, geometry.console.height);
-        chrome.endFill();
-        chrome.beginFill(Theme.PANEL_HEADER);
-        chrome.drawRect(geometry.leftPanel.x, geometry.leftPanel.y,
-            geometry.leftPanel.width, Theme.PANEL_HEADER_HEIGHT);
-        chrome.drawRect(geometry.rightPanel.x, geometry.rightPanel.y,
-            geometry.rightPanel.width, Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT);
-        chrome.endFill();
-        // Active dock tabs use the same restrained top marker as desktop DCC
-        // editors, rather than rounded floating panel cards.
-        chrome.beginFill(Theme.ACCENT);
-        chrome.drawRect(geometry.leftPanel.x, geometry.leftPanel.y,
-            Math.min(112, geometry.leftPanel.width), 2);
-        chrome.drawRect(geometry.rightPanel.x, geometry.rightPanel.y,
-            Math.min(88, geometry.rightPanel.width), 2);
-        chrome.endFill();
-        chrome.beginFill(Theme.TITLE_BAR);
-        chrome.drawRect(0, height - Theme.STATUS_BAR_HEIGHT, width, Theme.STATUS_BAR_HEIGHT);
-        chrome.endFill();
-
-        chrome.lineStyle(1, Theme.BORDER, 1);
-        chrome.moveTo(0, Theme.TITLE_BAR_HEIGHT);
-        chrome.lineTo(width, Theme.TITLE_BAR_HEIGHT);
-        chrome.moveTo(0, Theme.TOP_BAR_HEIGHT);
-        chrome.lineTo(width, Theme.TOP_BAR_HEIGHT);
-        chrome.moveTo(geometry.leftPanel.x,
-            geometry.leftPanel.y + Theme.PANEL_HEADER_HEIGHT - 0.5);
-        chrome.lineTo(geometry.leftPanel.x + geometry.leftPanel.width,
-            geometry.leftPanel.y + Theme.PANEL_HEADER_HEIGHT - 0.5);
-        chrome.moveTo(geometry.rightPanel.x,
-            geometry.rightPanel.y + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT - 0.5);
-        chrome.lineTo(geometry.rightPanel.x + geometry.rightPanel.width,
-            geometry.rightPanel.y + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT - 0.5);
-        chrome.moveTo(0, height - Theme.STATUS_BAR_HEIGHT);
-        chrome.lineTo(width, height - Theme.STATUS_BAR_HEIGHT);
-        chrome.drawRect(geometry.viewport.x, geometry.viewport.y,
-            geometry.viewport.width, geometry.viewport.height);
-        chrome.lineStyle();
+        chromeRenderer.draw(chrome, width, height, geometry);
     }
 
     function layoutTopBars(width:Float):Void {
@@ -776,12 +732,14 @@ class EditorShell {
         addObjectButton.x = 8;
         addObjectButton.y = toolbarY;
 
-        var toolX = 94.0;
-        for (button in transformButtons) {
-            button.x = toolX;
-            button.y = toolbarY;
-            toolX += 31;
+        var toolRects = BoxLayout.row(
+            new LayoutRect(94, toolbarY, 90, 28), [28, 28, 28], 3);
+        for (index in 0...transformButtons.length) {
+            var button = transformButtons[index];
+            button.x = toolRects[index].x;
+            button.y = toolRects[index].y;
         }
+        var toolX = 187.0;
         var transportX = Math.max(toolX + 16, width * 0.5 - 48);
         for (button in transportButtons) {
             button.x = transportX;
@@ -789,6 +747,45 @@ class EditorShell {
             button.visible = width > 620;
             transportX += 33;
         }
+    }
+
+    /**
+     * Declare stable identities for the retained shell in the shared frame
+     * registry. Retained H2D objects still own rendering/hit behavior while the
+     * core supplies diagnostics and a migration-safe persistent state key.
+     */
+    public function registerFrame(frame:UiFrame):Void {
+        var geometry = lastGeometry;
+        if (geometry == null) return;
+        frame.pushScope("editor-shell");
+        frame.register("hierarchy-panel", geometry.leftPanel);
+        frame.register("viewport", geometry.viewport);
+        frame.register("output-console", geometry.console);
+        frame.register("inspector-panel", geometry.rightPanel);
+
+        frame.pushScope("toolbar");
+        frame.register("add-object", new LayoutRect(
+            addObjectButton.x, addObjectButton.y, 78, 28));
+        var toolNames = ["move", "rotate", "scale"];
+        for (index in 0...transformButtons.length) {
+            var button = transformButtons[index];
+            frame.register(toolNames[index], new LayoutRect(
+                button.x, button.y, 28, 28));
+        }
+        frame.popScope();
+
+        frame.pushScope("hierarchy");
+        var visibleRows = hierarchyVisibleRowCount();
+        var last = Std.int(Math.min(hierarchyRows.length,
+            firstVisibleHierarchyRow + visibleRows));
+        for (index in firstVisibleHierarchyRow...last) {
+            var row = hierarchyRows[index];
+            frame.register('entity-${row.objectId}', new LayoutRect(
+                0, row.y, Math.max(0, geometry.leftPanel.width - 8),
+                HIERARCHY_ROW_HEIGHT));
+        }
+        frame.popScope();
+        frame.popScope();
     }
 
     function layoutHierarchy(leftWidth:Float, bodyTop:Float):Void {

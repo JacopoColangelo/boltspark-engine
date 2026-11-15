@@ -1,10 +1,12 @@
 import boltspark.editor.GridSnapping;
+import boltspark.editor.EditorViewport;
 import boltspark.editor.Keybindings;
 import boltspark.editor.RotationEuler;
 import boltspark.editor.ScalePolicy;
 import boltspark.editor.SceneObject;
 import boltspark.editor.TransformGizmo;
 import boltspark.editor.WorldBounds;
+import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
 import boltspark.ui.AppIcon;
 import boltspark.ui.BoltUI;
@@ -25,6 +27,7 @@ import boltspark.ui.windows.KeybindingsWindowApp;
  */
 class Main extends hxd.App {
     var boltUI:BoltUI;
+    var editorViewport:EditorViewport;
     var nativeWindow:hxd.Window;
     var cubePrimitive:h3d.prim.Cube;
     var groundGrid:h3d.scene.Graphics;
@@ -40,6 +43,7 @@ class Main extends hxd.App {
     var keybindings:Keybindings;
     /** Owns native top-level editor windows launched outside the main surface. */
     var applicationWindows:ApplicationWindowManager;
+    final runtimeProbes:RuntimeProbes = new RuntimeProbes();
     var currentTool:Int = 0;
     var localTransformSpace:Bool = false;
     var scaleProportionsLinked:Bool = false;
@@ -88,6 +92,7 @@ class Main extends hxd.App {
         #end
         applicationWindows = new ApplicationWindowManager();
         nativeWindow.onClose = function() {
+            runtimeProbes.shutdown();
             applicationWindows.shutdown();
             InteractiveResize.uninstall();
             return true;
@@ -98,6 +103,7 @@ class Main extends hxd.App {
         engine.backgroundColor = 0xFF000000 | Theme.APP_BG;
         var driverName = Type.getClassName(Type.getClass(engine.driver));
         Sys.println('[M0] renderer driver = ${driverName}');
+        runtimeProbes.start(nativeWindow, engine);
 
         cubePrimitive = new h3d.prim.Cube(1, 1, 1, true);
         // Cube.addUVs() unindexes the primitive; calculate normals afterwards
@@ -128,6 +134,8 @@ class Main extends hxd.App {
         snap = new GridSnapping();
         keybindings = new Keybindings();
         boltUI = new BoltUI(s2d, nativeWindow, snap, keybindings);
+        editorViewport = new EditorViewport(nativeWindow, s3d, s2d,
+            function() return boltUI.getViewportRect());
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreateObject = createCube;
         boltUI.onCreateObjectAt = createCubeAtViewport;
@@ -188,6 +196,7 @@ class Main extends hxd.App {
     }
 
     override function update(dt:Float):Void {
+        runtimeProbes.update(dt, h3d.Engine.getCurrent());
         applicationWindows.update();
         if (keybindings.pollExternalChanges()) {
             logActivity("keybindings: synchronized changes from the settings window");
@@ -202,49 +211,23 @@ class Main extends hxd.App {
         refreshSelectionOutline();
     }
 
+    override function onContextLost():Void {
+        super.onContextLost();
+        runtimeProbes.contextRestored();
+    }
+
     override function render(engine:h3d.Engine):Void {
-        var viewport = boltUI.getViewportRect();
-        var scaleX = engine.width / Math.max(1, nativeWindow.width);
-        var scaleY = engine.height / Math.max(1, nativeWindow.height);
-        var x = Std.int(Math.round(viewport.x * scaleX));
-        var y = Std.int(Math.round(viewport.y * scaleY));
-        var width = Std.int(Math.max(0, Math.round(viewport.width * scaleX)));
-        var height = Std.int(Math.max(0, Math.round(viewport.height * scaleY)));
-        if (width > 0 && height > 0) {
-            var centerX = x + width * 0.5;
-            var centerY = y + height * 0.5;
-            s3d.camera.setFovX(70, engine.width / engine.height);
-            s3d.camera.viewX = centerX * 2 / engine.width - 1;
-            s3d.camera.viewY = 1 - centerY * 2 / engine.height;
-            engine.setRenderZone(x, y, width, height);
-            engine.clear(0xFF000000 | Theme.VIEWPORT_BG, 1, 0);
-            s3d.render(engine);
-            engine.setRenderZone();
-        }
-        s2d.render(engine);
+        editorViewport.render(engine, Theme.VIEWPORT_BG);
     }
 
     /** Build a scene ray from viewport-local pointer coordinates. */
     function viewportRay(viewX:Float, viewY:Float):h3d.col.Ray {
-        var viewport = boltUI.getViewportRect();
-        var engine = h3d.Engine.getCurrent();
-        var scaleX = engine.width / Math.max(1, nativeWindow.width);
-        var scaleY = engine.height / Math.max(1, nativeWindow.height);
-        return s3d.camera.rayFromScreen(
-            (viewport.x + viewX) * scaleX,
-            (viewport.y + viewY) * scaleY,
-            engine.width,
-            engine.height);
+        return editorViewport.ray(viewX, viewY);
     }
 
     /** Engine-space pointer coordinates matching camera.project output. */
     function viewportPointer(viewX:Float, viewY:Float):h3d.Vector {
-        var viewport = boltUI.getViewportRect();
-        var engine = h3d.Engine.getCurrent();
-        var scaleX = engine.width / Math.max(1, nativeWindow.width);
-        var scaleY = engine.height / Math.max(1, nativeWindow.height);
-        return new h3d.Vector((viewport.x + viewX) * scaleX,
-            (viewport.y + viewY) * scaleY, 0);
+        return editorViewport.pointer(viewX, viewY);
     }
 
     static inline function degToRad(degrees:Float):Float {

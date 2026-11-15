@@ -42,7 +42,7 @@
 **Exit criteria**
 - Both scenes render in the same process and the 2D overlay appears above the 3D content.
 - [x] Drag-resize the native window while confirming rendering and layout continue updating.
-- [ ] Test small, large, maximized, and restored sizes without stale geometry or crashes.
+- [x] Test small, large, maximized, minimized, and restored sizes without stale geometry or crashes (`tests/native/Test-WindowLifecycle.ps1`).
 - No warnings/errors from the DirectX runtime during this smoke test.
 
 ## Gate 3 — Input and UI event flow
@@ -69,9 +69,14 @@ Implement in this order:
 7. Text input and menu primitives.
 
 **Exit criteria**
-- A two-panel split layout resizes by dragging.
-- Panel layout survives window resize and state changes.
-- UI controls issue editor commands; they do not directly mutate engine state.
+- [x] A multi-panel split layout resizes by dragging and persists its dimensions.
+- [x] Panel layout survives window resize, maximize/restore, and state changes.
+- [x] UI controls issue callbacks upward; they do not directly mutate engine state.
+
+The reusable core now also includes scoped stable IDs, frame lifecycle,
+backend-independent input snapshots, deterministic row/column/stack layout,
+diagnostics, and a pooled draw-command path. General widget migration and
+physical mixed-DPI validation continue incrementally.
 
 ## Gate 5 — Viewport embedding decision
 
@@ -81,8 +86,11 @@ The prototype clips `s3d` to the computed viewport rectangle with Heaps `Engine.
 - [x] 3D content is clipped to the viewport rectangle rather than hidden only by opaque panels.
 - [x] Picking rays use viewport-local coordinates and synchronize hierarchy selection.
 - [x] Native DX12 smoke tests confirm viewport clipping, cube selection, empty-space deselection, and camera/picking alignment after a 1440x900 to 1280x800 window resize.
-- [ ] Dock-splitter resize and high-DPI behavior are validated on a Windows target.
-- [ ] Device-loss/reset runtime validation remains pending.
+- [x] Dock-splitter resize is validated against viewport framing, empty-space deselection, and object picking (`tests/native/Test-WindowLifecycle.ps1`).
+- [x] Current-monitor DPI awareness and hldx/Win32 scale agreement are validated (`tests/native/Test-DpiAwareness.ps1`, 96 DPI / 1× on the reference machine).
+- [ ] Physical cross-monitor behavior at multiple Windows scale factors remains pending.
+- [x] Heaps' explicit DX12 context-loss/reset path recreates the context and restores scene resources while the editor remains responsive (`tests/native/Test-DeviceReset.ps1`).
+- [ ] A genuine driver/OS-triggered DXGI device-removal event remains a separate hardware test.
 
 ## DX12-specific validation
 
@@ -141,7 +149,7 @@ final position through the editor command flow; a consumed press calls
 tools keep the gizmo hidden until their milestones.
 
 **Exit criteria**
-- [x] The Move tool shows the axis gizmo at the selection; Rotate/Scale hide it and report as reserved.
+- [x] Historical Gate 8 first exposed only the Move axis gizmo. Gate 9 supersedes the former Rotate/Scale-reserved behavior with the complete three-tool suite.
 - [x] Axis picking and hover highlighting use the pointer ray against the axis segments with a world-space threshold.
 - [x] Dragging moves the object along the picked axis only, with live inspector value updates and no first-move jump.
 - [x] Release applies the position through the command flow and viewport click-picking stays suppressed during the drag.
@@ -161,7 +169,7 @@ handles through `h3d.scene.Graphics` with always-on-top depth testing:
   incremental camera-space arc-ball rotations.
 - **Scale**: box handles on each axis (ratio of ray-to-axis distance), plane
   quads (two-axis scale), and a center box for uniform relative scaling.
-- **Shortcuts**: number-row keys 1/2/3 switch Move/Rotate/Scale through the
+- **Shortcuts**: 1/E/R switch Move/Rotate/Scale by default through the
   input adapter, guarded like Delete so text capture wins while editing.
 - **Axis space**: the viewport WORLD/LOCAL overlay is a real clickable control.
   WORLD (default) keeps all axes, planes, and rings fixed to the scene while an
@@ -187,6 +195,6 @@ screen-space width, clips camera-crossing segments, and redraws per frame.
 - [x] The Move center square translates freely in the camera view plane (focused probe: (0, 0, 0) → (-0.72, 0.5, 0.32)).
 - [x] The omni center uses a virtual hemisphere (not the former z=0 circle), so a center-to-right drag tumbles around camera up instead of degenerating into screen roll (focused runs consistently produced large non-spin X/Z components, greater than 60° each).
 - [x] Scale handles scale only their axes; uniform scaling preserves ratios from a prior axis drag ((23.99, 12.43, 12.43) = ×1.93 on all three).
-- [x] Shortcuts 1/2/3 switch tools with the text-editing guard; toolbar buttons share the same switch.
-- [x] Automated evidence: `bin/verify-transform-gizmo.ps1` drives axis, plane, ring, omni, and scale drags plus shortcut presses across three relaunched sessions; engine logs in `bin/gizmo-runlog-{move,rotate,scale}.txt`, summary in `bin/transform-gizmo-evidence.txt`. Two consecutive runs reproduced matching values.
-- [x] Focused evidence: `bin/verify-gizmo-space-arcball.ps1` drives the Move center, presses the Rotate center and performs an arc-ball drag, then clicks the viewport toggle Local → World using window-scoped `SendMessageTimeout` only (`bin/gizmo-center-move-log.txt`, `bin/gizmo-arcball-log.txt`, `bin/gizmo-space-log.txt`).
+- [x] Rebindable shortcuts 1/E/R switch tools with the text-editing guard; toolbar buttons share the same switch. Historical 1/2/3 probe evidence is superseded by the keybinding acceptance evidence.
+- [x] Automated evidence: `tests/native/historical/verify-transform-gizmo.ps1` drives axis, plane, ring, omni, and scale drags plus shortcut presses across three relaunched sessions; engine logs in `bin/gizmo-runlog-{move,rotate,scale}.txt`, summary in `bin/transform-gizmo-evidence.txt`. Two consecutive runs reproduced matching values.
+- [x] Focused evidence: `tests/native/historical/verify-gizmo-space-arcball.ps1` drives the Move center, presses the Rotate center and performs an arc-ball drag, then clicks the viewport toggle Local → World using window-scoped `SendMessageTimeout` only (`bin/gizmo-center-move-log.txt`, `bin/gizmo-arcball-log.txt`, `bin/gizmo-space-log.txt`).

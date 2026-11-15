@@ -25,6 +25,7 @@ import boltspark.ui.windows.ApplicationWindowKind;
  */
 class BoltUI {
     final ctx:UiContext;
+    final input:InputAdapter;
     final shell:EditorShell;
 
     /** Editor commands forwarded to the engine by Main. */
@@ -60,7 +61,7 @@ class BoltUI {
     public function new(parent:h2d.Scene, window:hxd.Window, snapping:GridSnapping,
             keybindings:Keybindings) {
         ctx = new UiContext(window);
-        var input = new InputAdapter(parent, keybindings);
+        input = new InputAdapter(parent, keybindings, ctx.frame.input);
         shell = new EditorShell(parent, ctx, input, snapping);
         shell.onCreateObject = function() if (onCreateObject != null) onCreateObject();
         shell.onCreateObjectAt = function(x, y) if (onCreateObjectAt != null) onCreateObjectAt(x, y);
@@ -110,7 +111,17 @@ class BoltUI {
 
     /** Called once per app frame. Re-layout only when the OS window changes size. */
     public function update(dt:Float):Void {
+        ctx.beginFrame();
+        ctx.frame.register("editor-shell",
+            new LayoutRect(0, 0, ctx.width, ctx.height));
         shell.update(dt);
+        shell.registerFrame(ctx.frame);
+        var diagnostics = ctx.endFrame();
+        if (diagnostics.length > 0) {
+            // Contract failures are exceptional and de-duplicated per frame.
+            // Keep them out of the normal Output Log unless they actually occur.
+            for (message in diagnostics) Sys.println('[BoltUI] ${message}');
+        }
     }
 
     /** Rebuild static 2D chrome in response to a native window resize. */

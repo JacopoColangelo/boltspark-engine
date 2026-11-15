@@ -6,6 +6,8 @@
 *.md     text
 *.txt    text
 *.json   text
+*.boltproject text
+*.boltscene text
 *.ps1    text
 *.patch  text eol=lf
 *.xml    text

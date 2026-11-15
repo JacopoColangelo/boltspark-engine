@@ -98,7 +98,7 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 | Hierarchy background focus/selection | `bin/hierarchy-empty-body-deselect.png`, `bin/hierarchy-empty-header-deselect.png`, `bin/hierarchy-search-preserves-selection.png` (empty hierarchy chrome blurs and deselects; actual controls preserve selection) |
 | Numeric property interaction | `bin/numeric-drag-fields.png`, `bin/numeric-axis-scrub-right.png`, `bin/numeric-click-edit-focus.png`, `bin/transform-linked-scale.png` (compact up/down arrows, transform scrubbing, click-to-edit, and ratio-preserving scale linkage) |
 | Grid snapping + keybindings | `bin/keybindings-native-window.png`, `bin/keybindings-native-window-rebound.png`, `bin/main-dark-titlebar.png`, `bin/native-window-evidence.txt`, `bin/keybindings-v-held.png`, `bin/keybindings-evidence.txt`, `bin/snap-hold-on.log`, `bin/snap-hold-bypass.log`, `bin/gizmo-arcball-freeform-snap-on.txt`, `bin/gizmo-ring-snap-still-on.txt` (dark native title bars, separate HWND in development and release, same-PID/HWND cached reopen, live Ctrl+T synchronization/command routing, persistence, modifier-safe V release, snapped `x=1` versus held-V unsnapped `x=0.8`, and freeform omni rotation versus a still-snapped 30° axis-ring result) |
-| Smooth move + first-open window order | `bin/window-behavior-evidence.txt` from `bin/verify-move-loop.ps1` and `bin/verify-first-keybindings-open.ps1` (move-loop timers skip interactive DX12 redraw while resize timers retain it; the first keybindings HWND reports the editor HWND as `GW_OWNER`) |
+| Smooth move + first-open window order | `bin/window-behavior-evidence.txt` from tracked `tests/native/historical/verify-move-loop.ps1` and `tests/native/historical/verify-first-keybindings-open.ps1` (move-loop timers skip interactive DX12 redraw while resize timers retain it; the first keybindings HWND reports the editor HWND as `GW_OWNER`) |
 | Environment check | `tools/build.ps1 -Check` exit 0 |
 | Build | `tools/build.ps1` creates the development build and `release\Boltspark.exe` |
 | Clean shutdown | run exit code 0 on window close |
@@ -112,8 +112,13 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 
 ## 7. Known issues / open items
 
-- **Performance baseline** (idle frame time, CPU/GPU, memory at 1/15 min) not yet captured — checklist section left unchecked.
-- The input adapter's keyboard counters showed `u4` key-up events with `d0` key-downs during automated mouse testing (mouse clicks don't emit key events; cause not yet investigated — likely focus-related events). Observation only; no functional impact.
+- **Performance baseline captured 2026-11-15:** 15-minute idle/resize run found
+  no unbounded process memory/handle growth; exact frame, CPU, GPU, and memory
+  observations are in `docs/PERFORMANCE_BASELINE.md`.
+- The input adapter's historical `u4` key-up observation is now explicit:
+  backend-independent input state tracks physical downs and reports unmatched
+  releases as `orphanUp`, including releases after focus-loss clears held keys.
+  It remains diagnostic and does not trigger editor commands.
 - Second-machine confirmation of the acceptance checklist is pending.
 - Stale machine-level env vars on C: (dead paths) need admin to remove.
 - A cosmetic artifact: cube bottom edge shows slight z-fighting speckle at some angles (unlit cube, default renderer). Harmless at M0; will be revisited with the renderer work.
@@ -127,8 +132,36 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
 
 ## 9. Next steps (M1 entry points)
 
-1. **Capture the performance baseline** (open checklist section): idle frame time, CPU/GPU usage at 1440x900, memory at 1/15 minutes, growth check while resizing.
-2. **Gate 4 — BoltUI minimum system** (per `docs/IMPLEMENTATION_SEQUENCE.md`): theme tokens + logical units, layout containers, stable widget IDs, splitter/dock tree with drag-resize, text input primitives. The M0 widget/command base is the foundation for this.
-3. **Gate 5 — viewport embedding decision**: clip the 3D view to a viewport rectangle with bounded rendering and picking.
-4. **Robustness:** investigate the `u4`-without-`d` keyboard counter observation in `InputAdapter`; add an automated smoke script that launches the app, waits for the driver log line, and exits cleanly (headless CI-able check).
-5. **Second-machine confirmation** of the acceptance checklist, and (needs admin, low priority) removal of the stale machine-level `HAXEPATH`/`NEKO_INSTPATH` env vars pointing at the removed `C:\HaxeToolkit`.
+This historical M0 queue has advanced substantially. Gate 4 foundations and
+Gate 5 viewport embedding are implemented, while project/scene integration is
+now the next product-facing boundary. Current priorities are:
+
+1. Complete physical mixed-DPI and second-machine validation; the current
+   monitor is DPI-aware and reports a matching Win32/hldx scale.
+2. Migrate concrete editor edits onto the tested command-history foundation so
+   general Undo/Redo can be exposed safely.
+3. Integrate the versioned project/scene contracts into project open/save and
+   scene loading, followed by asset registry/import metadata.
+4. Continue incremental BoltUI widget migration onto stable IDs, generic layout,
+   and pooled draw commands.
+5. Keep genuine driver-triggered DXGI device removal as a hardware gate; the
+   explicit Heaps context-loss/recreation path is now covered automatically.
+
+## 10. Post-M0 foundation update — 2026-11-15
+
+- `tools/test.ps1` is the tracked regression entry point. Its portable mode
+  compiles the complete project and runs GPU-independent tests on hosted Windows
+  CI; native mode adds HashLink/CArray, FreeType, and optional HWND/DX12 probes.
+- Native smoke, resize/maximize/restore, dock-splitter + picking, current-monitor
+  DPI awareness, and forced DX12 context recreation now have tracked probes in
+  `tests/native/`. Machine-specific outputs remain under `bin/test-results/`.
+- BoltUI now has explicit frame boundaries, scoped stable IDs, persistent state,
+  an input snapshot with unmatched-key-up diagnostics, row/column/stack layout,
+  contract diagnostics, and pooled draw commands used by editor chrome.
+- Viewport render-zone and input coordinate conversion moved into
+  `editor/EditorViewport.hx`, providing one mapping for rendering, picking, and
+  gizmos after panel or backbuffer resizing.
+- Initial M3 data foundations now include versioned project/scene schemas,
+  durable IDs, safe relative paths, unknown-field preservation, reference and
+  cycle validation, atomic saves with backup, fixtures, and command history.
+  They are foundations only; user-facing project open/save is not yet claimed.

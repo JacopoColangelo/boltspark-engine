@@ -10,6 +10,11 @@ toolchain/hashlink/WinPixEventRuntime.LICENSE.txt
 *.hl
 *.hdll
 *.dll
+!toolchain/haxe-dev/libmbedcrypto.dll
+!toolchain/haxe-dev/libmbedtls.dll
+!toolchain/haxe-dev/libmbedx509.dll
+!toolchain/haxe-dev/libpcre2-8-0.dll
+!toolchain/haxe-dev/zlib1.dll
 *.so
 *.dylib
 *.pdb
