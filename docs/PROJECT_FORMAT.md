@@ -1,7 +1,7 @@
 # Initial Boltspark project and scene contracts
 
-This document describes the first **versioned data foundation**, not a claim
-that project open/save UI or a complete component runtime is finished.
+This document describes the first **versioned data foundation** and its current
+component mapping. Integrated project open/save UI remains future work.
 
 ## Files and schemas
 
@@ -45,8 +45,15 @@ Every entity contains:
 
 A component envelope has `type`, integer `version`, and object-valued `data`.
 Individual component payload schemas can therefore evolve independently of the
-scene root. The fixture currently demonstrates a `meshRenderer` envelope with
-a cube primitive; it does not yet define the final renderer/component API.
+scene root. The mandatory runtime Transform continues to map to the schema-1
+top-level `transform` object for backward compatibility. Other attached
+components map to envelopes through `ComponentRegistry`. The existing
+`meshRenderer { primitive: "cube" }` fixture loads as a real MeshRenderer and
+is written back with additive generic mesh/material identities.
+
+Unknown component types and unknown fields on known component envelopes remain
+preserved. This lets an older editor retain newer component data even when it
+cannot instantiate that component's behavior.
 
 ## Compatibility and safety
 

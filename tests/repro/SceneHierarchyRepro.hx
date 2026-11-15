@@ -1,8 +1,9 @@
 import boltspark.editor.EditorObject;
-import boltspark.editor.EditorObjectKind;
 import boltspark.editor.EditorSession;
 import boltspark.editor.EditorTransform;
 import boltspark.editor.TransformMatrix;
+import boltspark.engine.MeshRenderer;
+import boltspark.engine.PrimitiveGameObjects;
 import boltspark.project.SceneCodec;
 import boltspark.project.SceneSerializer;
 import boltspark.project.StableId;
@@ -180,13 +181,14 @@ class SceneHierarchyRepro {
 
     static function testMultiObjectLifecycle():Void {
         var session = new EditorSession(128);
-        var parent = session.addInitialObject("Parent", null, null, Empty);
+        var parent = session.addInitialObject("Parent");
         var child = session.addInitialObject("Child", new EditorTransform(1, 0, 0),
-            null, Cube, parent.id);
+            null, PrimitiveGameObjects.cubeComponents(), parent.id);
         var grandchild = session.addInitialObject("Grandchild",
-            new EditorTransform(0, 2, 0), null, Cube, child.id);
+            new EditorTransform(0, 2, 0), null,
+            PrimitiveGameObjects.cubeComponents(), child.id);
         var peer = session.addInitialObject("Peer", new EditorTransform(5, 0, 0));
-        var target = session.addInitialObject("Target", null, null, Empty);
+        var target = session.addInitialObject("Target");
 
         // Selecting Parent + Child must move only Parent's subtree root once.
         assertTrue(session.reparentObjects([parent.id, child.id, peer.id],
@@ -204,10 +206,11 @@ class SceneHierarchyRepro {
         var duplicates = session.duplicateObjects([parent.id, child.id]);
         assertTrue(duplicates.length == 1, "selected descendant was duplicated twice");
         var duplicate = duplicates[0];
-        assertTrue(duplicate.kind == Empty && duplicate.children.length == 1
-                && duplicate.children[0].kind == Cube
+        assertTrue(duplicate.getComponent(MeshRenderer) == null
+                && duplicate.children.length == 1
+                && duplicate.children[0].getComponent(MeshRenderer) != null
                 && duplicate.children[0].children.length == 1,
-            "nested hierarchy kinds were not duplicated recursively");
+            "nested hierarchy components were not duplicated recursively");
         assertTrue(duplicate.persistentId != parent.persistentId
                 && duplicate.children[0].persistentId != child.persistentId,
             "duplicate reused stable IDs");
@@ -223,7 +226,8 @@ class SceneHierarchyRepro {
             "paste did not retain subtree relationships");
 
         var emptyParent = session.createEmptyParent([peer.id], "Peer Group");
-        assertTrue(emptyParent != null && emptyParent.kind == Empty
+        assertTrue(emptyParent != null
+                && emptyParent.getComponent(MeshRenderer) == null
                 && peer.parent == emptyParent,
             "create-empty-parent transaction failed");
         assertTrue(session.undo() && session.findObject(emptyParent.id) == null
@@ -329,12 +333,13 @@ class SceneHierarchyRepro {
     static function testSerialization():Void {
         var session = new EditorSession();
         var root = session.addInitialObject("Root", transformedParent(1, 2, 3, 15, 2, 1, 3),
-            null, Empty);
+            null, []);
         var child = session.addInitialObject("Child",
             new EditorTransform(4, 5, 6, 0.1, 0.2, 0.3, 0.9,
                 10, 20, 30, true, -1, 2, 0.5, 0.2, -0.1, 0.3),
-            null, Cube, root.id);
-        var peer = session.addInitialObject("Peer", null, null, Cube, root.id);
+            null, PrimitiveGameObjects.cubeComponents(), root.id);
+        var peer = session.addInitialObject("Peer", null, null,
+            PrimitiveGameObjects.cubeComponents(), root.id);
         var sceneId = StableId.create("scene-test");
         var document = SceneSerializer.fromSession(session, sceneId, "Hierarchy Test");
         var encoded = SceneCodec.encode(document);
@@ -346,7 +351,8 @@ class SceneHierarchyRepro {
                 && loadedPeer.parent == loadedRoot
                 && loadedRoot.children[0] == loadedChild
                 && loadedRoot.children[1] == loadedPeer
-                && loadedRoot.kind == Empty && loadedChild.kind == Cube,
+                && loadedRoot.getComponent(MeshRenderer) == null
+                && loadedChild.getComponent(MeshRenderer) != null,
             "scene load did not reconstruct parent and sibling order");
         assertTrue(loadedChild.transform.sameAs(child.transform),
             "scene round-trip changed exact local affine transform");
@@ -385,7 +391,7 @@ class SceneHierarchyRepro {
         var depth = 3000;
         for (index in 0...depth) {
             parent = session.addInitialObject('Node${index}',
-                new EditorTransform(1, 0, 0), null, Empty,
+                new EditorTransform(1, 0, 0), null, [],
                 parent == null ? -1 : parent.id);
         }
         var world = parent.worldTransformMatrix.transformPoint(0, 0, 0);

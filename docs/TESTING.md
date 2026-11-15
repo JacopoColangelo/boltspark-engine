@@ -17,7 +17,7 @@ This command does not need Neko, HashLink runtime DLLs, or a GPU. It:
 2. compiles the complete application to HashLink bytecode using the tracked
    source classpaths directly;
 3. runs the portable arcball, Euler, BoltUI-core, command-history,
-   editor-session, scene-hierarchy, keybinding-migration, and
+   editor-session, component-system, scene-hierarchy, keybinding-migration, and
    project/scene-serialization tests through the Haxe interpreter.
 
 The pinned compiler executable and its five adjacent Windows runtime DLLs are

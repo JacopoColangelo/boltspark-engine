@@ -1,20 +1,17 @@
 package boltspark.editor;
 
+import boltspark.engine.Component;
+import boltspark.engine.GameObject;
 import boltspark.project.StableId;
 
-/** Pure scene object model owned by one EditorSession. */
-class EditorObject {
+/** Generic GameObject plus editor-only identity, hierarchy, and world caches. */
+class EditorObject extends GameObject {
     public final id:Int;
     public final persistentId:String;
-    public var name:String;
-    public final kind:EditorObjectKind;
     public var scene(default, null):Null<EditorSession>;
     public var parent(default, null):Null<EditorObject>;
     /** Ordered immediate children. Mutations are owned by SceneHierarchy. */
     public final children:Array<EditorObject> = [];
-    public var transform(get, set):EditorTransform;
-
-    var localTransform:EditorTransform;
 
     // Lazy world-cache state. SceneHierarchy is the only writer.
     @:noCompletion public var worldCacheInitialized:Bool = false;
@@ -27,16 +24,17 @@ class EditorObject {
     @:noCompletion public var cachedWorldTransformRevision:Int = -1;
 
     public function new(id:Int, persistentId:String, name:String,
-            transform:EditorTransform, kind:EditorObjectKind = Cube,
+            transform:EditorTransform, ?components:Array<Component>,
             ?scene:EditorSession) {
         if (id < 1) throw "Editor object runtime ID must be positive";
+        super(name, transform == null ? new EditorTransform() : transform);
         this.id = id;
         this.persistentId = StableId.require(persistentId,
             "editorObject.persistentId");
-        this.name = requireName(name);
-        this.kind = EditorObjectKind.require(kind);
         this.scene = scene;
-        setTransformInternal(transform == null ? new EditorTransform() : transform);
+        if (components != null) {
+            for (component in components) addComponent(component);
+        }
     }
 
     public var localTransformMatrix(get, never):TransformMatrix;
@@ -55,18 +53,13 @@ class EditorObject {
     public var siblingIndex(get, never):Int;
     public var depth(get, never):Int;
 
-    function get_localTransformMatrix():TransformMatrix {
-        return localTransform.toMatrix();
-    }
-
+    function get_localTransformMatrix():TransformMatrix return transform.toMatrix();
     function get_worldTransformMatrix():TransformMatrix {
         return requireScene().hierarchy.worldMatrix(this);
     }
-
     function get_worldTransform():EditorTransform {
         return requireScene().hierarchy.worldTransform(this);
     }
-
     inline function get_worldPositionX():Float return worldTransform.positionX;
     inline function get_worldPositionY():Float return worldTransform.positionY;
     inline function get_worldPositionZ():Float return worldTransform.positionZ;
@@ -86,25 +79,11 @@ class EditorObject {
         return scene == null ? 0 : scene.hierarchy.depth(this);
     }
 
-    function get_transform():EditorTransform return localTransform;
-
-    function set_transform(value:EditorTransform):EditorTransform {
-        setTransformInternal(value == null ? new EditorTransform() : value);
-        return localTransform;
-    }
-
-    function setTransformInternal(value:EditorTransform):Void {
-        var next = value.clone();
-        if (localTransform != null) localTransform.onChanged = null;
-        localTransform = next;
-        var owner = this;
-        localTransform.onChanged = function() {
-            // Descendants observe this through the parent's world revision;
-            // no subtree walk is required.
-            owner.cachedWorldTransformRevision = -1;
-        };
-        worldCacheInitialized = false;
-        cachedWorldTransformRevision = -1;
+    override public function componentChanged(component:Component):Void {
+        if (component == transform) {
+            worldCacheInitialized = false;
+            cachedWorldTransformRevision = -1;
+        }
     }
 
     @:noCompletion public function hierarchySetScene(value:Null<EditorSession>):Void {
@@ -129,11 +108,9 @@ class EditorObject {
         return false;
     }
 
-    public static function requireName(value:String):String {
-        if (value == null) throw "Editor object name cannot be null";
-        var normalized = StringTools.trim(value);
-        if (normalized.length == 0) throw "Editor object name cannot be empty";
-        return normalized;
+    /** Source-compatible validation entry point for editor commands. */
+    public static inline function requireName(value:String):String {
+        return GameObject.requireName(value);
     }
 
     function requireScene():EditorSession {

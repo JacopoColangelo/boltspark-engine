@@ -2,6 +2,8 @@ package boltspark.ui;
 
 import boltspark.editor.GridSnapping;
 import boltspark.editor.Keybindings;
+import boltspark.engine.ComponentTypeInfo;
+import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.windows.ApplicationWindowKind;
@@ -44,14 +46,13 @@ class BoltUI {
     public var onSelectSubtree:Null<Int->Void>;
     public var onCanHierarchyDrop:Null<Array<Int>->Int->Bool>;
     public var onHierarchyDrop:Null<Array<Int>->Int->Int->Bool->Void>;
-    public var onTransformChanged:Null<Int->Float->Void>;
-    public var onRotationChanged:Null<Int->Float->Void>;
-    public var onScaleChanged:Null<Int->Float->Void>;
-    public var onTransformEditBegin:Null<Int->Int->Void>;
-    public var onTransformEditEnd:Null<Int->Int->Void>;
-    /** Row index: 0 Position, 1 Rotation, 2 Scale. */
-    public var onTransformReset:Null<Int->Void>;
-    public var onScaleLinkChanged:Null<Bool->Void>;
+    public var onInspectorNumberChanged:Null<Int->String->Int->Float->Void>;
+    public var onInspectorTextChanged:Null<Int->String->String->Void>;
+    public var onInspectorEditBegin:Null<Int->String->Int->Void>;
+    public var onInspectorEditEnd:Null<Int->String->Int->Void>;
+    public var onInspectorReset:Null<Int->String->Void>;
+    public var onInspectorLinkChanged:Null<Int->String->Bool->Void>;
+    public var onAddComponent:Null<String->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     public var onTransformSpaceChanged:Null<Bool->Void>;
@@ -116,18 +117,36 @@ class BoltUI {
                 onHierarchyDrop(ids, parentId, index, preserveWorld);
             }
         };
-        shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
-        shell.onRotationChanged = function(axis, value) if (onRotationChanged != null) onRotationChanged(axis, value);
-        shell.onScaleChanged = function(axis, value) if (onScaleChanged != null) onScaleChanged(axis, value);
-        shell.onTransformEditBegin = function(row, axis) {
-            if (onTransformEditBegin != null) onTransformEditBegin(row, axis);
+        shell.onInspectorNumberChanged = function(component, property, axis, value) {
+            if (onInspectorNumberChanged != null) {
+                onInspectorNumberChanged(component, property, axis, value);
+            }
         };
-        shell.onTransformEditEnd = function(row, axis) {
-            if (onTransformEditEnd != null) onTransformEditEnd(row, axis);
+        shell.onInspectorTextChanged = function(component, property, value) {
+            if (onInspectorTextChanged != null) {
+                onInspectorTextChanged(component, property, value);
+            }
         };
-        shell.onTransformReset = function(row) if (onTransformReset != null) onTransformReset(row);
-        shell.onScaleLinkChanged = function(linked) {
-            if (onScaleLinkChanged != null) onScaleLinkChanged(linked);
+        shell.onInspectorEditBegin = function(component, property, axis) {
+            if (onInspectorEditBegin != null) {
+                onInspectorEditBegin(component, property, axis);
+            }
+        };
+        shell.onInspectorEditEnd = function(component, property, axis) {
+            if (onInspectorEditEnd != null) {
+                onInspectorEditEnd(component, property, axis);
+            }
+        };
+        shell.onInspectorReset = function(component, property) {
+            if (onInspectorReset != null) onInspectorReset(component, property);
+        };
+        shell.onInspectorLinkChanged = function(component, property, linked) {
+            if (onInspectorLinkChanged != null) {
+                onInspectorLinkChanged(component, property, linked);
+            }
+        };
+        shell.onAddComponent = function(typeId) {
+            if (onAddComponent != null) onAddComponent(typeId);
         };
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
         shell.onToolChanged = function(tool) if (onToolChanged != null) onToolChanged(tool);
@@ -192,11 +211,9 @@ class BoltUI {
     }
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
-            name:String, posX:Float = 0, posY:Float = 0, posZ:Float = 0,
-            rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
-            scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
-        shell.setSelectedObjects(ids, primaryId, name, posX, posY, posZ,
-            rotX, rotY, rotZ, scaleX, scaleY, scaleZ);
+            name:String, ?components:Array<ComponentInspectorData>,
+            ?availableTypes:Array<ComponentTypeInfo>):Void {
+        shell.setSelectedObjects(ids, primaryId, name, components, availableTypes);
     }
 
     public function setObjectName(name:String):Void {
@@ -208,11 +225,9 @@ class BoltUI {
         shell.setHistoryState(undoLabel, redoLabel);
     }
 
-    /** Live transform field update during viewport gizmo drags. */
-    public function updateTransformValues(posX:Float, posY:Float, posZ:Float,
-            rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
-            scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
-        shell.updateTransformValues(posX, posY, posZ, rotX, rotY, rotZ,
-            scaleX, scaleY, scaleZ);
+    /** Live component-vector update during viewport gizmo drags. */
+    public function updateInspectorVector(componentIndex:Int,
+            propertyId:String, x:Float, y:Float, z:Float):Void {
+        shell.updateInspectorVector(componentIndex, propertyId, x, y, z);
     }
 }

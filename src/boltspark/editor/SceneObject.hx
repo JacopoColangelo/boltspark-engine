@@ -1,16 +1,16 @@
 package boltspark.editor;
 
+import boltspark.engine.MeshRenderer;
 import boltspark.project.StableId;
 
 class SceneObject {
     public final id:Int;
     /** Durable serialization identity; runtime selection continues to use `id`. */
     public final persistentId:String;
-    /** Render node; empty hierarchy objects use a plain h3d.scene.Object. */
+    /** Transform/hierarchy root; renderers mount geometry as child nodes. */
     public final mesh:h3d.scene.Object;
-    public final renderMesh:Null<h3d.scene.Mesh>;
-    /** Authored culling before transform parity is applied. */
-    public final baseCulling:h3d.mat.Data.Face;
+    public final renderers:Array<SceneRendererView> = [];
+    public var renderMesh(get, never):Null<h3d.scene.Mesh>;
     /** Continuous editor-Euler representation corresponding to mesh rotation. */
     public final rotationHint:h3d.Vector = new h3d.Vector();
     public var rotationHintValid:Bool = false;
@@ -23,20 +23,52 @@ class SceneObject {
             ? StableId.create("scene-object")
             : StableId.require(persistentId, "sceneObject.persistentId");
         this.mesh = mesh;
-        renderMesh = Std.downcast(mesh, h3d.scene.Mesh);
-        baseCulling = renderMesh == null
-            ? h3d.mat.Data.Face.None
-            : renderMesh.material.mainPass.culling;
     }
 
-    public function cullingForScale(mirrored:Bool):h3d.mat.Data.Face {
-        if (!mirrored) return baseCulling;
-        return switch (baseCulling) {
-            case Back: Front;
-            case Front: Back;
-            case None: None;
-            case Both: Both;
-        };
+    /** Mount every current MeshRenderer and detach renderers no longer owned. */
+    public function synchronizeComponents(object:EditorObject):Void {
+        var next = object.getComponents(MeshRenderer);
+        var index = renderers.length - 1;
+        while (index >= 0) {
+            var view = renderers[index];
+            if (next.indexOf(view.component) < 0 || view.component.mesh == null) {
+                view.remove();
+                renderers.splice(index, 1);
+            }
+            index--;
+        }
+        for (component in next) {
+            if (component.mesh == null) continue;
+            var found:Null<SceneRendererView> = null;
+            for (view in renderers) {
+                if (view.component == component) {
+                    found = view;
+                    break;
+                }
+            }
+            if (found == null) {
+                renderers.push(new SceneRendererView(component, mesh));
+            } else {
+                found.synchronize();
+            }
+        }
+    }
+
+    public function allRenderMeshes():Array<h3d.scene.Mesh> {
+        var result:Array<h3d.scene.Mesh> = [];
+        for (renderer in renderers) result.push(renderer.mesh);
+        return result;
+    }
+
+    public function rendererFor(renderMesh:h3d.scene.Mesh):Null<SceneRendererView> {
+        for (renderer in renderers) {
+            if (renderer.mesh == renderMesh) return renderer;
+        }
+        return null;
+    }
+
+    function get_renderMesh():Null<h3d.scene.Mesh> {
+        return renderers.length == 0 ? null : renderers[0].mesh;
     }
 
     /** Capture the exact renderer transform for an editor command preview. */
@@ -115,6 +147,7 @@ class SceneObject {
 
     function set_name(value:String):String {
         mesh.name = value;
+        for (renderer in renderers) renderer.synchronize();
         return value;
     }
 }

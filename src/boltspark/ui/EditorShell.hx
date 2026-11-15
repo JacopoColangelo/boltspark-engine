@@ -1,6 +1,8 @@
 package boltspark.ui;
 
 import boltspark.editor.GridSnapping;
+import boltspark.engine.ComponentTypeInfo;
+import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
@@ -8,8 +10,8 @@ import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.layout.BoxLayout;
 import boltspark.ui.core.UiFrame;
 import boltspark.ui.windows.ApplicationWindowKind;
-import boltspark.ui.widgets.AxisValue;
 import boltspark.ui.widgets.ConsolePanel;
+import boltspark.ui.widgets.ComponentInspectorSection;
 import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.GameObjectPalette;
 import boltspark.ui.widgets.HierarchyRow;
@@ -29,7 +31,6 @@ import boltspark.ui.widgets.ViewportSnapBar;
 class EditorShell {
     static inline var HIERARCHY_ROW_HEIGHT:Int = 22;
     static inline var INSPECTOR_ROW_HEIGHT:Int = 28;
-    static inline var TRANSFORM_ACTION_WIDTH:Int = 22;
 
     final ctx:UiContext;
     final input:InputAdapter;
@@ -76,13 +77,10 @@ class EditorShell {
     final objectSection:InspectorSection;
     final objectNameField:TextInputField;
 
-    final transformSection:InspectorSection;
-    final transformLabels:Array<h2d.Text> = [];
-    final transformFields:Array<AxisValue> = [];
-    final rotationFields:Array<AxisValue> = [];
-    final scaleFields:Array<AxisValue> = [];
-    final transformResetButtons:Array<UiButton> = [];
-    final scaleLinkButton:UiButton;
+    final componentSections:Array<ComponentInspectorSection> = [];
+    final componentSectionExpanded:Map<String, Bool> = [];
+    final addComponentButton:UiButton;
+    var availableComponentTypes:Array<ComponentTypeInfo> = [];
 
     // Viewport/console/status.
     final viewportHit:h2d.Interactive;
@@ -126,15 +124,14 @@ class EditorShell {
     public var onCanHierarchyDrop:Null<Array<Int>->Int->Bool>;
     /** IDs, parent ID, insertion index, preserve world. */
     public var onHierarchyDrop:Null<Array<Int>->Int->Int->Bool->Void>;
-    public var onTransformChanged:Null<Int->Float->Void>;
-    public var onRotationChanged:Null<Int->Float->Void>;
-    public var onScaleChanged:Null<Int->Float->Void>;
-    /** Bracket one Inspector transform gesture for command coalescing. */
-    public var onTransformEditBegin:Null<Int->Int->Void>;
-    public var onTransformEditEnd:Null<Int->Int->Void>;
-    /** Row index: 0 Position, 1 Rotation, 2 Scale. */
-    public var onTransformReset:Null<Int->Void>;
-    public var onScaleLinkChanged:Null<Bool->Void>;
+    /** Generic component-property command callbacks. */
+    public var onInspectorNumberChanged:Null<Int->String->Int->Float->Void>;
+    public var onInspectorTextChanged:Null<Int->String->String->Void>;
+    public var onInspectorEditBegin:Null<Int->String->Int->Void>;
+    public var onInspectorEditEnd:Null<Int->String->Int->Void>;
+    public var onInspectorReset:Null<Int->String->Void>;
+    public var onInspectorLinkChanged:Null<Int->String->Bool->Void>;
+    public var onAddComponent:Null<String->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     /** `true` selects Local axes; `false` selects World axes. */
@@ -472,61 +469,28 @@ class EditorShell {
         };
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
 
-        transformSection = new InspectorSection(ctx, "Transform", inspectorContentMask);
-        var axisNames = ["X", "Y", "Z"];
-        var axisColors = [Theme.AXIS_X, Theme.AXIS_Y, Theme.AXIS_Z];
-        var rowNames = ["Position", "Rotation", "Scale"];
-        for (rowIndex in 0...rowNames.length) {
-            var rowLabel = new UiText(ctx.labelFont, transformSection.content);
-            rowLabel.text = rowNames[rowIndex];
-            rowLabel.textColor = Theme.TEXT_SECONDARY;
-            rowLabel.lineBreak = false;
-            transformLabels.push(rowLabel);
-            var rowFields = rowIndex == 0 ? transformFields
-                : (rowIndex == 1 ? rotationFields : scaleFields);
-            for (index in 0...axisNames.length) {
-                var field = new AxisValue(ctx, axisNames[index], axisColors[index], 60,
-                    Theme.CONTROL_HEIGHT, transformSection.content);
-                var capturedRow = rowIndex;
-                var capturedIndex = index;
-                field.onCommit = function(value:Float) {
-                    if (capturedRow == 0) {
-                        if (onTransformChanged != null) onTransformChanged(capturedIndex, value);
-                    } else if (capturedRow == 1) {
-                        if (onRotationChanged != null) onRotationChanged(capturedIndex, value);
-                    } else if (onScaleChanged != null) onScaleChanged(capturedIndex, value);
-                };
-                field.onEditBegin = function() {
-                    if (onTransformEditBegin != null) {
-                        onTransformEditBegin(capturedRow, capturedIndex);
+        addComponentButton = new UiButton(ctx, "Add Component",
+            Theme.RIGHT_PANEL_WIDTH - 16, Theme.CONTROL_HEIGHT,
+            inspectorContentMask);
+        addComponentButton.setIcon(Add);
+        addComponentButton.onClick = function() {
+            if (availableComponentTypes.length == 0) return;
+            var items:Array<MenuItem> = [];
+            for (entry in availableComponentTypes) {
+                var captured = entry;
+                items.push({
+                    label: captured.label,
+                    onClick: function() {
+                        if (onAddComponent != null) {
+                            onAddComponent(captured.typeId);
+                        }
                     }
-                };
-                field.onEditEnd = function() {
-                    if (onTransformEditEnd != null) {
-                        onTransformEditEnd(capturedRow, capturedIndex);
-                    }
-                };
-                field.onEditRejected = function(message:String) log("inspector: " + message);
-                rowFields.push(field);
+                });
             }
-            var resetRow = rowIndex;
-            var resetButton = new UiButton(ctx, "", TRANSFORM_ACTION_WIDTH,
-                Theme.CONTROL_HEIGHT, transformSection.content);
-            resetButton.setIcon(Reset);
-            resetButton.onClick = function() {
-                if (onTransformReset != null) onTransformReset(resetRow);
-            };
-            transformResetButtons.push(resetButton);
-        }
-
-        scaleLinkButton = new UiButton(ctx, "", TRANSFORM_ACTION_WIDTH,
-            Theme.CONTROL_HEIGHT, transformSection.content);
-        scaleLinkButton.setIcon(Unlink);
-        scaleLinkButton.onClick = function() {
-            setScaleLinked(!scaleLinked, true);
+            menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
         };
 
-        inspectorSections = [objectSection, transformSection];
+        inspectorSections = [objectSection];
         for (section in inspectorSections) {
             section.onToggle = function() layoutInspectorProperties();
         }
@@ -976,9 +940,6 @@ class EditorShell {
 
     function layoutInspectorProperties():Void {
         objectSection.contentHeight = INSPECTOR_ROW_HEIGHT;
-        // Transform holds Position, Rotation, and Scale rows with per-row
-        // reset actions and a scale-proportion link on the Scale row.
-        transformSection.contentHeight = INSPECTOR_ROW_HEIGHT * 3;
 
         var width = Math.max(0, inspectorContentMask.width);
         var y:Float = 0;
@@ -994,31 +955,11 @@ class EditorShell {
         objectNameField.y = 2;
         objectNameField.setWidth(Math.max(0, width - 16));
 
-        // Transform: DCC-style property rows (label left, three axis fields).
-        var fieldStart = 72.0;
-        var axisGap = 4.0;
-        var actionGap = 3.0;
-        var resetX = Math.max(fieldStart, width - 8 - TRANSFORM_ACTION_WIDTH);
-        var linkX = resetX - actionGap - TRANSFORM_ACTION_WIDTH;
-        var fieldEnd = linkX - axisGap;
-        var axisWidth = Math.max(0, (fieldEnd - fieldStart - axisGap * 2) / 3);
-        var rowGroups = [transformFields, rotationFields, scaleFields];
-        for (rowIndex in 0...rowGroups.length) {
-            var rowFields = rowGroups[rowIndex];
-            var rowY = 2 + rowIndex * INSPECTOR_ROW_HEIGHT;
-            var label = transformLabels[rowIndex];
-            label.x = 8;
-            label.y = rowY + Math.round((Theme.CONTROL_HEIGHT - label.textHeight) * 0.5 - 1);
-            for (index in 0...rowFields.length) {
-                rowFields[index].x = fieldStart + index * (axisWidth + axisGap);
-                rowFields[index].y = rowY;
-                rowFields[index].setWidth(axisWidth);
-            }
-            transformResetButtons[rowIndex].x = resetX;
-            transformResetButtons[rowIndex].y = rowY;
-        }
-        scaleLinkButton.x = linkX;
-        scaleLinkButton.y = 2 + 2 * INSPECTOR_ROW_HEIGHT;
+        addComponentButton.x = 8;
+        addComponentButton.y = Math.round(y + 8);
+        addComponentButton.setWidth(Math.max(0, width - 16));
+        addComponentButton.visible = inspectorContentMask.visible;
+        y += Theme.CONTROL_HEIGHT + 16;
 
         inspectorContentHeight = Math.round(y);
         var ratio = Math.min(1, inspectorContentMask.height / Math.max(1, inspectorContentHeight));
@@ -1161,11 +1102,12 @@ class EditorShell {
     }
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
-            name:String, posX:Float = 0, posY:Float = 0, posZ:Float = 0,
-            rotX:Float = 0, rotY:Float = 0, rotZ:Float = 0,
-            scaleX:Float = 1, scaleY:Float = 1, scaleZ:Float = 1):Void {
+            name:String, ?components:Array<ComponentInspectorData>,
+            ?availableTypes:Array<ComponentTypeInfo>):Void {
         selectedObjectIds = ids.copy();
         selectedObjectId = primaryId;
+        availableComponentTypes = availableTypes == null
+            ? [] : availableTypes.copy();
         if (selectedObjectIds.length == 1) {
             var rowFound = false;
             for (index in 0...hierarchyRows.length) {
@@ -1191,18 +1133,11 @@ class EditorShell {
                 }
             }
             objectNameField.setValue(name);
-            transformFields[0].setValue(posX);
-            transformFields[1].setValue(posY);
-            transformFields[2].setValue(posZ);
-            rotationFields[0].setValue(rotX);
-            rotationFields[1].setValue(rotY);
-            rotationFields[2].setValue(rotZ);
-            scaleFields[0].setValue(scaleX);
-            scaleFields[1].setValue(scaleY);
-            scaleFields[2].setValue(scaleZ);
+            rebuildInspectorComponents(components == null ? [] : components);
             inspectorContentMask.visible = true;
             selectionStatusValue = name + "  ·  Game Object";
         } else {
+            rebuildInspectorComponents([]);
             inspectorContentMask.visible = false;
             selectionStatusValue = selectedObjectIds.length > 1
                 ? selectedObjectIds.length + " objects selected"
@@ -1217,28 +1152,88 @@ class EditorShell {
 
     public inline function setObjectName(value:String):Void objectNameField.setValue(value);
 
-    /** Live transform update while a viewport gizmo drag moves the selection. */
-    public function updateTransformValues(posX:Float, posY:Float, posZ:Float,
-            rotX:Float, rotY:Float, rotZ:Float,
-            scaleX:Float, scaleY:Float, scaleZ:Float):Void {
-        transformFields[0].setValue(posX);
-        transformFields[1].setValue(posY);
-        transformFields[2].setValue(posZ);
-        rotationFields[0].setValue(rotX);
-        rotationFields[1].setValue(rotY);
-        rotationFields[2].setValue(rotZ);
-        scaleFields[0].setValue(scaleX);
-        scaleFields[1].setValue(scaleY);
-        scaleFields[2].setValue(scaleZ);
+    /** Live component-vector update while a viewport gizmo drag is active. */
+    public function updateInspectorVector(componentIndex:Int,
+            propertyId:String, x:Float, y:Float, z:Float):Void {
+        for (section in componentSections) {
+            if (section.componentIndex == componentIndex) {
+                section.updateVector(propertyId, x, y, z);
+                return;
+            }
+        }
     }
 
     /** Toggle ratio-preserving scale edits without changing current values. */
-    function setScaleLinked(value:Bool, notify:Bool):Void {
-        if (scaleLinked == value && !notify) return;
+    function setScaleLinked(value:Bool):Void {
+        if (scaleLinked == value) return;
         scaleLinked = value;
-        scaleLinkButton.setIcon(scaleLinked ? Link : Unlink);
-        scaleLinkButton.setSelected(scaleLinked);
-        if (notify && onScaleLinkChanged != null) onScaleLinkChanged(scaleLinked);
+        for (section in componentSections) {
+            section.setLinkState("scale", scaleLinked);
+        }
+    }
+
+    function rebuildInspectorComponents(data:Array<ComponentInspectorData>):Void {
+        for (section in componentSections) {
+            componentSectionExpanded.set(componentSectionKey(
+                section.componentIndex, section.typeId), section.expanded);
+            section.remove();
+        }
+        componentSections.resize(0);
+        inspectorSections.resize(1);
+
+        for (component in data) {
+            var section = new ComponentInspectorSection(ctx, component,
+                scaleLinked, inspectorContentMask);
+            var componentIndex = component.componentIndex;
+            var sectionKey = componentSectionKey(componentIndex, component.typeId);
+            if (componentSectionExpanded.exists(sectionKey)) {
+                section.setExpanded(componentSectionExpanded.get(sectionKey));
+            }
+            section.onNumberCommit = function(propertyId, axis, value) {
+                if (onInspectorNumberChanged != null) {
+                    onInspectorNumberChanged(componentIndex, propertyId, axis, value);
+                }
+            };
+            section.onNumberEditBegin = function(propertyId, axis) {
+                if (onInspectorEditBegin != null) {
+                    onInspectorEditBegin(componentIndex, propertyId, axis);
+                }
+            };
+            section.onNumberEditEnd = function(propertyId, axis) {
+                if (onInspectorEditEnd != null) {
+                    onInspectorEditEnd(componentIndex, propertyId, axis);
+                }
+            };
+            section.onTextCommit = function(propertyId, value) {
+                if (onInspectorTextChanged != null) {
+                    onInspectorTextChanged(componentIndex, propertyId, value);
+                }
+            };
+            section.onReset = function(propertyId) {
+                if (onInspectorReset != null) {
+                    onInspectorReset(componentIndex, propertyId);
+                }
+            };
+            section.onLinkChanged = function(propertyId, linked) {
+                setScaleLinked(linked);
+                if (onInspectorLinkChanged != null) {
+                    onInspectorLinkChanged(componentIndex, propertyId, linked);
+                }
+            };
+            section.onEditRejected = function(message) log("inspector: " + message);
+            var capturedSection = section;
+            var capturedKey = sectionKey;
+            section.onToggle = function() {
+                componentSectionExpanded.set(capturedKey, capturedSection.expanded);
+                layoutInspectorProperties();
+            };
+            componentSections.push(section);
+            inspectorSections.push(section);
+        }
+    }
+
+    static inline function componentSectionKey(index:Int, typeId:String):String {
+        return index + ":" + typeId;
     }
 
     function selectHierarchyRow(id:Int, control:Bool, shift:Bool):Void {
@@ -1576,9 +1571,7 @@ class EditorShell {
     function anyTextCaptureActive():Bool {
         if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
         for (row in hierarchyRows) if (row.isRenaming()) return true;
-        for (field in transformFields) if (field.isEditing()) return true;
-        for (field in rotationFields) if (field.isEditing()) return true;
-        for (field in scaleFields) if (field.isEditing()) return true;
+        for (section in componentSections) if (section.isEditing()) return true;
         return false;
     }
 

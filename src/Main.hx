@@ -1,7 +1,6 @@
 import boltspark.editor.GridSnapping;
 import boltspark.editor.EditorViewport;
 import boltspark.editor.EditorObject;
-import boltspark.editor.EditorObjectKind;
 import boltspark.editor.EditorSession;
 import boltspark.editor.EditorTransform;
 import boltspark.editor.Keybindings;
@@ -10,6 +9,10 @@ import boltspark.editor.ScalePolicy;
 import boltspark.editor.SceneObject;
 import boltspark.editor.TransformGizmo;
 import boltspark.editor.WorldBounds;
+import boltspark.engine.ComponentRegistry;
+import boltspark.engine.Component;
+import boltspark.engine.MeshRenderer;
+import boltspark.engine.PrimitiveGameObjects;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
 import boltspark.ui.AppIcon;
@@ -33,7 +36,6 @@ class Main extends hxd.App {
     var boltUI:BoltUI;
     var editorViewport:EditorViewport;
     var nativeWindow:hxd.Window;
-    var cubePrimitive:h3d.prim.Cube;
     var groundGrid:h3d.scene.Graphics;
     var selectionOutline:h3d.scene.Graphics;
     /** Heaps render views synchronized from the renderer-independent session. */
@@ -106,6 +108,7 @@ class Main extends hxd.App {
         applicationWindows = new ApplicationWindowManager();
         nativeWindow.onClose = function() {
             runtimeProbes.shutdown();
+            if (editorSession != null) editorSession.destroy();
             applicationWindows.shutdown();
             InteractiveResize.uninstall();
             return true;
@@ -118,17 +121,13 @@ class Main extends hxd.App {
         Sys.println('[M0] renderer driver = ${driverName}');
         runtimeProbes.start(nativeWindow, engine);
 
-        cubePrimitive = new h3d.prim.Cube(1, 1, 1, true);
-        // Cube.addUVs() unindexes the primitive; calculate normals afterwards
-        // so each face stays flat instead of sharing smoothed corner normals.
-        cubePrimitive.addUVs();
-        cubePrimitive.addNormals();
         setupViewportScene();
         gizmoProxy = new h3d.scene.Object(s3d);
         gizmoProxy.name = "TransformGizmoProxy";
         gizmo = new TransformGizmo(s3d);
         editorSession = new EditorSession();
-        var initialEditorObject = editorSession.addInitialObject("sampleCube");
+        var initialEditorObject = editorSession.addInitialObject("sampleCube",
+            null, null, PrimitiveGameObjects.cubeComponents());
         synchronizeSceneObjects();
 
         s3d.camera.pos.set(5.8, 4.2, 6.4);
@@ -158,13 +157,13 @@ class Main extends hxd.App {
         boltUI.onCreateObjectAt = createCubeAtViewport;
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
-        boltUI.onTransformChanged = applyTransformChange;
-        boltUI.onRotationChanged = applyRotationChange;
-        boltUI.onScaleChanged = applyScaleChange;
-        boltUI.onTransformEditBegin = beginInspectorTransformEdit;
-        boltUI.onTransformEditEnd = endInspectorTransformEdit;
-        boltUI.onTransformReset = resetTransformRow;
-        boltUI.onScaleLinkChanged = setScaleProportionsLinked;
+        boltUI.onInspectorNumberChanged = applyInspectorNumberChange;
+        boltUI.onInspectorTextChanged = applyInspectorTextChange;
+        boltUI.onInspectorEditBegin = beginComponentInspectorEdit;
+        boltUI.onInspectorEditEnd = endComponentInspectorEdit;
+        boltUI.onInspectorReset = resetInspectorProperty;
+        boltUI.onInspectorLinkChanged = setInspectorPropertyLinked;
+        boltUI.onAddComponent = addSelectedComponent;
         boltUI.onToolChanged = setEditorTool;
         boltUI.onTransformSpaceChanged = setTransformSpace;
         boltUI.onViewportHover = onViewportHover;
@@ -245,6 +244,7 @@ class Main extends hxd.App {
     override function update(dt:Float):Void {
         runtimeProbes.update(dt, h3d.Engine.getCurrent());
         applicationWindows.update();
+        editorSession.update(dt);
         if (keybindings.pollExternalChanges()) {
             logActivity("keybindings: synchronized changes from the settings window");
         }
@@ -253,7 +253,11 @@ class Main extends hxd.App {
         // A very large object can enclose the editor camera. Render that mesh
         // two-sided only while inside it so it remains visibly present rather
         // than looking as though it was deleted by a transform command.
-        for (sceneObject in sceneObjects) refreshScaleRendering(sceneObject);
+        for (sceneObject in sceneObjects) {
+            var model = editorSession.findObject(sceneObject.id);
+            if (model != null) sceneObject.synchronizeComponents(model);
+            refreshScaleRendering(sceneObject);
+        }
         // The selection outline tracks transform edits and gizmo drags.
         refreshSelectionOutline();
     }
@@ -305,6 +309,115 @@ class Main extends hxd.App {
         sceneObject.rotationHint.load(result);
         sceneObject.rotationHintValid = true;
         return RotationEuler.normalized(result);
+    }
+
+    /** Route generic Inspector metadata back into the Transform command path. */
+    function applyInspectorNumberChange(componentIndex:Int, propertyId:String,
+            axis:Int, value:Float):Void {
+        if (isSelectedTransform(componentIndex)) {
+            switch (propertyId) {
+                case "position": applyTransformChange(axis, value);
+                case "rotation": applyRotationChange(axis, value);
+                case "scale": applyScaleChange(axis, value);
+                default:
+                    boltUI.log('inspector: unsupported numeric property ${propertyId}');
+            }
+            return;
+        }
+        var component = selectedInspectorComponent(componentIndex);
+        if (component != null
+                && component.setInspectorNumber(propertyId, axis, value)) {
+            editorSession.componentEdited(editorSession.selectedObjectId);
+        }
+    }
+
+    function applyInspectorTextChange(componentIndex:Int, propertyId:String,
+            value:String):Void {
+        var component = selectedInspectorComponent(componentIndex);
+        if (component != null && component.setInspectorText(propertyId, value)) {
+            editorSession.componentEdited(editorSession.selectedObjectId);
+        } else {
+            boltUI.log('inspector: ${propertyId} is not directly editable');
+            refreshSelectionInspector();
+        }
+    }
+
+    function beginComponentInspectorEdit(componentIndex:Int,
+            propertyId:String, axis:Int):Void {
+        if (!isSelectedTransform(componentIndex)) return;
+        var row = transformPropertyRow(propertyId);
+        if (row >= 0) beginInspectorTransformEdit(row, axis);
+    }
+
+    function endComponentInspectorEdit(componentIndex:Int,
+            propertyId:String, axis:Int):Void {
+        if (!isSelectedTransform(componentIndex)) {
+            clearInspectorTransformEdit();
+            return;
+        }
+        var row = transformPropertyRow(propertyId);
+        if (row >= 0) endInspectorTransformEdit(row, axis);
+    }
+
+    function resetInspectorProperty(componentIndex:Int, propertyId:String):Void {
+        if (isSelectedTransform(componentIndex)) {
+            var row = transformPropertyRow(propertyId);
+            if (row >= 0) resetTransformRow(row);
+            return;
+        }
+        var component = selectedInspectorComponent(componentIndex);
+        if (component != null && component.resetInspectorProperty(propertyId)) {
+            editorSession.componentEdited(editorSession.selectedObjectId);
+        }
+    }
+
+    function setInspectorPropertyLinked(componentIndex:Int, propertyId:String,
+            linked:Bool):Void {
+        if (isSelectedTransform(componentIndex) && propertyId == "scale") {
+            setScaleProportionsLinked(linked);
+            return;
+        }
+        var component = selectedInspectorComponent(componentIndex);
+        if (component != null
+                && component.setInspectorLinked(propertyId, linked)) {
+            editorSession.componentEdited(editorSession.selectedObjectId);
+        }
+    }
+
+    function addSelectedComponent(typeId:String):Void {
+        var selected = editorSession.findObject(editorSession.selectedObjectId);
+        if (selected == null) return;
+        try {
+            var component = ComponentRegistry.create(typeId);
+            if (editorSession.addComponent(selected.id, component)) {
+                logActivity('component: added ${component.displayName} to ${selected.name}');
+            }
+        } catch (error:Dynamic) {
+            boltUI.log('component: could not add ${typeId}: ${Std.string(error)}');
+        }
+    }
+
+    function isSelectedTransform(componentIndex:Int):Bool {
+        var selected = editorSession.findObject(editorSession.selectedObjectId);
+        return selected != null && componentIndex >= 0
+            && componentIndex < selected.components.length
+            && selected.components[componentIndex] == selected.transform;
+    }
+
+    function selectedInspectorComponent(componentIndex:Int):Null<Component> {
+        var selected = editorSession.findObject(editorSession.selectedObjectId);
+        return selected == null || componentIndex < 0
+            || componentIndex >= selected.components.length
+            ? null : selected.components[componentIndex];
+    }
+
+    static function transformPropertyRow(propertyId:String):Int {
+        return switch (propertyId) {
+            case "position": 0;
+            case "rotation": 1;
+            case "scale": 2;
+            default: -1;
+        };
     }
 
     /** Capture one complete Inspector gesture so scrubbing creates one command. */
@@ -866,9 +979,14 @@ class Main extends hxd.App {
     /** Live inspector values while a gizmo drag is in progress. */
     function pushInspectorTransform(selected:SceneObject):Void {
         var rotation = rotationDegrees(selected);
-        boltUI.updateTransformValues(
-            selected.mesh.x, selected.mesh.y, selected.mesh.z,
-            rotation.x, rotation.y, rotation.z,
+        var model = editorSession.findObject(selected.id);
+        if (model == null) return;
+        var componentIndex = model.components.indexOf(model.transform);
+        boltUI.updateInspectorVector(componentIndex, "position",
+            selected.mesh.x, selected.mesh.y, selected.mesh.z);
+        boltUI.updateInspectorVector(componentIndex, "rotation",
+            rotation.x, rotation.y, rotation.z);
+        boltUI.updateInspectorVector(componentIndex, "scale",
             selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
     }
 
@@ -925,16 +1043,16 @@ class Main extends hxd.App {
         var nearestDistance = Math.POSITIVE_INFINITY;
         var nearestObject:Null<SceneObject> = null;
         for (sceneObject in sceneObjects) {
-            var renderMesh = sceneObject.renderMesh;
-            if (renderMesh == null) continue;
-            // Pick this object's own geometry, not a recursive child collider;
-            // empty hierarchy parents must not steal their children's hits.
-            var collider = renderMesh.getGlobalCollider();
-            if (collider == null) continue;
-            var distance = collider.rayIntersection(ray, true);
-            if (distance >= 0 && distance < nearestDistance) {
-                nearestDistance = distance;
-                nearestObject = sceneObject;
+            for (renderMesh in sceneObject.allRenderMeshes()) {
+                // Pick renderer-owned geometry, not the root's recursive
+                // collider; empty parents must not steal their children's hits.
+                var collider = renderMesh.getGlobalCollider();
+                if (collider == null) continue;
+                var distance = collider.rayIntersection(ray, true);
+                if (distance >= 0 && distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestObject = sceneObject;
+                }
             }
         }
         if (nearestObject == null) {
@@ -947,20 +1065,13 @@ class Main extends hxd.App {
     }
 
     function createSceneObjectView(object:EditorObject):SceneObject {
-        var node:h3d.scene.Object;
-        if (object.kind == EditorObjectKind.Cube) {
-            var mesh = new h3d.scene.Mesh(cubePrimitive, s3d);
-            mesh.material.color.setColor(Theme.CUBE_ORANGE);
-            mesh.material.shadows = false;
-            mesh.material.specularAmount = 0.18;
-            mesh.material.specularPower = 24;
-            node = mesh;
-        } else {
-            node = new h3d.scene.Object(s3d);
-        }
+        // Every GameObject has the same plain transform root. Renderable
+        // geometry is supplied only by attached MeshRenderer components.
+        var node = new h3d.scene.Object(s3d);
         node.name = object.name;
         var sceneObject = new SceneObject(object.id, node, object.persistentId);
-        sceneObject.applyTransform(object.transform);
+        sceneObject.synchronizeComponents(object);
+        sceneObject.applyTransform(object.transform.value);
         refreshScaleRendering(sceneObject);
         return sceneObject;
     }
@@ -1002,7 +1113,8 @@ class Main extends hxd.App {
                 desiredParent.addChildAt(sceneObject.mesh, object.siblingIndex);
             }
             sceneObject.name = object.name;
-            sceneObject.applyTransform(object.transform);
+            sceneObject.synchronizeComponents(object);
+            sceneObject.applyTransform(object.transform.value);
             refreshScaleRendering(sceneObject);
             ordered.push(sceneObject);
         }
@@ -1024,18 +1136,19 @@ class Main extends hxd.App {
 
     /** Keep back-face culling aligned with a reflected transform's winding. */
     function refreshScaleRendering(sceneObject:SceneObject):Void {
-        var mesh = sceneObject.renderMesh;
-        if (mesh == null) return;
-        var mirrored = mesh.getAbsPos().getDeterminant() < 0;
-        // A camera inside a closed one-sided mesh sees only back faces. Draw
-        // both sides in that editor-only condition so extreme but valid scale
-        // values cannot make an object appear to have been deleted.
-        var culling = cameraInsideMesh(mesh)
-            ? h3d.mat.Data.Face.None
-            : sceneObject.cullingForScale(mirrored);
-        mesh.material.mainPass.culling = culling;
-        var shadowPass = mesh.material.getPass("shadow");
-        if (shadowPass != null) shadowPass.culling = culling;
+        for (mesh in sceneObject.allRenderMeshes()) {
+            var renderer = sceneObject.rendererFor(mesh);
+            if (renderer == null) continue;
+            var mirrored = mesh.getAbsPos().getDeterminant() < 0;
+            // A camera inside a closed one-sided mesh sees only back faces.
+            // Draw both sides only in that editor condition.
+            var culling = cameraInsideMesh(mesh)
+                ? h3d.mat.Data.Face.None
+                : renderer.cullingForScale(mirrored);
+            mesh.material.mainPass.culling = culling;
+            var shadowPass = mesh.material.getPass("shadow");
+            if (shadowPass != null) shadowPass.culling = culling;
+        }
     }
 
     /**
@@ -1098,7 +1211,8 @@ class Main extends hxd.App {
         var transform = new EditorTransform(
             Math.max(-pivotLimit, Math.min(pivotLimit, x)), 0,
             Math.max(-pivotLimit, Math.min(pivotLimit, z)));
-        editorSession.createObject(name, transform);
+        editorSession.createObject(name, transform, -1,
+            PrimitiveGameObjects.cubeComponents());
         logActivity("scene: created " + name);
     }
 
@@ -1106,7 +1220,7 @@ class Main extends hxd.App {
         var runtimeId = editorSession.nextRuntimeId;
         var name = empty ? "GameObject" : "Cube" + runtimeId;
         editorSession.createObject(name, new EditorTransform(), parentId,
-            empty ? EditorObjectKind.Empty : EditorObjectKind.Cube);
+            empty ? [] : PrimitiveGameObjects.cubeComponents());
     }
 
     function deleteSceneObjects(ids:Array<Int>):Void {
@@ -1132,14 +1246,26 @@ class Main extends hxd.App {
     function refreshSelectionInspector():Void {
         var selected = getSelectedObject();
         if (selected == null) {
-            boltUI.setSelectedObjects(editorSession.selectedObjectIds, -1, "");
+            boltUI.setSelectedObjects(editorSession.selectedObjectIds, -1, "", [],
+                ComponentRegistry.addableTypes());
             return;
         }
+        var model = editorSession.findObject(selected.id);
+        if (model == null) return;
         var rotation = rotationDegrees(selected);
+        var components = [for (index in 0...model.components.length)
+            model.components[index].inspectorData(index)];
+        var transformIndex = model.components.indexOf(model.transform);
+        if (transformIndex >= 0 && transformIndex < components.length) {
+            for (property in components[transformIndex].properties) {
+                if (property.id != "rotation" || property.numberValues.length < 3) continue;
+                property.numberValues[0] = rotation.x;
+                property.numberValues[1] = rotation.y;
+                property.numberValues[2] = rotation.z;
+            }
+        }
         boltUI.setSelectedObjects(editorSession.selectedObjectIds, selected.id,
-            selected.name, selected.mesh.x, selected.mesh.y, selected.mesh.z,
-            rotation.x, rotation.y, rotation.z,
-            selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
+            selected.name, components, ComponentRegistry.addableTypes());
     }
 
     function getSelectedObject():Null<SceneObject> {
@@ -1197,7 +1323,8 @@ class Main extends hxd.App {
             depths.set(object.id, depth);
             entries.push(new HierarchyEntry(object.id, object.name,
                 object.persistentId, parentId,
-                depth, object.children.length > 0, object.kind,
+                depth, object.children.length > 0,
+                object.getComponent(MeshRenderer) != null,
                 object.children.length, siblingIndex));
         }
         boltUI.setHierarchyEntries(entries);
@@ -1257,7 +1384,10 @@ class Main extends hxd.App {
         // over the outline where their projections cross.
         groundGrid.material.mainPass.layer = -10;
         var extent = 20;
-        var gridY = -0.505;
+        // The visible editor origin is y=0. A tiny negative bias avoids line
+        // z-fighting without baking the centered cube's half-height into every
+        // empty GameObject's apparent pivot.
+        var gridY = -0.005;
         for (i in -extent...(extent + 1)) {
             var major = i % 5 == 0;
             groundGrid.lineStyle(major ? 1.0 : 0.75,
@@ -1294,17 +1424,16 @@ class Main extends hxd.App {
         selectionOutline.lineStyle(2.0, Theme.ACCENT, 1);
         for (sceneObject in sceneObjects) {
             if (editorSession.selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
-            if (sceneObject.renderMesh != null) {
-                drawSelectionEdges(selectionOutline, sceneObject.renderMesh);
+            for (renderMesh in sceneObject.allRenderMeshes()) {
+                drawSelectionEdges(selectionOutline, renderMesh);
             }
         }
     }
 
     /**
-     * Trace the mesh's actual silhouette: the unit cube primitive's 12 edges
-     * transformed by the object's current transform (rotation and scale), so
-     * a rotated object is outlined by its true shape rather than an
-     * axis-aligned boundary cube.
+     * Trace the renderer primitive's local bounds transformed by its current
+     * transform. This remains exact for box primitives and works for arbitrary
+     * primitive/imported mesh sizes without assuming unit-cube geometry.
      *
      * Edges are drawn at their exact transformed positions. The Graphics line
      * shader supplies the fixed two-pixel screen-space width; no world-space
@@ -1315,13 +1444,22 @@ class Main extends hxd.App {
      */
     function drawSelectionEdges(graphic:h3d.scene.Graphics, mesh:h3d.scene.Mesh):Void {
         var transform = mesh.getAbsPos();
-        inline function corner(sx:Float, sy:Float, sz:Float):h3d.Vector {
-            return new h3d.Vector(sx * 0.5, sy * 0.5, sz * 0.5)
+        if (mesh.primitive == null) return;
+        var bounds = mesh.primitive.getBounds();
+        if (bounds == null) return;
+        inline function corner(x:Float, y:Float, z:Float):h3d.Vector {
+            return new h3d.Vector(x, y, z)
                 .transformed(transform);
         }
         var corners = [
-            corner(-1, -1, -1), corner(1, -1, -1), corner(1, 1, -1), corner(-1, 1, -1),
-            corner(-1, -1, 1), corner(1, -1, 1), corner(1, 1, 1), corner(-1, 1, 1)
+            corner(bounds.xMin, bounds.yMin, bounds.zMin),
+            corner(bounds.xMax, bounds.yMin, bounds.zMin),
+            corner(bounds.xMax, bounds.yMax, bounds.zMin),
+            corner(bounds.xMin, bounds.yMax, bounds.zMin),
+            corner(bounds.xMin, bounds.yMin, bounds.zMax),
+            corner(bounds.xMax, bounds.yMin, bounds.zMax),
+            corner(bounds.xMax, bounds.yMax, bounds.zMax),
+            corner(bounds.xMin, bounds.yMax, bounds.zMax)
         ];
         // 12 cube edges as index pairs over the corner list.
         var edges = [

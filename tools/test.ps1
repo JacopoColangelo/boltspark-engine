@@ -113,6 +113,7 @@ try {
             'BoltUiCoreRepro',
             'CommandHistoryRepro',
             'EditorSessionRepro',
+            'ComponentSystemRepro',
             'SceneHierarchyRepro',
             'KeybindingsMigrationRepro',
             'ProjectSerializationRepro'
@@ -145,6 +146,7 @@ try {
         @{ Name = 'BoltUiCoreRepro'; Output = 'bolt-ui-core-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'CommandHistoryRepro'; Output = 'command-history-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'EditorSessionRepro'; Output = 'editor-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
+        @{ Name = 'ComponentSystemRepro'; Output = 'component-system-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'SceneHierarchyRepro'; Output = 'scene-hierarchy-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'SceneObjectAffineRepro'; Output = 'scene-object-affine-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'KeybindingsMigrationRepro'; Output = 'keybindings-migration-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },

@@ -8,7 +8,11 @@ import boltspark.editor.commands.DuplicateObjectsCommand;
 import boltspark.editor.commands.EditorCommand;
 import boltspark.editor.commands.RenameObjectCommand;
 import boltspark.editor.commands.ReparentObjectsCommand;
+import boltspark.editor.commands.AddComponentCommand;
+import boltspark.editor.commands.RemoveComponentCommand;
 import boltspark.editor.commands.TransformObjectCommand;
+import boltspark.engine.Component;
+import boltspark.engine.Transform;
 import boltspark.project.StableId;
 
 /** Renderer-independent owner of scene objects, hierarchy, selection, and history. */
@@ -34,7 +38,7 @@ class EditorSession {
     }
 
     public function addInitialObject(name:String, ?transform:EditorTransform,
-            ?persistentId:String, kind:EditorObjectKind = Cube,
+            ?persistentId:String, ?components:Array<Component>,
             parentId:Int = -1, siblingIndex:Int = -1):EditorObject {
         // Resolve every fallible relationship before mutating the registry so
         // an invalid parent cannot leave an unreachable half-created object.
@@ -47,7 +51,7 @@ class EditorSession {
         }
         var object = new EditorObject(nextObjectId, durableId,
             name, transform == null ? new EditorTransform() : transform,
-            kind, this);
+            cloneComponents(components), this);
         nextObjectId++;
         registerObject(object, objects.length);
         var siblings = parent == null ? hierarchy.roots : parent.children;
@@ -58,14 +62,14 @@ class EditorSession {
     }
 
     public function createObject(name:String, ?transform:EditorTransform,
-            parentId:Int = -1, kind:EditorObjectKind = Cube):EditorObject {
+            parentId:Int = -1, ?components:Array<Component>):EditorObject {
         var runtimeId = nextObjectId++;
         var parent = parentId < 0 ? null : requireObject(parentId);
         var siblings = parent == null ? hierarchy.roots : parent.children;
         var snapshot = new EditorObjectSnapshot(runtimeId,
             StableId.create("scene-object"), EditorObject.requireName(name),
             transform == null ? new EditorTransform() : transform,
-            kind, parent == null ? null : parent.persistentId, siblings.length);
+            components, parent == null ? null : parent.persistentId, siblings.length);
         var before = captureSelection();
         var after = new EditorSelectionState([runtimeId], runtimeId);
         history.execute(new CreateObjectCommand(this, snapshot, objects.length,
@@ -76,8 +80,8 @@ class EditorSession {
 
     public inline function createChild(parentId:Int, name:String,
             ?transform:EditorTransform,
-            kind:EditorObjectKind = Cube):EditorObject {
-        return createObject(name, transform, parentId, kind);
+            ?components:Array<Component>):EditorObject {
+        return createObject(name, transform, parentId, components);
     }
 
     /**
@@ -87,7 +91,7 @@ class EditorSession {
     public function createEmptyParent(ids:Array<Int>,
             name:String = "GameObject"):Null<EditorObject> {
         var roots = selectedTopLevel(ids);
-        if (roots.length == 0) return createObject(name, null, -1, Empty);
+        if (roots.length == 0) return createObject(name);
 
         var commonParent = roots[0].parent;
         var sameParent = true;
@@ -116,7 +120,7 @@ class EditorSession {
         // position. This matters for selections such as B + D in A/B/C/D.
         var parentAppendIndex = parentSiblings.length;
         var parentSnapshot = new EditorObjectSnapshot(runtimeId, persistentId,
-            EditorObject.requireName(name), parentTransform, Empty,
+            EditorObject.requireName(name), parentTransform, [],
             commonParent == null ? null : commonParent.persistentId,
             parentAppendIndex);
         var selectionBefore = captureSelection();
@@ -132,11 +136,11 @@ class EditorSession {
             var local = sameParent
                 ? object.transform.clone()
                 : EditorTransform.fromMatrix(
-                    hierarchy.worldMatrix(object), object.transform);
+                    hierarchy.worldMatrix(object), object.transform.value);
             changes.push(new HierarchyChange(object.persistentId,
                 object.parent == null ? null : object.parent.persistentId,
                 object.siblingIndex, persistentId, index,
-                object.transform, local));
+                object.transform.value, local));
         }
         var selectionAfter = new EditorSelectionState([runtimeId], runtimeId);
         var reparent = new ReparentObjectsCommand(this, changes,
@@ -250,13 +254,13 @@ class EditorSession {
             var object = moved[index];
             var after = preserveWorld && object.parent != newParent
                 ? EditorTransform.fromMatrix(hierarchy.localMatrixForWorld(
-                    object, hierarchy.worldMatrix(object), newParent), object.transform)
+                    object, hierarchy.worldMatrix(object), newParent), object.transform.value)
                 : object.transform.clone();
             changes.push(new HierarchyChange(object.persistentId,
                 object.parent == null ? null : object.parent.persistentId,
                 object.siblingIndex,
                 newParent == null ? null : newParent.persistentId,
-                targetIndex + index, object.transform, after));
+                targetIndex + index, object.transform.value, after));
         }
         var changed = false;
         for (change in changes) {
@@ -319,7 +323,7 @@ class EditorSession {
             description:String):Bool {
         var object = findObject(id);
         if (object == null) return false;
-        return commitAppliedTransform(id, object.transform, after, description);
+        return commitAppliedTransform(id, object.transform.value, after, description);
     }
 
     /** Set an object's world transform, deriving an exact local affine transform. */
@@ -328,7 +332,36 @@ class EditorSession {
         var object = findObject(id);
         if (object == null || world == null) return false;
         var local = hierarchy.localTransformForWorld(object, world, object.parent);
-        return commitAppliedTransform(id, object.transform, local, description);
+        return commitAppliedTransform(id, object.transform.value, local, description);
+    }
+
+    /** Attach a component through command history. */
+    public function addComponent(id:Int, component:Component):Bool {
+        var object = findObject(id);
+        if (object == null || component == null
+                || Std.isOfType(component, Transform)) return false;
+        history.execute(new AddComponentCommand(this, object.persistentId,
+            object.components.length, component));
+        notifyChanged();
+        return true;
+    }
+
+    /** Remove a non-Transform component through command history. */
+    public function removeComponentAt(id:Int, componentIndex:Int):Bool {
+        var object = findObject(id);
+        if (object == null || componentIndex <= 0
+                || componentIndex >= object.components.length) return false;
+        history.execute(new RemoveComponentCommand(this, object.persistentId,
+            componentIndex, object.components[componentIndex]));
+        notifyChanged();
+        return true;
+    }
+
+    /** Publish an already-validated custom component property edit. */
+    public function componentEdited(id:Int):Bool {
+        if (findObject(id) == null) return false;
+        notifyChanged();
+        return true;
     }
 
     public function commitAppliedTransform(id:Int, before:EditorTransform,
@@ -457,6 +490,7 @@ class EditorSession {
         while (index >= 0) {
             var object = objects[index];
             if (removing.exists(object.persistentId)) {
+                object.destroy();
                 objects.splice(index, 1);
                 objectsById.remove(object.id);
                 objectsByPersistentId.remove(object.persistentId);
@@ -502,8 +536,8 @@ class EditorSession {
         for (changeIndex in order) {
             var change = changes[changeIndex];
             var object = objectsToMove[changeIndex];
-            object.transform = useNewState
-                ? change.newLocalTransform : change.previousLocalTransform;
+            object.transform.setValue(useNewState
+                ? change.newLocalTransform : change.previousLocalTransform);
             hierarchy.attach(object, parents[changeIndex], useNewState
                 ? change.newSiblingIndex : change.previousSiblingIndex);
         }
@@ -518,7 +552,17 @@ class EditorSession {
 
     @:noCompletion public function commandTransformObject(
             persistentId:String, transform:EditorTransform):Void {
-        requirePersistentObject(persistentId).transform = transform;
+        requirePersistentObject(persistentId).transform.setValue(transform);
+    }
+
+    @:noCompletion public function commandInsertComponent(
+            persistentId:String, index:Int, component:Component):Void {
+        requirePersistentObject(persistentId).insertComponent(component, index);
+    }
+
+    @:noCompletion public function commandRemoveComponent(
+            persistentId:String, index:Int):Void {
+        requirePersistentObject(persistentId).removeComponentAt(index);
     }
 
     function executeClone(source:Array<EditorObjectSnapshot>,
@@ -575,7 +619,7 @@ class EditorSession {
             var clone = new EditorObjectSnapshot(runtimeId,
                 oldToNew.get(snapshot.persistentId),
                 cloneName,
-                snapshot.transform, snapshot.kind, parentId, siblingIndex);
+                snapshot.transform, snapshot.components, parentId, siblingIndex);
             cloned.push(new IndexedEditorObjectSnapshot(objects.length + cloned.length,
                 clone));
             if (isRoot) clonedRootRuntimeIds.push(runtimeId);
@@ -659,6 +703,32 @@ class EditorSession {
     }
 
     inline function get_nextRuntimeId():Int return nextObjectId;
+
+    /** Run attached component lifecycles from the engine frame loop. */
+    public function update(dt:Float):Void {
+        for (object in objects.copy()) object.update(dt);
+    }
+
+    /** Destroy all components when the owning application/session shuts down. */
+    public function destroy():Void {
+        for (object in objects.copy()) object.destroy();
+        objects.resize(0);
+        objectsById.clear();
+        objectsByPersistentId.clear();
+        hierarchy.roots.resize(0);
+        applySelection(new EditorSelectionState([], -1));
+        history.clear();
+    }
+
+    static function cloneComponents(source:Null<Array<Component>>):Array<Component> {
+        if (source == null) return [];
+        return [for (component in source) {
+            if (Std.isOfType(component, Transform)) {
+                throw "Transform is created automatically and cannot be supplied twice";
+            }
+            component.cloneComponent();
+        }];
+    }
 
     function notifyChanged():Void {
         if (onChanged != null) onChanged();

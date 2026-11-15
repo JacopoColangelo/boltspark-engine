@@ -42,14 +42,16 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 3. `h3d.Engine` selects `h3d.impl.DX12Driver` because `compile.hxml` defines `-D dx12` (with `-D hl_ver=1.16.0` required by the driver's `hl.CArray` usage).
 4. `Main.init()`:
    - logs the actual driver class name (`Type.getClassName(Type.getClass(engine.driver))`) — M0's positive driver evidence;
-   - builds the sample cube primitive in `s3d`;
+   - creates a sample generic GameObject with Transform + MeshRenderer; the
+     Heaps bridge resolves its primitive mesh into `s3d`;
    - constructs `BoltUI` in `s2d` (the overlay); `UiContext` creates exact-size
      Inter and JetBrains Mono faces through FreeType and preloads the common
      editor characters.
 5. `Main.update(dt)` runs per frame: application-window synchronization,
-   BoltUI's explicit begin/end frame, gizmo follow, scale/culling maintenance,
-   and selection-outline synchronization. Optional performance and device-reset
-   probes are disabled during normal sessions.
+   GameObject component lifecycle dispatch, BoltUI's explicit begin/end frame,
+   component-render-view synchronization, gizmo follow, scale/culling
+   maintenance, and selection-outline synchronization. Optional performance
+   and device-reset probes are disabled during normal sessions.
 
 ## Module responsibilities (src/boltspark/ui)
 
@@ -77,11 +79,14 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 
 | Module | Responsibility |
 |---|---|
+| `engine/GameObject.hx` / `Component.hx` / `Transform.hx` | Generic component container, mandatory Transform, typed component queries/removal, ownership, and start/update/destroy dispatch. |
+| `engine/MeshRenderer.hx` / `Mesh.hx` / `Material.hx` | Renderer-independent geometry/material assignment. Primitive factories configure ordinary GameObjects; the editor Heaps bridge owns concrete `h3d.scene.Mesh` projections. |
+| `engine/ComponentRegistry.hx` / `engine/inspector/` | Extensible scene factories and UI-neutral Inspector property metadata. Unknown serialized components remain opaque and round-trip safely. |
 | `editor/EditorViewport.hx` | One source of truth for render-zone composition and viewport/window/backbuffer coordinate conversion used by rendering, rays, and gizmos. |
-| `editor/EditorSession.hx` / `SceneHierarchy.hx` | Renderer-independent owner of the ordered scene graph, durable/runtime IDs, selection, clipboard, and bounded history. Hierarchy mutation is centralized; iterative traversal and revision-stamped world matrices avoid recursion and eager subtree invalidation. `Main` mirrors this model into nested Heaps nodes. |
+| `editor/EditorSession.hx` / `SceneHierarchy.hx` | Renderer-independent owner of generic component-based scene objects, the ordered scene graph, durable/runtime IDs, selection, clipboard, and bounded history. Hierarchy mutation is centralized; iterative traversal and revision-stamped world matrices avoid recursion and eager subtree invalidation. `Main` mirrors this model into nested Heaps nodes. |
 | `editor/EditorTransform.hx` / `TransformMatrix.hx` | Exact local affine state: position, normalized quaternion interpretation, signed non-zero scale, and shear. Matrix decomposition retains the shear required by world-preserving reparenting between rotated, non-uniform ancestors. |
 | `editor/commands/` | Concrete create/delete/duplicate/reparent/rename/transform commands plus bounded execute/undo/redo history and failure-safe composites. Structural commands restore parent, sibling order, transform, identity, and selection. |
-| `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, atomic storage with backup, and `SceneSerializer` mapping for hierarchy/object-kind/exact-transform state. |
+| `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, atomic storage with backup, and `SceneSerializer` mapping for hierarchy/component/exact-transform state. |
 | `tests/repro/` | Portable math/UI/data/command tests plus native-module regressions. |
 | `tests/native/` | Tracked HWND lifecycle, command-history, DPI, forced DX12 reset, smoke, and performance probes; outputs go to ignored `bin/test-results/`. |
 
@@ -111,12 +116,17 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
     only through `SceneHierarchy`; UI rows and Heaps objects are projections.
     Reparenting rejects cross-scene links and cycles, preserves world matrices by
     default, and records exact reversible forest changes.
+14. **Object behavior comes from components.** Every GameObject owns exactly one
+    non-removable Transform. Cubes and future primitives are factory presets,
+    not object subclasses or kinds. Component ownership and lifecycle are
+    centralized, and the Inspector iterates component metadata rather than
+    branching on GameObject type.
 
 ## Current scope boundary
 
 Splitters, retained text input, menus, bounded picking, native packaging, and
 current-monitor DPI awareness now exist. Still out of scope are a complete
 immediate-mode public BoltUI API, physical mixed-DPI monitor validation, a
-    general dock tree/detached panels, integrated project open/save, asset import,
-    the final component runtime, materials/PBR, and Play mode. See
-    `docs/PROJECT_FORMAT.md` for the implemented data boundary.
+general dock tree/detached panels, integrated project open/save, asset import,
+production materials/PBR, and Play mode. See `docs/PROJECT_FORMAT.md` for the
+implemented data boundary.

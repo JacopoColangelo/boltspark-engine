@@ -5,7 +5,8 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 ## What is working (M0)
 
 - A native Windows 11 x64 desktop window ("Boltspark Engine") booted by the HashLink VM, rendering through the **DirectX 12** Heaps driver (positively identified at runtime as `h3d.impl.DX12Driver`).
-- A static orange editor cube in `s3d` behind a native `h2d` editor chrome overlay.
+- An orange sample GameObject composed from Transform + MeshRenderer components
+  in `s3d`, behind a native `h2d` editor chrome overlay.
 - A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
 - A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter and JetBrains Mono, exact-size pixel-grid-fitted analytic icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics. The Output Log stays focused on actionable warnings and errors instead of echoing routine selections, tool switches, and transform edits; launch with `BOLTSPARK_VERBOSE_LOGS` set to restore detailed interaction telemetry for diagnosis.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and scale-invariant two-pixel selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
@@ -28,8 +29,13 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
   bounded undo/redo command history. A renderer-independent `EditorSession` now
   owns the ordered scene graph, local affine transforms, selection, clipboard,
   and history. Parent references, sibling order, exact quaternion/shear state,
-  and object kinds map to and from `SceneDocument`; project open/save UI and the
-  asset browser are still later integration work.
+  and attached components map to and from `SceneDocument`; project open/save UI
+  and the asset browser are still later integration work.
+- A Unity-style component runtime now provides generic GameObjects, mandatory
+  Transform components, typed add/get/remove APIs, lifecycle dispatch,
+  component-preserving history/serialization, generic MeshRenderer components,
+  primitive mesh factories, and a metadata-driven component Inspector with an
+  Add Component command. Cubes are ordinary GameObjects rather than object kinds.
 
 ## Hard platform policy
 
@@ -81,6 +87,7 @@ The development build runs through `hl.exe` and retains its command window for l
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — master development plan (do not modify)
 - [`docs/TESTING.md`](docs/TESTING.md) — tracked portable/native test matrix and commands
 - [`docs/PROJECT_FORMAT.md`](docs/PROJECT_FORMAT.md) — initial versioned project/scene contracts
+- [`docs/COMPONENT_SYSTEM.md`](docs/COMPONENT_SYSTEM.md) — GameObject/component APIs, lifecycle, rendering, and extension
 - [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) — measured 15-minute idle/resize baseline
 - [`tests/native-foundation-acceptance.md`](tests/native-foundation-acceptance.md) — acceptance checklist with executed results
 
@@ -104,6 +111,7 @@ src/
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
     windows/                  — native top-level editor-window routing and H2D content
   boltspark/project/          — versioned project/scene data, validation, atomic storage
+  boltspark/engine/           — GameObject, Component, Transform, rendering components/assets
   boltspark/editor/           — pure editor session/model plus viewport and gizmos
     commands/                 — object, transform, duplicate, and hierarchy history
   res/fonts/                  — embedded Inter and JetBrains Mono TTF faces

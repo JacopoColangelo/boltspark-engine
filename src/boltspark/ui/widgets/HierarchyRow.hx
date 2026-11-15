@@ -1,6 +1,5 @@
 package boltspark.ui.widgets;
 
-import boltspark.editor.EditorObjectKind;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
@@ -41,7 +40,7 @@ class HierarchyRow extends h2d.Object {
     final renameInput:UiTextInput;
     final dropFeedback:h2d.Graphics;
     var fullName:String;
-    var kind:EditorObjectKind = Cube;
+    var renderable:Bool = false;
     var expanded:Bool = true;
     var selected:Bool = false;
     var hovered:Bool = false;
@@ -153,7 +152,7 @@ class HierarchyRow extends h2d.Object {
         parentId = entry.parentId;
         depth = entry.depth;
         hasChildren = entry.hasChildren;
-        kind = entry.kind;
+        renderable = entry.renderable;
         this.expanded = expanded;
         setName(entry.name);
         refreshEntryVisuals();
@@ -311,9 +310,9 @@ class HierarchyRow extends h2d.Object {
         }
         objectIcon.clear();
         UiIcons.draw(objectIcon,
-            kind == EditorObjectKind.Empty ? Hierarchy : Cube,
+            renderable ? Cube : Hierarchy,
             0, 0, 13,
-            kind == EditorObjectKind.Empty ? Theme.TEXT_SECONDARY : Theme.CUBE_ORANGE);
+            renderable ? Theme.CUBE_ORANGE : Theme.TEXT_SECONDARY);
         disclosureHit.visible = hasChildren;
         layoutContents();
     }

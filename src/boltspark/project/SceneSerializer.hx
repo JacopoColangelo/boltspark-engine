@@ -1,9 +1,10 @@
 package boltspark.project;
 
 import boltspark.editor.EditorObject;
-import boltspark.editor.EditorObjectKind;
 import boltspark.editor.EditorSession;
 import boltspark.editor.EditorTransform;
+import boltspark.engine.ComponentRegistry;
+import boltspark.engine.Transform;
 
 /** Maps the authoritative editor scene graph to/from durable scene documents. */
 class SceneSerializer {
@@ -13,7 +14,7 @@ class SceneSerializer {
         var document = new SceneDocument(
             StableId.require(sceneId, "scene.id"), name);
         for (object in session.hierarchy.flatten()) {
-            var transform = object.transform;
+            var transform = object.transform.value;
             var data = new TransformData(
                 transform.positionX, transform.positionY, transform.positionZ,
                 transform.rotationHintValid ? transform.rotationHintX : 0,
@@ -25,9 +26,10 @@ class SceneSerializer {
                  transform.shearXY, transform.shearXZ, transform.shearYZ,
                  transform.rotationHintValid);
             var components:Array<ComponentData> = [];
-            if (object.kind == EditorObjectKind.Cube) {
-                components.push(new ComponentData("meshRenderer", 1,
-                    {primitive: "cube"}));
+            for (component in object.components) {
+                if (Std.isOfType(component, Transform)) continue;
+                var serialized = ComponentRegistry.serialize(component);
+                if (serialized != null) components.push(serialized);
             }
             document.entities.push(new SceneEntityData(object.persistentId,
                 object.name,
@@ -45,9 +47,11 @@ class SceneSerializer {
         var session = new EditorSession(historyCapacity);
         var entityToObject:Map<String, EditorObject> = [];
         for (entity in document.entities) {
+            var components = [for (component in entity.components)
+                ComponentRegistry.deserialize(component)];
             var object = session.addInitialObject(entity.name,
                 toEditorTransform(entity.transform), entity.id,
-                kindFor(entity));
+                components);
             entityToObject.set(entity.id, object);
         }
 
@@ -108,13 +112,5 @@ class SceneSerializer {
         result.shearXZ = data.shearXZ;
         result.shearYZ = data.shearYZ;
         return result;
-    }
-
-    static function kindFor(entity:SceneEntityData):EditorObjectKind {
-        for (component in entity.components) {
-            if (component.type != "meshRenderer") continue;
-            if (Reflect.field(component.data, "primitive") == "cube") return Cube;
-        }
-        return Empty;
     }
 }

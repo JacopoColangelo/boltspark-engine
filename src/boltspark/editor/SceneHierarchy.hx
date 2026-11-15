@@ -174,7 +174,7 @@ class SceneHierarchy {
         if (object.cachedWorldTransformRevision != object.worldRevision
                 || object.cachedWorldTransform == null) {
             object.cachedWorldTransform = EditorTransform.fromMatrix(
-                object.cachedWorldMatrix, object.transform);
+                object.cachedWorldMatrix, object.transform.value);
             object.cachedWorldTransformRevision = object.worldRevision;
         }
         return object.cachedWorldTransform.clone();
@@ -200,7 +200,7 @@ class SceneHierarchy {
             ?newParent:EditorObject):EditorTransform {
         if (desiredWorld == null) throw "Desired world transform cannot be null";
         return EditorTransform.fromMatrix(localMatrixForWorld(object,
-            desiredWorld.toMatrix(), newParent), object.transform);
+            desiredWorld.toMatrix(), newParent), object.transform.value);
     }
 
     /** Validate full graph consistency after loading or complex commands. */
