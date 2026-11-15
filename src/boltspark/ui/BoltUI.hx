@@ -72,6 +72,20 @@ class BoltUI {
     public var onPrepareApplicationWindow:Null<ApplicationWindowKind->Void>;
     public var onUndo:Null<Void->Void>;
     public var onRedo:Null<Void->Void>;
+    /** Mouse wheel over the viewport (positive delta scrolls down). */
+    public var onViewportWheel:Null<Float->Void>;
+    /** Camera gesture start: GESTURE_* kind + viewport-local pointer. */
+    public var onViewportCameraBegin:Null<Int->Float->Float->Bool>;
+    /** Camera gesture movement: kind + viewport-local pointer. */
+    public var onViewportCameraMove:Null<Int->Float->Float->Void>;
+    /** Camera gesture end: kind + viewport-local pointer (-1 when cancelled). */
+    public var onViewportCameraEnd:Null<Int->Float->Float->Void>;
+    /** Viewport focus (hover or owned gesture) changed. */
+    public var onViewportFocusChanged:Null<Bool->Void>;
+    /** The native window lost keyboard focus. */
+    public var onWindowFocusLost:Null<Void->Void>;
+    /** G: toggle the independent editor grid. */
+    public var onToggleGrid:Null<Void->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window, snapping:GridSnapping,
             keybindings:Keybindings) {
@@ -172,6 +186,32 @@ class BoltUI {
         };
         shell.onUndo = function() if (onUndo != null) onUndo();
         shell.onRedo = function() if (onRedo != null) onRedo();
+        shell.onViewportWheel = function(delta) {
+            if (onViewportWheel != null) onViewportWheel(delta);
+        };
+        shell.onViewportCameraBegin = function(kind, x, y) {
+            return onViewportCameraBegin != null
+                && onViewportCameraBegin(kind, x, y);
+        };
+        shell.onViewportCameraMove = function(kind, x, y) {
+            if (onViewportCameraMove != null) onViewportCameraMove(kind, x, y);
+        };
+        shell.onViewportCameraEnd = function(kind, x, y) {
+            if (onViewportCameraEnd != null) onViewportCameraEnd(kind, x, y);
+        };
+        shell.onViewportFocusChanged = function(focused) {
+            if (onViewportFocusChanged != null) onViewportFocusChanged(focused);
+        };
+        shell.onWindowFocusLost = function() {
+            if (onWindowFocusLost != null) onWindowFocusLost();
+        };
+        shell.onToggleGrid = function() {
+            if (onToggleGrid != null) onToggleGrid();
+        };
+        // The shell owns the viewport focus notion (hover + gesture capture,
+        // suppressed while typing); the input adapter consults it before
+        // letting camera-key-bound shortcuts fire.
+        input.viewportFocusQuery = function() return shell.isViewportFocused();
     }
 
     /** Editor console access. */
@@ -204,6 +244,16 @@ class BoltUI {
 
     public function getViewportRect():LayoutRect {
         return shell.viewportRect;
+    }
+
+    /** UI font for editor overlay text (viewport axis gizmo letters). */
+    public function viewportFont():h2d.Font {
+        return shell.viewportFont();
+    }
+
+    /** Small viewport overlay showing the current camera movement speed. */
+    public function setCameraSpeedLabel(text:String):Void {
+        shell.setCameraSpeedLabel(text);
     }
 
     public function setHierarchyEntries(entries:Array<HierarchyEntry>):Void {

@@ -100,6 +100,7 @@ class Keybindings {
             case EditorAction.Paste: "Paste";
             case EditorAction.DuplicateSelection: "Duplicate Selection";
             case EditorAction.RenameSelection: "Rename Selection";
+            case EditorAction.ToggleGrid: "Toggle Editor Grid";
             default: "Unknown Action";
         };
     }
@@ -145,6 +146,9 @@ class Keybindings {
         bindings[EditorAction.Paste] = {keyCode: hxd.Key.V, ctrl: true};
         bindings[EditorAction.DuplicateSelection] = {keyCode: hxd.Key.D, ctrl: true};
         bindings[EditorAction.RenameSelection] = {keyCode: hxd.Key.F2, ctrl: false};
+        // G toggles the independent editor grid (Game View); registered like
+        // every other action so it is rebindable and persisted.
+        bindings[EditorAction.ToggleGrid] = {keyCode: hxd.Key.G, ctrl: false};
         lastError = "";
         if (!quiet) {
             var saveError = save();

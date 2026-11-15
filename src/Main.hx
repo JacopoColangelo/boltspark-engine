@@ -1,3 +1,7 @@
+import boltspark.editor.EditorAction;
+import boltspark.editor.EditorAxisGizmoRenderer;
+import boltspark.editor.EditorCameraController;
+import boltspark.editor.EditorGridRenderer;
 import boltspark.editor.GridSnapping;
 import boltspark.editor.EditorViewport;
 import boltspark.editor.EditorObject;
@@ -36,7 +40,12 @@ class Main extends hxd.App {
     var boltUI:BoltUI;
     var editorViewport:EditorViewport;
     var nativeWindow:hxd.Window;
-    var groundGrid:h3d.scene.Graphics;
+    /** Independent editor grid pass; never a node in the world scene. */
+    var gridRenderer:EditorGridRenderer;
+    /** Independent viewport orientation gizmo overlay. */
+    var axisGizmo:EditorAxisGizmoRenderer;
+    /** Editor free-fly camera navigation (RMB look, WASDQE, pan, orbit). */
+    var cameraController:EditorCameraController;
     var selectionOutline:h3d.scene.Graphics;
     /** Heaps render views synchronized from the renderer-independent session. */
     final sceneObjects:Array<SceneObject> = [];
@@ -84,6 +93,19 @@ class Main extends hxd.App {
     var dragVirtualX:Float = 0;
     var dragVirtualY:Float = 0;
     var dragRelative:Bool = false;
+    // Viewport camera gesture tracking. Only one gesture owns the pointer at
+    // a time; RMB free-look may switch the window into relative mouse mode
+    // (shared with gizmo drags — see onRelativeMouseMove).
+    var cameraGesture:Int = -1;
+    var lookRelative:Bool = false;
+    var cameraGestureLastX:Float = 0;
+    var cameraGestureLastY:Float = 0;
+    // Camera-speed overlay change detection, so steady frames allocate
+    // nothing.
+    var lastSpeedValue:Float = -1;
+    var lastSpeedModifierState:Int = -1;
+    // Probe telemetry: at most one camera position line per second.
+    var cameraTelemetryTimer:Float = 0;
     // Synthetic-input verification probes drive drags with WM_MOUSEMOVE,
     // which relative mode ignores; probes keep Absolute mode.
     var inputProbeMode:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null;
@@ -139,6 +161,9 @@ class Main extends hxd.App {
         // Boltspark's scene editing logic is Y-up (ground placement intersects
         // y = 0), while Heaps defaults its camera to Z-up.
         s3d.camera.up.set(0, 1, 0);
+        // Editor free-fly navigation adopts the scene setup as its starting
+        // framing; every later camera motion flows through the controller.
+        cameraController = new EditorCameraController(s3d.camera);
 
         // BoltUI is a native H2D overlay rendered by Heaps. It is not HTML,
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
@@ -150,8 +175,14 @@ class Main extends hxd.App {
         snap = new GridSnapping();
         keybindings = new Keybindings();
         boltUI = new BoltUI(s2d, nativeWindow, snap, keybindings);
+        // Independent editor render components: the grid owns a dedicated
+        // h3d.scene.Scene pass and the gizmo owns a 2D overlay object graph.
+        // Neither is ever parented into the world scene.
+        gridRenderer = new EditorGridRenderer();
+        axisGizmo = new EditorAxisGizmoRenderer(s3d.camera, s2d,
+            boltUI.viewportFont(), function() return boltUI.getViewportRect());
         editorViewport = new EditorViewport(nativeWindow, s3d, s2d,
-            function() return boltUI.getViewportRect());
+            function() return boltUI.getViewportRect(), gridRenderer, axisGizmo);
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreateObject = createCube;
         boltUI.onCreateObjectAt = createCubeAtViewport;
@@ -217,6 +248,18 @@ class Main extends hxd.App {
                 ? "snapping: translation snapping suspended (key held)"
                 : "snapping: translation snapping resumed");
         };
+        // Viewport camera navigation and editor-only visibility.
+        boltUI.onViewportWheel = onViewportWheel;
+        boltUI.onViewportCameraBegin = onViewportCameraBegin;
+        boltUI.onViewportCameraMove = onViewportCameraMove;
+        boltUI.onViewportCameraEnd = onViewportCameraEnd;
+        boltUI.onViewportFocusChanged = function(focused:Bool) {
+            cameraController.viewportFocused = focused;
+        };
+        boltUI.onWindowFocusLost = function() {
+            cameraController.onWindowFocusLost();
+        };
+        boltUI.onToggleGrid = toggleEditorGrid;
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
@@ -248,7 +291,25 @@ class Main extends hxd.App {
         if (keybindings.pollExternalChanges()) {
             logActivity("keybindings: synchronized changes from the settings window");
         }
+        // Editor camera navigation runs before everything that reads the
+        // camera this frame (gizmo follow, outline, rendering). Movement keys
+        // are inert while a gizmo drag owns the pointer or the viewport is
+        // unfocused; the controller is told both each frame.
+        cameraController.keyboardEnabled = !gizmoDragging;
+        cameraController.setViewportWidth(boltUI.getViewportRect().width);
+        cameraController.update(dt);
         boltUI.update(dt);
+        axisGizmo.update();
+        refreshCameraSpeedLabel();
+        if (verboseLogging) {
+            cameraTelemetryTimer += dt;
+            if (cameraTelemetryTimer >= 1.0) {
+                cameraTelemetryTimer = 0;
+                var cam = s3d.camera;
+                printActivity('[camera] pos=(${round2(cam.pos.x)}, '
+                    + '${round2(cam.pos.y)}, ${round2(cam.pos.z)})');
+            }
+        }
         gizmo.follow();
         // A very large object can enclose the editor camera. Render that mesh
         // two-sided only while inside it so it remains visibly present rather
@@ -698,6 +759,9 @@ class Main extends hxd.App {
     }
 
     function onViewportPush(x:Float, y:Float):Bool {
+        // A camera gesture owns the pointer; gizmo picking stays silent
+        // until the gesture ends (Unreal-style navigation priority).
+        if (cameraGesture >= 0) return false;
         var selected = getSelectedObject();
         if (selected == null) return false;
         var model = editorSession.findObject(selected.id);
@@ -748,7 +812,7 @@ class Main extends hxd.App {
         }
         // Absolute path (verification probes only): fold pixel motion into
         // the virtual pointer. Relative-mode drags are driven by
-        // onDragRelativeMove instead; hxd delivers no EMove then.
+        // onRelativeMouseMove instead; hxd delivers no EMove then.
         dragVirtualX += x - dragLastX;
         dragVirtualY += y - dragLastY;
         dragLastX = x;
@@ -769,7 +833,7 @@ class Main extends hxd.App {
         if (inputProbeMode) return;
         try {
             nativeWindow.mouseMode =
-                hxd.impl.MouseMode.Relative(onDragRelativeMove, true);
+                hxd.impl.MouseMode.Relative(onRelativeMouseMove, true);
             dragRelative = switch (nativeWindow.mouseMode) {
                 case Relative(_, _): true;
                 case _: false;
@@ -801,21 +865,33 @@ class Main extends hxd.App {
         }
     }
 
-    /** Raw hardware deltas from the hidden-cursor drag drive the gizmo. */
-    function onDragRelativeMove(event:hxd.Event):Void {
-        if (!gizmoDragging || !dragRelative) return;
-        // Relative callbacks are private to the gizmo. Never turn them back
-        // into absolute EMove events, which would run the capture path twice.
-        event.propagate = false;
-        if (event.relX == 0 && event.relY == 0) return;
-        dragVirtualX += event.relX;
-        dragVirtualY += event.relY;
-        var selected = getSelectedObject();
-        if (selected == null) {
-            cancelGizmoDrag();
+    /**
+     * Raw hardware deltas from the hidden-cursor relative mouse mode drive
+     * both consumers: gizmo drags and RMB free-look. The window has one
+     * relative callback at a time, so both sessions route through here and
+     * only the active one acts. Callbacks are never turned back into
+     * absolute EMove events, which would run the capture path twice.
+     */
+    function onRelativeMouseMove(event:hxd.Event):Void {
+        if (gizmoDragging && dragRelative) {
+            if (event.relX == 0 && event.relY == 0) return;
+            event.propagate = false;
+            dragVirtualX += event.relX;
+            dragVirtualY += event.relY;
+            var selected = getSelectedObject();
+            if (selected == null) {
+                cancelGizmoDrag();
+                return;
+            }
+            applyDragTransform(selected);
             return;
         }
-        applyDragTransform(selected);
+        if (cameraGesture == EditorCameraController.GESTURE_LOOK
+                && lookRelative) {
+            if (event.relX == 0 && event.relY == 0) return;
+            event.propagate = false;
+            cameraController.addLookDelta(event.relX, event.relY);
+        }
     }
 
     /** Abort a drag safely if its selected object disappears mid-capture. */
@@ -962,6 +1038,166 @@ class Main extends hxd.App {
         var enabled = snap.isEnabled(mode);
         logActivity('snapping: ${modeNames[mode]} ${enabled ? "enabled" : "disabled"}'
             + ' · step ${round2(snap.stepFor(mode))}');
+    }
+
+    // ------------------------------------------------------------------
+    // Viewport camera navigation. Gesture state lives in Main so gizmo
+    // presses can reject navigation and vice versa (one pointer owner at a
+    // time); all motion math lives in EditorCameraController.
+    // ------------------------------------------------------------------
+
+    /**
+     * Wheel over the viewport: adjust movement speed only while the RMB
+     * free-look gesture owns the camera (Unreal-style). Without a gesture
+     * the wheel does nothing here, leaving it free for panel scrolling and
+     * future viewport uses. The gesture capture passes wheel events through
+     * (propagate stays true), so they reach this handler mid-look.
+     */
+    function onViewportWheel(delta:Float):Void {
+        if (cameraGesture != EditorCameraController.GESTURE_LOOK) return;
+        cameraController.adjustSpeedForWheel(delta);
+        refreshCameraSpeedLabel();
+    }
+
+    function onViewportCameraBegin(kind:Int, viewX:Float, viewY:Float):Bool {
+        if (gizmoDragging || cameraGesture >= 0) return false;
+        cameraGesture = kind;
+        cameraGestureLastX = viewX;
+        cameraGestureLastY = viewY;
+        switch (kind) {
+            case EditorCameraController.GESTURE_LOOK:
+                lookRelative = false;
+                beginRelativeLook();
+            case EditorCameraController.GESTURE_PAN:
+                cameraController.beginPan();
+            case EditorCameraController.GESTURE_ORBIT:
+                cameraController.beginOrbit(currentOrbitPivot());
+            default:
+                cameraGesture = -1;
+                return false;
+        }
+        if (verboseLogging) {
+            logActivity('camera: ${gestureName(kind)} gesture started');
+            printActivity('[camera] gesture=${gestureName(kind)} begin');
+        }
+        return true;
+    }
+
+    function onViewportCameraMove(kind:Int, viewX:Float, viewY:Float):Void {
+        if (cameraGesture != kind) return;
+        // RMB free-look in relative mouse mode is driven by raw hardware
+        // deltas in onRelativeMouseMove; the capture delivers no EMove
+        // events then, but stay defensive against both firing.
+        if (kind == EditorCameraController.GESTURE_LOOK && lookRelative) return;
+        var dx = viewX - cameraGestureLastX;
+        var dy = viewY - cameraGestureLastY;
+        cameraGestureLastX = viewX;
+        cameraGestureLastY = viewY;
+        if (dx == 0 && dy == 0) return;
+        switch (kind) {
+            case EditorCameraController.GESTURE_LOOK:
+                cameraController.addLookDelta(dx, dy);
+            case EditorCameraController.GESTURE_PAN:
+                cameraController.addPanDelta(dx, dy);
+            case EditorCameraController.GESTURE_ORBIT:
+                cameraController.addOrbitDelta(dx, dy);
+        }
+    }
+
+    function onViewportCameraEnd(kind:Int, viewX:Float, viewY:Float):Void {
+        if (cameraGesture != kind) return;
+        switch (kind) {
+            case EditorCameraController.GESTURE_LOOK:
+                if (lookRelative) {
+                    // Restore absolute mode only, no cursor parking: free
+                    // look leaves the cursor wherever the view stopped, and
+                    // Relative(restore) already keeps the pre-gesture spot
+                    // out of the equation.
+                    lookRelative = false;
+                    try {
+                        nativeWindow.mouseMode = hxd.impl.MouseMode.Absolute;
+                    } catch (error:Dynamic) {
+                        Sys.println('[camera] mouse mode restore failed: '
+                            + Std.string(error));
+                    }
+                }
+                cameraController.endLook();
+            case EditorCameraController.GESTURE_PAN:
+                cameraController.endPan();
+            case EditorCameraController.GESTURE_ORBIT:
+                cameraController.endOrbit();
+        }
+        cameraGesture = -1;
+        if (verboseLogging) {
+            logActivity('camera: ${gestureName(kind)} gesture ended');
+            printActivity('[camera] gesture=${gestureName(kind)} end');
+        }
+    }
+
+    /**
+     * Relative mouse mode for RMB free-look: the cursor hides and locks so
+     * the view can turn indefinitely without stalling at screen edges. The
+     * single shared relative callback (onRelativeMouseMove) routes deltas
+     * here while the look gesture is the active session.
+     */
+    function beginRelativeLook():Void {
+        lookRelative = false;
+        if (inputProbeMode) return;
+        try {
+            nativeWindow.mouseMode =
+                hxd.impl.MouseMode.Relative(onRelativeMouseMove, true);
+            lookRelative = switch (nativeWindow.mouseMode) {
+                case Relative(_, _): true;
+                case _: false;
+            };
+        } catch (error:Dynamic) {
+            Sys.println('[camera] relative mouse mode unavailable: '
+                + Std.string(error));
+        }
+    }
+
+    /** Orbit pivot: the primary selection's position, or the world origin. */
+    function currentOrbitPivot():h3d.Vector {
+        var selected = getSelectedObject();
+        if (selected != null) {
+            return new h3d.Vector(selected.mesh.x, selected.mesh.y,
+                selected.mesh.z);
+        }
+        return new h3d.Vector(0, 0, 0);
+    }
+
+    /** G key: toggle the independent grid pass, nothing else changes. */
+    function toggleEditorGrid():Void {
+        gridRenderer.visible = !gridRenderer.visible;
+        printActivity('[grid] visible=${gridRenderer.visible}');
+        logActivity(gridRenderer.visible
+            ? "viewport: editor grid shown"
+            : "viewport: editor grid hidden");
+    }
+
+    function gestureName(kind:Int):String {
+        return switch (kind) {
+            case EditorCameraController.GESTURE_LOOK: "look";
+            case EditorCameraController.GESTURE_PAN: "pan";
+            case EditorCameraController.GESTURE_ORBIT: "orbit";
+            default: "unknown";
+        };
+    }
+
+    /**
+     * Push the current speed to the viewport overlay. The label is only
+     * rebuilt when the base speed or a modifier state actually changed, so
+     * steady frames allocate nothing.
+     */
+    function refreshCameraSpeedLabel():Void {
+        var base = cameraController.baseSpeedValue();
+        var modifier = cameraController.modifierState();
+        if (base == lastSpeedValue && modifier == lastSpeedModifierState) return;
+        lastSpeedValue = base;
+        lastSpeedModifierState = modifier;
+        var label = cameraController.speedLabel();
+        boltUI.setCameraSpeedLabel(label);
+        printActivity('[camera] speed label=$label');
     }
 
     /** Ratio represented by the active scale handle's unlinked result. */
@@ -1375,34 +1611,10 @@ class Main extends hxd.App {
         var bounceLight = new h3d.scene.fwd.DirLight(new h3d.Vector(1.0, -0.15, 0.25), s3d);
         bounceLight.color = new h3d.Vector(0.10, 0.12, 0.16);
 
-        groundGrid = new h3d.scene.Graphics(s3d);
-        groundGrid.name = "EditorGrid";
-        groundGrid.material.mainPass.depthWrite = false;
-        // Draw the grid before scene geometry and editor overlays. Both the
-        // grid and selection outline are screen-space Graphics lines, so an
-        // explicit layer prevents material sorting from painting grid pixels
-        // over the outline where their projections cross.
-        groundGrid.material.mainPass.layer = -10;
-        var extent = 20;
-        // The visible editor origin is y=0. A tiny negative bias avoids line
-        // z-fighting without baking the centered cube's half-height into every
-        // empty GameObject's apparent pivot.
-        var gridY = -0.005;
-        for (i in -extent...(extent + 1)) {
-            var major = i % 5 == 0;
-            groundGrid.lineStyle(major ? 1.0 : 0.75,
-                major ? 0x384450 : 0x252D37, 1);
-            groundGrid.moveTo(i, gridY, -extent);
-            groundGrid.lineTo(i, gridY, extent);
-            groundGrid.moveTo(-extent, gridY, i);
-            groundGrid.lineTo(extent, gridY, i);
-        }
-        groundGrid.lineStyle(1.35, Theme.AXIS_X, 1);
-        groundGrid.moveTo(-extent, gridY + 0.003, 0);
-        groundGrid.lineTo(extent, gridY + 0.003, 0);
-        groundGrid.lineStyle(1.35, Theme.AXIS_Z, 1);
-        groundGrid.moveTo(0, gridY + 0.003, -extent);
-        groundGrid.lineTo(0, gridY + 0.003, extent);
+        // The editor grid is NOT part of this scene graph: it renders from
+        // its own dedicated h3d.scene.Scene pass (EditorGridRenderer) so it
+        // never appears as a scene object, is never serialized, and never
+        // participates in picking or inspection.
 
         selectionOutline = new h3d.scene.Graphics(s3d);
         selectionOutline.name = "SelectionOutline";

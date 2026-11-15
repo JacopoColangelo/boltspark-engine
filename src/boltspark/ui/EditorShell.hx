@@ -1,5 +1,7 @@
 package boltspark.ui;
 
+import boltspark.editor.EditorCameraController;
+import boltspark.editor.EditorViewport;
 import boltspark.editor.GridSnapping;
 import boltspark.engine.ComponentTypeInfo;
 import boltspark.engine.inspector.ComponentInspectorData;
@@ -88,11 +90,23 @@ class EditorShell {
     final viewportModeSurface:UiSurface;
     final viewportModeIcon:h2d.Graphics;
     final viewportModeText:h2d.Text;
+    final viewportModeHit:h2d.Interactive;
+    /** Width of the PERSPECTIVE · LIT strip, tracked for snap-bar layout. */
+    var viewModeStripWidth:Float = 134;
     final viewportHintSurface:UiSurface;
     final viewportHintIcon:h2d.Graphics;
     final viewportHintText:h2d.Text;
     final viewportHintHit:h2d.Interactive;
     final snapBar:ViewportSnapBar;
+    final cameraSpeedSurface:UiSurface;
+    final cameraSpeedText:UiText;
+    /** Speed chip flash state: visible briefly after each speed change. */
+    var speedChipShown:Bool = false;
+    var speedChipTimer:Float = 0;
+    /** How long the speed chip stays fully visible after a change. */
+    static inline var SPEED_CHIP_VISIBLE:Float = 1.2;
+    /** Closing fade duration at the end of the flash. */
+    static inline var SPEED_CHIP_FADE:Float = 0.35;
     final console:ConsolePanel;
     final statusDot:h2d.Graphics;
     final statusText:h2d.Text;
@@ -152,6 +166,21 @@ class EditorShell {
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
     public var onViewportRelease:Null<Float->Float->Void>;
+    /** Mouse wheel over the viewport (positive delta scrolls down). */
+    public var onViewportWheel:Null<Float->Void>;
+    /** Camera gesture start: GESTURE_* kind + viewport-local pointer.
+        Returns true when the gesture was accepted. */
+    public var onViewportCameraBegin:Null<Int->Float->Float->Bool>;
+    /** Camera gesture movement: kind + viewport-local pointer. */
+    public var onViewportCameraMove:Null<Int->Float->Float->Void>;
+    /** Camera gesture end: kind + viewport-local pointer (-1 when cancelled). */
+    public var onViewportCameraEnd:Null<Int->Float->Float->Void>;
+    /** Viewport focus (hover or owned gesture) changed. */
+    public var onViewportFocusChanged:Null<Bool->Void>;
+    /** The native window lost keyboard focus. */
+    public var onWindowFocusLost:Null<Void->Void>;
+    /** G: toggle the independent editor grid. */
+    public var onToggleGrid:Null<Void->Void>;
     public var viewportRect(default, null):LayoutRect;
 
     var lastWidth:Int = -1;
@@ -175,6 +204,13 @@ class EditorShell {
     var scaleLinked:Bool = false;
     /** Whether a hold-to-disable press was actually forwarded past the text guard. */
     var snapHoldForwarded:Bool = false;
+    // Viewport focus and camera-gesture ownership. Focus is hover or an
+    // active pointer capture; a focused viewport owns camera navigation keys
+    // and the G grid toggle.
+    var viewportHovered:Bool = false;
+    var cameraGesture:Int = -1;
+    var gizmoCaptureActive:Bool = false;
+    var viewportFocusNotified:Bool = false;
     var lastGeometry:Null<DockLayoutGeometry>;
     var historyUndoLabel:Null<String>;
     var historyRedoLabel:Null<String>;
@@ -199,41 +235,32 @@ class EditorShell {
         viewportHit = new h2d.Interactive(1, 1, root);
         viewportHit.backgroundColor = 0;
         viewportHit.cursor = hxd.Cursor.Default;
+        // Right/middle button pushes and releases reach the handlers below
+        // so the editor camera controller can own look/pan gestures.
+        viewportHit.enableRightButton = true;
+        viewportHit.onOver = function(_) setViewportHover(true);
+        viewportHit.onOut = function(_) setViewportHover(false);
+        viewportHit.onWheel = function(event) {
+            if (onViewportWheel != null) onViewportWheel(event.wheelDelta);
+            event.propagate = false;
+        };
         viewportHit.onMove = function(event) {
             if (onViewportHover != null) onViewportHover(event.relX, event.relY);
         };
         viewportHit.onPush = function(event) {
-            if (event.button != 0) return;
-            // Any viewport press dismisses the snap preset dropdown and the
-            // File menu before the press is processed.
-            snapBar.closePopup();
-            menuDropdown.close();
-            var gizmoConsumed = onViewportPush != null
-                && onViewportPush(event.relX, event.relY);
-            if (!gizmoConsumed) return;
-            // A gizmo drag owns this press: the release must not fall through
-            // to onClick (which would re-run object picking).
-            closePaletteIfOpen();
-            viewportHit.preventClick();
-            viewportHit.startCapture(function(captured) {
-                switch (captured.kind) {
-                    case EMove:
-                        if (onViewportDrag != null) onViewportDrag(
-                            ctx.window.mouseX - viewportRect.x,
-                            ctx.window.mouseY - viewportRect.y);
-                        captured.propagate = false;
-                    case ERelease, EReleaseOutside, EFocusLost:
-                        captured.propagate = false;
-                        viewportHit.stopCapture();
-                        if (onViewportRelease != null) onViewportRelease(
-                            ctx.window.mouseX - viewportRect.x,
-                            ctx.window.mouseY - viewportRect.y);
-                    case _:
-                        captured.propagate = true;
-                }
-            });
+            switch (event.button) {
+                case 0: handleViewportPrimaryPush(event);
+                case 1:
+                    beginViewportCameraGesture(
+                        EditorCameraController.GESTURE_LOOK, event);
+                default:
+                    beginViewportCameraGesture(
+                        EditorCameraController.GESTURE_PAN, event);
+            }
         };
         viewportHit.onClick = function(event) {
+            // Right/middle clicks are camera gestures, never object picks.
+            if (event.button != 0) return;
             closePaletteIfOpen();
             if (onViewportClick != null) onViewportClick(event.relX, event.relY);
         };
@@ -517,6 +544,22 @@ class EditorShell {
         viewportModeText.lineBreak = false;
         viewportModeText.x = 25;
         viewportModeText.y = 4;
+        // The strip doubles as the camera/visualization settings menu button
+        // (Unreal-style viewport label dropdown).
+        viewportModeHit = new h2d.Interactive(134, 24, viewportHud);
+        viewportModeHit.backgroundColor = 0;
+        viewportModeHit.cursor = hxd.Cursor.Button;
+        viewportModeHit.onOver = function(_) {
+            viewportModeSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
+        };
+        viewportModeHit.onOut = function(_) {
+            viewportModeSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
+        };
+        viewportModeHit.onClick = function(event) {
+            if (event.button != 0) return;
+            openViewModeMenu();
+            event.propagate = false;
+        };
 
         viewportHintSurface = new UiSurface(ctx, viewportHud);
         viewportHintSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
@@ -555,6 +598,24 @@ class EditorShell {
             closePaletteIfOpen();
             if (onSnapChanged != null) onSnapChanged(mode);
         };
+        refreshViewModeLabel();
+
+        // Unobtrusive camera-speed chip in the viewport's bottom-left corner,
+        // refreshed by Main from the editor camera controller. The text is a
+        // child of the chip surface so it moves with it — parenting it to the
+        // HUD would draw it at the HUD's top-left, over the view-mode strip.
+        cameraSpeedSurface = new UiSurface(ctx, viewportHud);
+        cameraSpeedSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
+        cameraSpeedSurface.setSize(110, 24);
+        cameraSpeedText = new UiText(ctx.captionFont, cameraSpeedSurface);
+        cameraSpeedText.text = "SPEED —";
+        cameraSpeedText.textColor = Theme.TEXT_SECONDARY;
+        cameraSpeedText.lineBreak = false;
+        cameraSpeedText.x = 8;
+        cameraSpeedText.y = 4;
+        // Hidden until a real speed change flashes it (see setCameraSpeedLabel).
+        cameraSpeedSurface.visible = false;
+        cameraSpeedText.visible = false;
         // Ctrl+End routes from the window-level input adapter, which sees key
         // events even when full-window interactives consume pointer input.
         input.onSnapToGridPressed = function() {
@@ -639,6 +700,15 @@ class EditorShell {
             }
             closePaletteIfOpen();
         };
+        // G (rebindable) toggles the independent editor grid; only accepted
+        // while the viewport owns focus, never while typing into a field.
+        input.onToggleGridPressed = function() {
+            if (!isViewportFocused()) return;
+            if (onToggleGrid != null) onToggleGrid();
+        };
+        input.onWindowFocusLost = function() {
+            if (onWindowFocusLost != null) onWindowFocusLost();
+        };
 
         dockLayout = new DockLayout();
         layoutStore = new DockLayoutStore();
@@ -683,6 +753,119 @@ class EditorShell {
         resize();
     }
 
+    // ------------------------------------------------------------------
+    // Viewport pointer gestures and focus
+    // ------------------------------------------------------------------
+
+    /** Left-button viewport press: Alt+LMB orbits, otherwise object
+        picking / transform gizmo drags run as before. */
+    function handleViewportPrimaryPush(event:hxd.Event):Void {
+        if (hxd.Key.isDown(hxd.Key.ALT)) {
+            // Alt+LMB orbits the camera around the navigation pivot; the
+            // press never reaches object picking or the transform gizmo.
+            closePaletteIfOpen();
+            beginViewportCameraGesture(
+                EditorCameraController.GESTURE_ORBIT, event);
+            return;
+        }
+        // Any viewport press dismisses the snap preset dropdown and the
+        // File menu before the press is processed.
+        snapBar.closePopup();
+        menuDropdown.close();
+        var gizmoConsumed = onViewportPush != null
+            && onViewportPush(event.relX, event.relY);
+        if (!gizmoConsumed) return;
+        // A gizmo drag owns this press: the release must not fall through
+        // to onClick (which would re-run object picking).
+        gizmoCaptureActive = true;
+        notifyViewportFocus();
+        closePaletteIfOpen();
+        viewportHit.preventClick();
+        viewportHit.startCapture(function(captured) {
+            switch (captured.kind) {
+                case EMove:
+                    if (onViewportDrag != null) onViewportDrag(
+                        ctx.window.mouseX - viewportRect.x,
+                        ctx.window.mouseY - viewportRect.y);
+                    captured.propagate = false;
+                case ERelease, EReleaseOutside, EFocusLost:
+                    captured.propagate = false;
+                    endGizmoCapture();
+                    if (onViewportRelease != null) onViewportRelease(
+                        ctx.window.mouseX - viewportRect.x,
+                        ctx.window.mouseY - viewportRect.y);
+                case _:
+                    captured.propagate = true;
+            }
+        });
+    }
+
+    function endGizmoCapture():Void {
+        viewportHit.stopCapture();
+        gizmoCaptureActive = false;
+        notifyViewportFocus();
+    }
+
+    /** Start a camera gesture (look/pan/orbit) with pointer capture so the
+        release is always observed. Gestures never overlap gizmo drags. */
+    function beginViewportCameraGesture(kind:Int, event:hxd.Event):Void {
+        if (cameraGesture >= 0 || gizmoCaptureActive) return;
+        if (onViewportCameraBegin == null) return;
+        if (!onViewportCameraBegin(kind, event.relX, event.relY)) return;
+        viewportHit.preventClick();
+        cameraGesture = kind;
+        notifyViewportFocus();
+        viewportHit.startCapture(function(captured) {
+            switch (captured.kind) {
+                case EMove:
+                    if (onViewportCameraMove != null) onViewportCameraMove(kind,
+                        ctx.window.mouseX - viewportRect.x,
+                        ctx.window.mouseY - viewportRect.y);
+                    captured.propagate = false;
+                case ERelease, EReleaseOutside, EFocusLost:
+                    captured.propagate = false;
+                    endViewportCameraGesture(kind,
+                        ctx.window.mouseX - viewportRect.x,
+                        ctx.window.mouseY - viewportRect.y);
+                case _:
+                    captured.propagate = true;
+            }
+        }, function() endViewportCameraGesture(kind, -1, -1));
+    }
+
+    function endViewportCameraGesture(kind:Int, x:Float, y:Float):Void {
+        if (cameraGesture != kind) return;
+        cameraGesture = -1;
+        // When invoked from the capture callback this stops the capture and
+        // re-enters through onCancel, which early-outs on the guard above.
+        viewportHit.stopCapture();
+        notifyViewportFocus();
+        if (onViewportCameraEnd != null) onViewportCameraEnd(kind, x, y);
+    }
+
+    function setViewportHover(hovered:Bool):Void {
+        if (viewportHovered == hovered) return;
+        viewportHovered = hovered;
+        notifyViewportFocus();
+    }
+
+    function notifyViewportFocus():Void {
+        var focused = isViewportFocused();
+        if (viewportFocusNotified == focused) return;
+        viewportFocusNotified = focused;
+        if (onViewportFocusChanged != null) onViewportFocusChanged(focused);
+    }
+
+    /**
+     * Keyboard-facing viewport focus: the pointer hovers the viewport or a
+     * pointer gesture owns it, and no text field captures typing (camera
+     * keys and the G toggle must not hijack text entry).
+     */
+    public function isViewportFocused():Bool {
+        if (anyTextCaptureActive()) return false;
+        return viewportHovered || cameraGesture >= 0 || gizmoCaptureActive;
+    }
+
     function fitText(target:h2d.Text, value:String, maxWidth:Float):Void {
         target.lineBreak = false;
         target.maxWidth = null;
@@ -705,6 +888,69 @@ class EditorShell {
 
     public inline function log(line:String):Void console.log(line);
 
+    /**
+     * PERSPECTIVE · LIT strip: camera and visualization settings. The field
+     * of view applies to the shared horizontal FOV that the viewport pass
+     * and the camera controller's pan scale both read.
+     */
+    static final VIEW_FOV_PRESETS:Array<Int> = [50, 60, 70, 75, 90, 110];
+
+    function openViewModeMenu():Void {
+        closePaletteIfOpen();
+        var fovRows:Array<MenuItem> = [];
+        for (preset in VIEW_FOV_PRESETS) {
+            var value = preset;
+            var active = Math.round(EditorViewport.VIEW_FOV_DEG) == value;
+            fovRows.push({
+                label: (active ? '●  ' : '    ') + value + '°',
+                onClick: function() {
+                    EditorViewport.VIEW_FOV_DEG = value;
+                    refreshViewModeLabel();
+                    log('viewport: field of view ${value}°');
+                },
+            });
+        }
+        menuDropdown.open(viewportHud.x, viewportHud.y + 26, [
+            { label: "Field of View", submenu: fovRows },
+            { label: "Toggle Editor Grid  (G)", onClick: function() {
+                if (onToggleGrid != null) onToggleGrid();
+            } },
+        ]);
+    }
+
+    /** Rebuild the strip label with the live FOV and keep neighbors placed. */
+    function refreshViewModeLabel():Void {
+        viewportModeText.text = 'PERSPECTIVE ${Math.round(EditorViewport.VIEW_FOV_DEG)}° · LIT';
+        viewModeStripWidth = Math.ceil(25 + viewportModeText.textWidth + 8);
+        viewportModeSurface.setSize(viewModeStripWidth, 24);
+        viewportModeHit.width = viewModeStripWidth;
+        viewportModeHit.height = 24;
+        snapBar.x = viewModeStripWidth + 8;
+    }
+
+    /** Small viewport overlay showing the current camera movement speed.
+        The chip is hidden by default and flashes briefly whenever the speed
+        changes, fading out after SPEED_CHIP_VISIBLE seconds. */
+    public function setCameraSpeedLabel(text:String):Void {
+        if (cameraSpeedText.text == text) return;
+        // The startup synchronization ("SPEED —" → live value) must not
+        // flash the chip; only real speed changes do.
+        var initial = cameraSpeedText.text == "SPEED —";
+        cameraSpeedText.text = text;
+        if (initial) return;
+        speedChipShown = true;
+        speedChipTimer = SPEED_CHIP_VISIBLE;
+        cameraSpeedSurface.alpha = 1;
+        cameraSpeedText.alpha = 1;
+        cameraSpeedSurface.visible = viewportHud.visible;
+        cameraSpeedText.visible = viewportHud.visible;
+    }
+
+    /** UI font for editor overlay text (viewport axis gizmo letters). */
+    public function viewportFont():h2d.Font {
+        return ctx.font;
+    }
+
     public function setHistoryState(undoLabel:Null<String>,
             redoLabel:Null<String>):Void {
         historyUndoLabel = undoLabel;
@@ -713,6 +959,19 @@ class EditorShell {
 
     public function update(dt:Float):Void {
         if (ctx.width != lastWidth || ctx.height != lastHeight) resize();
+        if (speedChipShown) {
+            speedChipTimer -= dt;
+            if (speedChipTimer <= 0) {
+                speedChipShown = false;
+                cameraSpeedSurface.visible = false;
+                cameraSpeedText.visible = false;
+            } else if (speedChipTimer < SPEED_CHIP_FADE) {
+                // Fade the last moments instead of popping out.
+                var alpha = speedChipTimer / SPEED_CHIP_FADE;
+                cameraSpeedSurface.alpha = alpha;
+                cameraSpeedText.alpha = alpha;
+            }
+        }
         if (inputStatus.visible) inputStatus.x = Math.max(0, ctx.width - inputStatus.textWidth - 10);
     }
 
@@ -773,12 +1032,19 @@ class EditorShell {
         viewportHintHit.x = viewportHintSurface.x;
         viewportHintHit.y = 0;
 
-        // Snap toolbar sits right of the 134px view-mode strip and before the
+        // Snap toolbar sits right of the view-mode strip and before the
         // right-aligned World/Local control; hidden on very narrow viewports.
-        snapBar.x = 142;
+        snapBar.x = viewModeStripWidth + 8;
         snapBar.y = 0;
         snapBar.visible = viewportHud.visible
-            && geometry.viewport.width >= 142 + 248 + 96;
+            && geometry.viewport.width >= viewModeStripWidth + 8 + 248 + 96;
+        // Camera-speed chip sits under the view-mode strip in the
+        // viewport's bottom-left corner (viewportHud is at viewport + 8).
+        // It only shows while flashing after a speed change.
+        cameraSpeedSurface.visible = viewportHud.visible && speedChipShown;
+        cameraSpeedText.visible = viewportHud.visible && speedChipShown;
+        cameraSpeedSurface.x = 0;
+        cameraSpeedSurface.y = Math.max(0, geometry.viewport.height - 40);
         // Real, splitter-aware container height for popup clamping: the
         // console splitter can shrink the viewport at any time, so the popup
         // bounds are derived from the live layout, never a fixed estimate.

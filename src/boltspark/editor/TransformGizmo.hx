@@ -74,6 +74,14 @@ class TransformGizmo {
 	/** Tiny overlap at the silhouette avoids precision-sized gaps in the arcs. */
 	static inline var RING_VISIBILITY_PADDING:Float = 0.001;
 	static inline var OMNI_MIN_RADIUS:Float = 4;
+	/**
+	 * Unreal-style screen-space sizing: the gizmo is scaled by camera
+	 * distance so it occupies a constant share of the viewport. Scale 1 is
+	 * the historical fixed size, reached at GIZMO_BASE_DISTANCE units.
+	 */
+	static inline var GIZMO_BASE_DISTANCE:Float = 10;
+	static inline var MIN_DRAW_SCALE:Float = 0.25;
+	static inline var MAX_DRAW_SCALE:Float = 200;
 	/** Local projection sample used to build stable pixels-per-world mappings. */
 	static inline var SCREEN_PROJECTION_STEP:Float = 0.1;
 	static inline var SCREEN_EPSILON_SQ:Float = 1e-8;
@@ -93,7 +101,10 @@ class TransformGizmo {
 	final scalePlanes:Array<h3d.scene.Mesh> = [];
 	var scaleCenter:h3d.scene.Mesh;	/** Reusable solver result (the gizmo solves one axis at a time). */
 	final closest:AxisRayClosest = new AxisRayClosest();
+	/** Attached object (or null); all handles draw around its origin. */
 	var attached:h3d.scene.Object;
+	/** Uniform scale of the gizmo solids for constant screen size. */
+	var drawScale:Float = 1;
 	var currentTool:Int = TOOL_MOVE;
 	/** World/Local handle alignment (viewport HUD toggle). */
 	var gizmoSpace:Int = SPACE_WORLD;
@@ -300,6 +311,7 @@ class TransformGizmo {
 	/** Keep the gizmo glued to the attached object; call per frame. */
 	public function follow():Void {
 		if (attached == null || !solidRoot.visible) return;
+		updateDrawScale();
 		solidRoot.setPosition(attached.x, attached.y, attached.z);
 		var quat = attached.getRotationQuat();
 		var moved = attached.x != lastPos.x || attached.y != lastPos.y
@@ -761,8 +773,11 @@ class TransformGizmo {
 
 	/** World point on the captured rotation ring at `angle`. */
 	function ringWorldPoint(angle:Float, out:h3d.Vector):Void {
-		var cos = Math.cos(angle) * RING_RADIUS;
-		var sin = Math.sin(angle) * RING_RADIUS;
+		// The visual ring lives on the scaled gizmo, so the tangent is
+		// measured at the same radius to keep ring drags 1:1 with the arc.
+		var radius = RING_RADIUS * drawScale;
+		var cos = Math.cos(angle) * radius;
+		var sin = Math.sin(angle) * radius;
 		out.set(
 			dragStartPos.x + ringU.x * cos + ringV.x * sin,
 			dragStartPos.y + ringU.y * cos + ringV.y * sin,
@@ -836,12 +851,12 @@ class TransformGizmo {
 		return {ax: ax, ay: ay, az: az};
 	}
 
-	/** World point relative to the attached object's origin. */
+	/** World point relative to the attached object's origin (draw-scaled). */
 	function pointAt(x:Float, y:Float, z:Float):h3d.Vector {
 		return new h3d.Vector(
-			(attached == null ? 0 : attached.x) + x,
-			(attached == null ? 0 : attached.y) + y,
-			(attached == null ? 0 : attached.z) + z);
+			(attached == null ? 0 : attached.x) + x * drawScale,
+			(attached == null ? 0 : attached.y) + y * drawScale,
+			(attached == null ? 0 : attached.z) + z * drawScale);
 	}
 
 	function scaledAxisPoint(axis:h3d.Vector, t:Float):h3d.Vector {
@@ -1182,9 +1197,32 @@ class TransformGizmo {
 		var shown = attached != null;
 		solidRoot.visible = shown;
 		if (shown) {
+			updateDrawScale();
 			solidRoot.setPosition(attached.x, attached.y, attached.z);
 			redraw();
 		}
+	}
+
+	/**
+	 * Recompute the gizmo's world scale from the camera distance so the
+	 * handles keep a constant screen size. Only the solid root is scaled:
+	 * every picking/drag sample flows through pointAt(), which applies the
+	 * same factor, so hit testing and drag solving stay aligned with what
+	 * is rendered. Camera motion cannot happen mid-drag (gestures are
+	 * rejected while a gizmo drag owns the pointer), so press-time anchors
+	 * stay stable.
+	 */
+	function updateDrawScale():Void {
+		var dx = scene.camera.pos.x - attached.x;
+		var dy = scene.camera.pos.y - attached.y;
+		var dz = scene.camera.pos.z - attached.z;
+		var distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+		var next = distance / GIZMO_BASE_DISTANCE;
+		if (next < MIN_DRAW_SCALE) next = MIN_DRAW_SCALE;
+		if (next > MAX_DRAW_SCALE) next = MAX_DRAW_SCALE;
+		if (next == drawScale) return;
+		drawScale = next;
+		solidRoot.setScale(drawScale);
 	}
 
 	function redraw():Void {

@@ -39,6 +39,12 @@ class InputAdapter {
     public var onPastePressed:Null<Void->Void>;
     public var onDuplicatePressed:Null<Void->Void>;
     public var onRenamePressed:Null<Void->Void>;
+    /** G (rebindable): toggle the independent editor grid. */
+    public var onToggleGridPressed:Null<Void->Void>;
+    /** The native window lost keyboard focus; release held navigation state. */
+    public var onWindowFocusLost:Null<Void->Void>;
+    /** Returns true while the editor viewport owns keyboard navigation. */
+    public var viewportFocusQuery:Null<Void->Bool>;
 
     final scene:h2d.Scene;
     final keybindings:Keybindings;
@@ -57,6 +63,7 @@ class InputAdapter {
     var pasteKeyDown:Int = -1;
     var duplicateKeyDown:Int = -1;
     var renameKeyDown:Int = -1;
+    var toggleGridKeyDown:Int = -1;
 
     public function new(scene:h2d.Scene, keybindings:Keybindings,
             ?state:UiInputState) {
@@ -116,13 +123,18 @@ class InputAdapter {
                 }
                 // Tool shortcuts (1 = Move, E = Rotate, R = Scale by
                 // default); repeat while held is suppressed like Delete.
+                // Single-key shortcuts bound to camera navigation keys (E by
+                // default) stay silent while the viewport owns navigation.
                 var shortcut = -1;
-                if (keybindings.matches(EditorAction.ToolMove, event.keyCode, ctrlDown)) {
-                    shortcut = 0;
-                } else if (keybindings.matches(EditorAction.ToolRotate, event.keyCode, ctrlDown)) {
-                    shortcut = 1;
-                } else if (keybindings.matches(EditorAction.ToolScale, event.keyCode, ctrlDown)) {
-                    shortcut = 2;
+                if (!(viewportNavigationActive()
+                        && isCameraNavigationKey(event.keyCode))) {
+                    if (keybindings.matches(EditorAction.ToolMove, event.keyCode, ctrlDown)) {
+                        shortcut = 0;
+                    } else if (keybindings.matches(EditorAction.ToolRotate, event.keyCode, ctrlDown)) {
+                        shortcut = 1;
+                    } else if (keybindings.matches(EditorAction.ToolScale, event.keyCode, ctrlDown)) {
+                        shortcut = 2;
+                    }
                 }
                 if (shortcut >= 0) {
                     if (shortcutKeyDown < 0) {
@@ -180,6 +192,13 @@ class InputAdapter {
                         renameKeyDown = event.keyCode;
                     }
                 }
+                if (keybindings.matches(EditorAction.ToggleGrid,
+                        event.keyCode, ctrlDown)) {
+                    if (toggleGridKeyDown < 0) {
+                        if (onToggleGridPressed != null) onToggleGridPressed();
+                        toggleGridKeyDown = event.keyCode;
+                    }
+                }
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
                     onEscapePressed();
                 }
@@ -196,6 +215,7 @@ class InputAdapter {
                 if (event.keyCode == pasteKeyDown) pasteKeyDown = -1;
                 if (event.keyCode == duplicateKeyDown) duplicateKeyDown = -1;
                 if (event.keyCode == renameKeyDown) renameKeyDown = -1;
+                if (event.keyCode == toggleGridKeyDown) toggleGridKeyDown = -1;
                 if (event.keyCode == snapHoldKeyDown) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -223,10 +243,12 @@ class InputAdapter {
                 pasteKeyDown = -1;
                 duplicateKeyDown = -1;
                 renameKeyDown = -1;
+                toggleGridKeyDown = -1;
                 if (snapHoldKeyDown >= 0) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
                 }
+                if (onWindowFocusLost != null) onWindowFocusLost();
                 refresh();
             case EFocus:
                 focusGotCount++;
@@ -240,5 +262,18 @@ class InputAdapter {
 
     function refresh():Void {
         if (report != null) report.text = statusLine();
+    }
+
+    /** WASD/QE fly the editor camera while the viewport is focused; a
+        single-key shortcut bound to one of them (Rotate on E by default)
+        must not fire during flight. */
+    public static function isCameraNavigationKey(keyCode:Int):Bool {
+        return keyCode == hxd.Key.W || keyCode == hxd.Key.A
+            || keyCode == hxd.Key.S || keyCode == hxd.Key.D
+            || keyCode == hxd.Key.Q || keyCode == hxd.Key.E;
+    }
+
+    function viewportNavigationActive():Bool {
+        return viewportFocusQuery != null && viewportFocusQuery();
     }
 }
