@@ -15,6 +15,7 @@ import boltspark.ui.widgets.GameObjectPalette;
 import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.MenuDropdown;
+import boltspark.ui.widgets.MenuDropdown.MenuItem;
 import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
 import boltspark.ui.widgets.TextInputField;
@@ -58,6 +59,8 @@ class EditorShell {
     final allHierarchyEntries:Array<HierarchyEntry> = [];
     final visibleHierarchyEntries:Array<HierarchyEntry> = [];
     final hierarchyScrollBar:ScrollBar;
+    final hierarchyDropFeedback:h2d.Graphics;
+    final hierarchyExpanded:Map<Int, Bool> = [];
 
     // Details panel.
     final rightContentMask:h2d.Mask;
@@ -111,6 +114,18 @@ class EditorShell {
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
+    public var onHierarchyObjectNameChanged:Null<Int->String->Void>;
+    public var onCreateChildObject:Null<Int->Bool->Void>;
+    public var onCreateEmptyParent:Null<Array<Int>->Void>;
+    public var onDuplicateObjects:Null<Array<Int>->Void>;
+    public var onCopyObjects:Null<Array<Int>->Void>;
+    /** Parent ID, or -1 for root/default placement. */
+    public var onPasteObjects:Null<Int->Void>;
+    public var onUnparentObjects:Null<Array<Int>->Void>;
+    public var onSelectSubtree:Null<Int->Void>;
+    public var onCanHierarchyDrop:Null<Array<Int>->Int->Bool>;
+    /** IDs, parent ID, insertion index, preserve world. */
+    public var onHierarchyDrop:Null<Array<Int>->Int->Int->Bool->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onRotationChanged:Null<Int->Float->Void>;
     public var onScaleChanged:Null<Int->Float->Void>;
@@ -146,10 +161,17 @@ class EditorShell {
     var lastHeight:Int = -1;
     var selectedObjectIds:Array<Int> = [];
     var selectedObjectId:Int = -1;
-    var selectionAnchorIndex:Int = -1;
+    /** Stable object anchor; its visible row index can change as trees fold. */
+    var selectionAnchorId:Int = -1;
     var firstVisibleHierarchyRow:Int = 0;
     var inspectorScrollValue:Float = 0;
     var hierarchyFilter:String = "";
+    var hierarchyDragIds:Array<Int> = [];
+    var hierarchyDropParentId:Int = -1;
+    var hierarchyDropSiblingIndex:Int = 0;
+    var hierarchyDropMode:Int = HierarchyRow.DROP_NONE;
+    var hierarchyDropValid:Bool = false;
+    var hierarchyDropRow:Null<HierarchyRow>;
     var selectionStatusValue:String = "Select an object to inspect";
     var localTransformSpace:Bool = false;
     var transformSpaceHovered:Bool = false;
@@ -299,6 +321,37 @@ class EditorShell {
                             input.clearFocus();
                             if (onRedo != null) onRedo();
                         }
+                    }, {
+                        label: "Copy",
+                        onClick: copySelection
+                    }, {
+                        label: "Paste",
+                        onClick: function() {
+                            if (onPasteObjects != null) onPasteObjects(-2);
+                        }
+                    }, {
+                        label: "Duplicate",
+                        onClick: duplicateSelection
+                    }]);
+                };
+            } else if (menuName == "Scene") {
+                button.onClick = function() {
+                    if (menuDropdown.isOpen) {
+                        menuDropdown.close();
+                        return;
+                    }
+                    closePaletteIfOpen();
+                    menuDropdown.open(capturedButton.x, Theme.TITLE_BAR_HEIGHT, [{
+                        label: "Create Empty",
+                        onClick: function() {
+                            if (onCreateChildObject != null) onCreateChildObject(-1, true);
+                        }
+                    }, {
+                        label: "Expand All",
+                        onClick: expandAllHierarchy
+                    }, {
+                        label: "Collapse All",
+                        onClick: collapseAllHierarchy
                     }]);
                 };
             } else {
@@ -377,6 +430,7 @@ class EditorShell {
             layoutHierarchyRows();
         };
         hierarchyScrollBar.onWheel = scrollHierarchy;
+        hierarchyDropFeedback = new h2d.Graphics(leftContentMask);
 
         // Inspector panel header.
         inspectorTitleIcon = new h2d.Graphics(rightContentMask);
@@ -572,6 +626,22 @@ class EditorShell {
         input.onRedoPressed = function() {
             if (anyTextCaptureActive()) return;
             if (onRedo != null) onRedo();
+        };
+        input.onCopyPressed = function() {
+            if (anyTextCaptureActive()) return;
+            copySelection();
+        };
+        input.onPastePressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onPasteObjects != null) onPasteObjects(-2);
+        };
+        input.onDuplicatePressed = function() {
+            if (anyTextCaptureActive()) return;
+            duplicateSelection();
+        };
+        input.onRenamePressed = function() {
+            if (anyTextCaptureActive() || selectedObjectId < 0) return;
+            beginRenameFor(selectedObjectId);
         };
         // Tool shortcuts (1 Move / E Rotate / R Scale by default) share the
         // text-capture guard: typing in a field must not hijack the keypress.
@@ -980,7 +1050,20 @@ class EditorShell {
 
     public function setHierarchyEntries(entries:Array<HierarchyEntry>):Void {
         allHierarchyEntries.resize(0);
-        for (entry in entries) allHierarchyEntries.push(entry);
+        var live:Map<Int, Bool> = [];
+        for (entry in entries) {
+            allHierarchyEntries.push(entry);
+            live.set(entry.id, true);
+            if (!hierarchyExpanded.exists(entry.id)) {
+                hierarchyExpanded.set(entry.id, true);
+            }
+        }
+        var stale:Array<Int> = [];
+        for (id in hierarchyExpanded.keys()) if (!live.exists(id)) stale.push(id);
+        for (id in stale) hierarchyExpanded.remove(id);
+        if (selectionAnchorId >= 0 && !live.exists(selectionAnchorId)) {
+            selectionAnchorId = -1;
+        }
         rebuildFilteredHierarchy();
         rendererStatus.text = "DX12  ·  Native  ·  " + entries.length
             + (entries.length == 1 ? " object" : " objects");
@@ -989,35 +1072,92 @@ class EditorShell {
     function applyHierarchyFilter(value:String):Void {
         hierarchyFilter = StringTools.trim(value).toLowerCase();
         firstVisibleHierarchyRow = 0;
-        selectionAnchorIndex = -1;
+        selectionAnchorId = -1;
         rebuildFilteredHierarchy();
     }
 
     function rebuildFilteredHierarchy():Void {
         visibleHierarchyEntries.resize(0);
+        var byId:Map<Int, HierarchyEntry> = [];
+        for (entry in allHierarchyEntries) byId.set(entry.id, entry);
+        var included:Map<Int, Bool> = [];
+        if (hierarchyFilter.length > 0) {
+            // Search results keep their complete ancestor path visible, while
+            // expansion state remains untouched for when filtering ends.
+            for (entry in allHierarchyEntries) {
+                if (entry.name.toLowerCase().indexOf(hierarchyFilter) < 0) continue;
+                var current:Null<HierarchyEntry> = entry;
+                while (current != null && !included.exists(current.id)) {
+                    included.set(current.id, true);
+                    current = current.parentId < 0 ? null : byId.get(current.parentId);
+                }
+            }
+        }
         for (entry in allHierarchyEntries) {
-            if (hierarchyFilter.length == 0
-                || entry.name.toLowerCase().indexOf(hierarchyFilter) >= 0) {
+            var visible = hierarchyFilter.length > 0
+                ? included.exists(entry.id)
+                : ancestorsExpanded(entry, byId);
+            if (visible) {
                 visibleHierarchyEntries.push(entry);
             }
         }
-        while (hierarchyRows.length > visibleHierarchyEntries.length) hierarchyRows.pop().remove();
+        while (hierarchyRows.length > visibleHierarchyEntries.length) {
+            var removed = hierarchyRows.pop();
+            removed.cancelRename();
+            removed.remove();
+        }
         for (index in 0...visibleHierarchyEntries.length) {
             var entry = visibleHierarchyEntries[index];
             var row:HierarchyRow;
             if (index < hierarchyRows.length) {
                 row = hierarchyRows[index];
-                row.objectId = entry.id;
-                row.setName(entry.name);
             } else {
                 row = new HierarchyRow(ctx, entry.id, entry.name, leftContentMask);
                 row.onSelect = selectHierarchyRow;
                 row.onWheel = function(delta) scrollHierarchy(delta);
-                row.onContextMenu = openHierarchyPalette;
+                row.onToggle = toggleHierarchyEntry;
+                row.onContextMenu = openHierarchyContextMenu;
+                row.onRename = renameHierarchyObject;
+                row.onDragStart = beginHierarchyDrag;
+                row.onDragMove = updateHierarchyDrag;
+                row.onDragEnd = finishHierarchyDrag;
                 hierarchyRows.push(row);
             }
+            row.setEntry(entry, hierarchyExpanded.get(entry.id) != false);
         }
+        clearHierarchyDropFeedback();
         resize();
+    }
+
+    function ancestorsExpanded(entry:HierarchyEntry,
+            byId:Map<Int, HierarchyEntry>):Bool {
+        var parentId = entry.parentId;
+        while (parentId >= 0) {
+            if (hierarchyExpanded.get(parentId) == false) return false;
+            var parent = byId.get(parentId);
+            if (parent == null) return false;
+            parentId = parent.parentId;
+        }
+        return true;
+    }
+
+    function revealHierarchyObject(id:Int):Bool {
+        var byId:Map<Int, HierarchyEntry> = [];
+        for (entry in allHierarchyEntries) byId.set(entry.id, entry);
+        var entry = byId.get(id);
+        if (entry == null) return false;
+        var changed = false;
+        var parentId = entry.parentId;
+        while (parentId >= 0) {
+            if (hierarchyExpanded.get(parentId) == false) {
+                hierarchyExpanded.set(parentId, true);
+                changed = true;
+            }
+            var parent = byId.get(parentId);
+            if (parent == null) break;
+            parentId = parent.parentId;
+        }
+        return changed;
     }
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
@@ -1027,13 +1167,28 @@ class EditorShell {
         selectedObjectIds = ids.copy();
         selectedObjectId = primaryId;
         if (selectedObjectIds.length == 1) {
+            var rowFound = false;
             for (index in 0...hierarchyRows.length) {
                 if (hierarchyRows[index].objectId != primaryId) continue;
+                rowFound = true;
                 var visibleRows = hierarchyVisibleRowCount();
                 if (index < firstVisibleHierarchyRow) firstVisibleHierarchyRow = index;
                 else if (index >= firstVisibleHierarchyRow + visibleRows)
                     firstVisibleHierarchyRow = index - visibleRows + 1;
                 break;
+            }
+            if (!rowFound && hierarchyFilter.length == 0
+                    && revealHierarchyObject(primaryId)) {
+                rebuildFilteredHierarchy();
+                for (index in 0...hierarchyRows.length) {
+                    if (hierarchyRows[index].objectId != primaryId) continue;
+                    var visibleRows = hierarchyVisibleRowCount();
+                    if (index < firstVisibleHierarchyRow) firstVisibleHierarchyRow = index;
+                    else if (index >= firstVisibleHierarchyRow + visibleRows) {
+                        firstVisibleHierarchyRow = index - visibleRows + 1;
+                    }
+                    break;
+                }
             }
             objectNameField.setValue(name);
             transformFields[0].setValue(posX);
@@ -1096,23 +1251,181 @@ class EditorShell {
         }
         if (clickedIndex < 0) return;
 
+        var anchorIndex = -1;
+        if (shift && selectionAnchorId >= 0) {
+            for (index in 0...hierarchyRows.length) {
+                if (hierarchyRows[index].objectId == selectionAnchorId) {
+                    anchorIndex = index;
+                    break;
+                }
+            }
+        }
         var selection = control ? selectedObjectIds.copy() : [];
-        if (shift && selectionAnchorIndex >= 0) {
+        if (shift && anchorIndex >= 0) {
             selection = [];
-            var first = Std.int(Math.min(selectionAnchorIndex, clickedIndex));
-            var last = Std.int(Math.max(selectionAnchorIndex, clickedIndex));
+            var first = Std.int(Math.min(anchorIndex, clickedIndex));
+            var last = Std.int(Math.max(anchorIndex, clickedIndex));
             for (index in first...(last + 1)) selection.push(hierarchyRows[index].objectId);
         } else if (control) {
             if (selection.indexOf(id) >= 0) selection.remove(id) else selection.push(id);
-            selectionAnchorIndex = clickedIndex;
+            selectionAnchorId = id;
         } else {
             selection = [id];
-            selectionAnchorIndex = clickedIndex;
+            selectionAnchorId = id;
         }
 
         var primary = selection.indexOf(id) >= 0 ? id
             : (selection.length == 0 ? -1 : selection[selection.length - 1]);
         if (onObjectsSelected != null) onObjectsSelected(selection, primary);
+    }
+
+    function toggleHierarchyEntry(id:Int):Void {
+        hierarchyExpanded.set(id, hierarchyExpanded.get(id) == false);
+        rebuildFilteredHierarchy();
+    }
+
+    function expandAllHierarchy():Void {
+        for (entry in allHierarchyEntries) hierarchyExpanded.set(entry.id, true);
+        rebuildFilteredHierarchy();
+    }
+
+    function collapseAllHierarchy():Void {
+        for (entry in allHierarchyEntries) {
+            if (entry.hasChildren) hierarchyExpanded.set(entry.id, false);
+        }
+        rebuildFilteredHierarchy();
+    }
+
+    function renameHierarchyObject(id:Int, value:String):Void {
+        if (onHierarchyObjectNameChanged != null) {
+            onHierarchyObjectNameChanged(id, value);
+        }
+    }
+
+    function beginRenameFor(id:Int):Void {
+        for (row in hierarchyRows) {
+            if (row.objectId == id) {
+                row.beginRename();
+                return;
+            }
+        }
+    }
+
+    function beginHierarchyDrag(sourceId:Int):Void {
+        closePaletteIfOpen();
+        hierarchyDragIds = selectedObjectIds.indexOf(sourceId) >= 0
+            ? selectedObjectIds.copy() : [sourceId];
+        clearHierarchyDropFeedback();
+    }
+
+    function updateHierarchyDrag(sourceId:Int, mouseX:Float, mouseY:Float):Void {
+        clearHierarchyDropFeedback();
+        if (hierarchyDragIds.length == 0) hierarchyDragIds = [sourceId];
+        if (mouseX < hierarchyHit.x || mouseX > hierarchyHit.x + hierarchyHit.width
+                || mouseY < hierarchyHit.y
+                || mouseY > hierarchyHit.y + hierarchyHit.height) {
+            return;
+        }
+
+        // Keep long-tree drag/drop usable without releasing the capture. Each
+        // pointer move near an edge advances one row and recomputes hit rows.
+        var edge = 12.0;
+        if (mouseY < hierarchyHit.y + edge && firstVisibleHierarchyRow > 0) {
+            firstVisibleHierarchyRow--;
+            layoutHierarchyRows();
+        } else if (mouseY > hierarchyHit.y + hierarchyHit.height - edge
+                && firstVisibleHierarchyRow < maxFirstVisibleHierarchyRow()) {
+            firstVisibleHierarchyRow++;
+            layoutHierarchyRows();
+        }
+
+        var targetRow:Null<HierarchyRow> = null;
+        for (row in hierarchyRows) {
+            if (!row.visible) continue;
+            if (mouseY >= row.y && mouseY < row.y + HIERARCHY_ROW_HEIGHT) {
+                targetRow = row;
+                break;
+            }
+        }
+        if (targetRow == null) {
+            hierarchyDropParentId = -1;
+            hierarchyDropSiblingIndex = rootEntryCount();
+            hierarchyDropMode = HierarchyRow.DROP_AFTER;
+            hierarchyDropValid = onCanHierarchyDrop != null
+                && onCanHierarchyDrop(hierarchyDragIds, -1);
+            var lineY = hierarchyHit.y + Math.min(hierarchyHit.height - 2,
+                Math.max(2, visibleRowsHeight()));
+            hierarchyDropFeedback.lineStyle(2,
+                hierarchyDropValid ? Theme.ACCENT : Theme.DANGER, 1);
+            hierarchyDropFeedback.moveTo(4, lineY);
+            hierarchyDropFeedback.lineTo(Math.max(4, hierarchyHit.width - 4), lineY);
+            hierarchyDropFeedback.lineStyle();
+            return;
+        }
+
+        var entry = findVisibleHierarchyEntry(targetRow.objectId);
+        if (entry == null) return;
+        var relativeY = mouseY - targetRow.y;
+        if (relativeY < HIERARCHY_ROW_HEIGHT * 0.28) {
+            hierarchyDropMode = HierarchyRow.DROP_BEFORE;
+            hierarchyDropParentId = entry.parentId;
+            hierarchyDropSiblingIndex = entry.siblingIndex;
+        } else if (relativeY > HIERARCHY_ROW_HEIGHT * 0.72) {
+            hierarchyDropMode = HierarchyRow.DROP_AFTER;
+            hierarchyDropParentId = entry.parentId;
+            hierarchyDropSiblingIndex = entry.siblingIndex + 1;
+        } else {
+            hierarchyDropMode = HierarchyRow.DROP_CHILD;
+            hierarchyDropParentId = entry.id;
+            hierarchyDropSiblingIndex = entry.childCount;
+        }
+        hierarchyDropValid = onCanHierarchyDrop != null
+            && onCanHierarchyDrop(hierarchyDragIds, hierarchyDropParentId);
+        hierarchyDropRow = targetRow;
+        targetRow.setDropFeedback(hierarchyDropMode, hierarchyDropValid);
+    }
+
+    function finishHierarchyDrag(sourceId:Int, mouseX:Float, mouseY:Float):Void {
+        updateHierarchyDrag(sourceId, mouseX, mouseY);
+        if (hierarchyDropValid && onHierarchyDrop != null) {
+            // Default behavior matches Unity/Unreal: preserve world. Holding
+            // Alt explicitly requests local-transform preservation.
+            var preserveWorld = !hxd.Key.isDown(hxd.Key.ALT);
+            if (hierarchyDropMode == HierarchyRow.DROP_CHILD
+                    && hierarchyDropParentId >= 0) {
+                hierarchyExpanded.set(hierarchyDropParentId, true);
+            }
+            onHierarchyDrop(hierarchyDragIds.copy(), hierarchyDropParentId,
+                hierarchyDropSiblingIndex, preserveWorld);
+        }
+        hierarchyDragIds.resize(0);
+        clearHierarchyDropFeedback();
+    }
+
+    function clearHierarchyDropFeedback():Void {
+        if (hierarchyDropRow != null) {
+            hierarchyDropRow.setDropFeedback(HierarchyRow.DROP_NONE, false);
+        }
+        hierarchyDropRow = null;
+        hierarchyDropMode = HierarchyRow.DROP_NONE;
+        hierarchyDropValid = false;
+        hierarchyDropFeedback.clear();
+    }
+
+    function findVisibleHierarchyEntry(id:Int):Null<HierarchyEntry> {
+        for (entry in visibleHierarchyEntries) if (entry.id == id) return entry;
+        return null;
+    }
+
+    function rootEntryCount():Int {
+        var count = 0;
+        for (entry in allHierarchyEntries) if (entry.parentId < 0) count++;
+        return count;
+    }
+
+    function visibleRowsHeight():Float {
+        return Math.min(hierarchyRows.length, hierarchyVisibleRowCount())
+            * HIERARCHY_ROW_HEIGHT;
     }
 
     function layoutHierarchyRows():Void {
@@ -1123,6 +1436,7 @@ class EditorShell {
             var row = hierarchyRows[index];
             var visibleIndex = index - firstVisibleHierarchyRow;
             var isVisible = visibleIndex >= 0 && visibleIndex < visibleRows;
+            if (!isVisible && row.isRenaming()) row.cancelRename();
             row.visible = isVisible;
             if (isVisible) {
                 row.setBounds(3, hierarchyHit.y + visibleIndex * HIERARCHY_ROW_HEIGHT,
@@ -1151,19 +1465,108 @@ class EditorShell {
         return true;
     }
 
-    function openHierarchyPalette():Void {
-        if (viewportRect != null) {
-            palette.openAt(ctx.window.mouseX, ctx.window.mouseY, viewportRect);
-        }
+    function openHierarchyContextMenu(id:Int):Void {
+        var entry = findVisibleHierarchyEntry(id);
+        if (entry == null) return;
+        var actionIds = selectedObjectIds.indexOf(id) >= 0
+            ? selectedObjectIds.copy() : [id];
+        var items:Array<MenuItem> = [{
+            label: "Create Child",
+            submenu: [{
+                label: "Cube",
+                onClick: function() {
+                    hierarchyExpanded.set(id, true);
+                    if (onCreateChildObject != null) onCreateChildObject(id, false);
+                }
+            }, {
+                label: "Empty Object",
+                onClick: function() {
+                    hierarchyExpanded.set(id, true);
+                    if (onCreateChildObject != null) onCreateChildObject(id, true);
+                }
+            }]
+        }, {
+            label: "Create Empty Parent",
+            onClick: function() {
+                if (onCreateEmptyParent != null) onCreateEmptyParent(actionIds);
+            }
+        }, {
+            label: "Rename",
+            onClick: function() beginRenameFor(id)
+        }, {
+            label: "Duplicate",
+            onClick: function() {
+                if (onDuplicateObjects != null) onDuplicateObjects(actionIds);
+            }
+        }, {
+            label: "Copy",
+            onClick: function() {
+                if (onCopyObjects != null) onCopyObjects(actionIds);
+            }
+        }, {
+            label: "Paste as Child",
+            onClick: function() {
+                hierarchyExpanded.set(id, true);
+                if (onPasteObjects != null) onPasteObjects(id);
+            }
+        }, {
+            label: "Unparent",
+            onClick: function() {
+                if (onUnparentObjects != null) onUnparentObjects(actionIds);
+            }
+        }, {
+            label: "Select Subtree",
+            onClick: function() {
+                if (onSelectSubtree != null) onSelectSubtree(id);
+            }
+        }, {
+            label: hierarchyExpanded.get(id) == false ? "Expand" : "Collapse",
+            onClick: function() toggleHierarchyEntry(id)
+        }, {
+            label: "Delete",
+            onClick: function() {
+                if (onDeleteObjects != null) onDeleteObjects(actionIds);
+            }
+        }];
+        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
+    }
+
+    function openHierarchyRootContextMenu():Void {
+        var items:Array<MenuItem> = [{
+            label: "Create",
+            submenu: [{
+                label: "Cube",
+                onClick: function() {
+                    if (onCreateChildObject != null) onCreateChildObject(-1, false);
+                }
+            }, {
+                label: "Empty Object",
+                onClick: function() {
+                    if (onCreateChildObject != null) onCreateChildObject(-1, true);
+                }
+            }]
+        }, {
+            label: "Paste at Root",
+            onClick: function() {
+                if (onPasteObjects != null) onPasteObjects(-1);
+            }
+        }, {
+            label: "Expand All",
+            onClick: expandAllHierarchy
+        }, {
+            label: "Collapse All",
+            onClick: collapseAllHierarchy
+        }];
+        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
     function handleHierarchyBackgroundClick(event:hxd.Event):Void {
         if (event.button == 1) {
-            openHierarchyPalette();
+            openHierarchyRootContextMenu();
         } else if (event.button == 0) {
             closePaletteIfOpen();
             input.clearFocus();
-            selectionAnchorIndex = -1;
+            selectionAnchorId = -1;
             if (onObjectsSelected != null) onObjectsSelected([], -1);
         } else return;
         event.propagate = false;
@@ -1172,6 +1575,7 @@ class EditorShell {
     /** True while any text-entry control owns the keyboard. */
     function anyTextCaptureActive():Bool {
         if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
+        for (row in hierarchyRows) if (row.isRenaming()) return true;
         for (field in transformFields) if (field.isEditing()) return true;
         for (field in rotationFields) if (field.isEditing()) return true;
         for (field in scaleFields) if (field.isEditing()) return true;
@@ -1198,6 +1602,18 @@ class EditorShell {
     function deleteSelection():Void {
         if (selectedObjectIds.length > 0 && onDeleteObjects != null) {
             onDeleteObjects(selectedObjectIds.copy());
+        }
+    }
+
+    function duplicateSelection():Void {
+        if (selectedObjectIds.length > 0 && onDuplicateObjects != null) {
+            onDuplicateObjects(selectedObjectIds.copy());
+        }
+    }
+
+    function copySelection():Void {
+        if (selectedObjectIds.length > 0 && onCopyObjects != null) {
+            onCopyObjects(selectedObjectIds.copy());
         }
     }
 

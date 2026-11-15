@@ -21,8 +21,9 @@ import sys.io.File;
  */
 class Keybindings {
     static inline var FILE_NAME:String = "keybindings.json";
-    static inline var SCHEMA_VERSION:Int = 2;
+    static inline var SCHEMA_VERSION:Int = 3;
     static inline var VERSION_ONE_ACTION_COUNT:Int = 6;
+    static inline var VERSION_TWO_ACTION_COUNT:Int = 8;
 
     final directory:Null<String>;
     final filePath:Null<String>;
@@ -95,6 +96,10 @@ class Keybindings {
             case EditorAction.HoldSnapOff: "Hold to Disable Move Snap";
             case EditorAction.Undo: "Undo";
             case EditorAction.Redo: "Redo";
+            case EditorAction.CopySelection: "Copy Selection";
+            case EditorAction.Paste: "Paste";
+            case EditorAction.DuplicateSelection: "Duplicate Selection";
+            case EditorAction.RenameSelection: "Rename Selection";
             default: "Unknown Action";
         };
     }
@@ -136,6 +141,10 @@ class Keybindings {
         bindings[EditorAction.HoldSnapOff] = {keyCode: hxd.Key.V, ctrl: false};
         bindings[EditorAction.Undo] = {keyCode: hxd.Key.Z, ctrl: true};
         bindings[EditorAction.Redo] = {keyCode: hxd.Key.Y, ctrl: true};
+        bindings[EditorAction.CopySelection] = {keyCode: hxd.Key.C, ctrl: true};
+        bindings[EditorAction.Paste] = {keyCode: hxd.Key.V, ctrl: true};
+        bindings[EditorAction.DuplicateSelection] = {keyCode: hxd.Key.D, ctrl: true};
+        bindings[EditorAction.RenameSelection] = {keyCode: hxd.Key.F2, ctrl: false};
         lastError = "";
         if (!quiet) {
             var saveError = save();
@@ -239,7 +248,8 @@ class Keybindings {
             return false;
         }
         var storedVersion = Reflect.field(data, "version");
-        if ((storedVersion != 1 && storedVersion != SCHEMA_VERSION)
+        if ((storedVersion != 1 && storedVersion != 2
+                && storedVersion != SCHEMA_VERSION)
                 || !Std.isOfType(Reflect.field(data, "bindings"), Array)) {
             lastError = 'Keybindings at ${filePath} have an unsupported format; using defaults.';
             return false;
@@ -254,7 +264,9 @@ class Keybindings {
         var chords:Map<String, Bool> = [];
         var expectedActions = storedVersion == 1
             ? VERSION_ONE_ACTION_COUNT
-            : (EditorAction.ACTION_COUNT : Int);
+            : (storedVersion == 2
+                ? VERSION_TWO_ACTION_COUNT
+                : (EditorAction.ACTION_COUNT : Int));
         for (entry in stored) {
             if (!Reflect.isObject(entry)) return invalidStoredBindings();
             var action = Reflect.field(entry, "action");
@@ -273,12 +285,18 @@ class Keybindings {
         for (action in 0...expectedActions) {
             if (loaded[action] == null) return invalidStoredBindings();
         }
-        // Version 1 predates Undo/Redo. Preserve every user binding and append
-        // their defaults when those chords are still available.
+        // Older versions predate Undo/Redo and/or hierarchy clipboard actions.
+        // Preserve every user binding and append collision-free defaults. If
+        // an older user already claimed a new action's default chord, give the
+        // new action a deterministic spare binding instead of rejecting the
+        // complete historical map.
         for (action in expectedActions...(EditorAction.ACTION_COUNT : Int)) {
             var fallback = bindings[action];
             var chord = (fallback.ctrl ? "1:" : "0:") + fallback.keyCode;
-            if (chords.exists(chord)) return invalidStoredBindings();
+            if (chords.exists(chord)) {
+                fallback = spareMigrationBinding(chords);
+                chord = (fallback.ctrl ? "1:" : "0:") + fallback.keyCode;
+            }
             chords.set(chord, true);
             loaded[action] = {keyCode: fallback.keyCode, ctrl: fallback.ctrl};
         }
@@ -290,7 +308,7 @@ class Keybindings {
             persistedContents = contents;
         } else {
             // Rewrite the complete migrated map once so both editor windows
-            // subsequently observe the same version-2 payload.
+            // subsequently observe the same version-3 payload.
             persistedContents = null;
             var migrationError = save();
             if (migrationError != null) lastError = migrationError;
@@ -302,6 +320,17 @@ class Keybindings {
     function invalidStoredBindings():Bool {
         lastError = 'Keybindings at ${filePath} are incomplete or invalid; using defaults.';
         return false;
+    }
+
+    function spareMigrationBinding(chords:Map<String, Bool>):
+            {keyCode:Int, ctrl:Bool} {
+        // F13-F24 are valid Windows virtual keys and remain reachable from the
+        // keybindings UI, while being unlikely to displace a common shortcut.
+        for (keyCode in hxd.Key.F13...(hxd.Key.F24 + 1)) {
+            var chord = "1:" + keyCode;
+            if (!chords.exists(chord)) return {keyCode: keyCode, ctrl: true};
+        }
+        throw "No collision-free keybinding remained during migration";
     }
 
     function save():Null<String> {

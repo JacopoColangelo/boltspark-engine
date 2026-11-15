@@ -10,5 +10,9 @@ enum abstract EditorAction(Int) from Int to Int {
     var HoldSnapOff = 5;
     var Undo = 6;
     var Redo = 7;
-    var ACTION_COUNT = 8;
+    var CopySelection = 8;
+    var Paste = 9;
+    var DuplicateSelection = 10;
+    var RenameSelection = 11;
+    var ACTION_COUNT = 12;
 }

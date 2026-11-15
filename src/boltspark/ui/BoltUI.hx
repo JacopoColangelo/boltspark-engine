@@ -34,6 +34,16 @@ class BoltUI {
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
+    public var onHierarchyObjectNameChanged:Null<Int->String->Void>;
+    public var onCreateChildObject:Null<Int->Bool->Void>;
+    public var onCreateEmptyParent:Null<Array<Int>->Void>;
+    public var onDuplicateObjects:Null<Array<Int>->Void>;
+    public var onCopyObjects:Null<Array<Int>->Void>;
+    public var onPasteObjects:Null<Int->Void>;
+    public var onUnparentObjects:Null<Array<Int>->Void>;
+    public var onSelectSubtree:Null<Int->Void>;
+    public var onCanHierarchyDrop:Null<Array<Int>->Int->Bool>;
+    public var onHierarchyDrop:Null<Array<Int>->Int->Int->Bool->Void>;
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onRotationChanged:Null<Int->Float->Void>;
     public var onScaleChanged:Null<Int->Float->Void>;
@@ -74,6 +84,38 @@ class BoltUI {
             if (onObjectsSelected != null) onObjectsSelected(ids, primary);
         };
         shell.onObjectNameChanged = function(name) if (onObjectNameChanged != null) onObjectNameChanged(name);
+        shell.onHierarchyObjectNameChanged = function(id, name) {
+            if (onHierarchyObjectNameChanged != null) onHierarchyObjectNameChanged(id, name);
+        };
+        shell.onCreateChildObject = function(parentId, empty) {
+            if (onCreateChildObject != null) onCreateChildObject(parentId, empty);
+        };
+        shell.onCreateEmptyParent = function(ids) {
+            if (onCreateEmptyParent != null) onCreateEmptyParent(ids);
+        };
+        shell.onDuplicateObjects = function(ids) {
+            if (onDuplicateObjects != null) onDuplicateObjects(ids);
+        };
+        shell.onCopyObjects = function(ids) {
+            if (onCopyObjects != null) onCopyObjects(ids);
+        };
+        shell.onPasteObjects = function(parentId) {
+            if (onPasteObjects != null) onPasteObjects(parentId);
+        };
+        shell.onUnparentObjects = function(ids) {
+            if (onUnparentObjects != null) onUnparentObjects(ids);
+        };
+        shell.onSelectSubtree = function(id) {
+            if (onSelectSubtree != null) onSelectSubtree(id);
+        };
+        shell.onCanHierarchyDrop = function(ids, parentId) {
+            return onCanHierarchyDrop != null && onCanHierarchyDrop(ids, parentId);
+        };
+        shell.onHierarchyDrop = function(ids, parentId, index, preserveWorld) {
+            if (onHierarchyDrop != null) {
+                onHierarchyDrop(ids, parentId, index, preserveWorld);
+            }
+        };
         shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
         shell.onRotationChanged = function(axis, value) if (onRotationChanged != null) onRotationChanged(axis, value);
         shell.onScaleChanged = function(axis, value) if (onScaleChanged != null) onScaleChanged(axis, value);

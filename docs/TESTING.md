@@ -17,8 +17,8 @@ This command does not need Neko, HashLink runtime DLLs, or a GPU. It:
 2. compiles the complete application to HashLink bytecode using the tracked
    source classpaths directly;
 3. runs the portable arcball, Euler, BoltUI-core, command-history,
-   editor-session, keybinding-migration, and project/scene-serialization tests
-   through the Haxe interpreter.
+   editor-session, scene-hierarchy, keybinding-migration, and
+   project/scene-serialization tests through the Haxe interpreter.
 
 The pinned compiler executable and its five adjacent Windows runtime DLLs are
 tracked as one hash-verified set; native HashLink/DX12 runtime modules remain
@@ -34,9 +34,9 @@ on pull requests.
 ```
 
 The default native path first runs `tools/build.ps1 -Check`, then compiles and
-runs all portable tests as HashLink bytecode plus the DX12 `hl.CArray` and
-FreeType native-module regressions. It expects a previous build to have created
-`bin/freetype.hdll`.
+runs all portable tests as HashLink bytecode plus the Heaps affine scene-object
+bridge, DX12 `hl.CArray`, and FreeType native-module regressions. It expects a
+previous build to have created `bin/freetype.hdll`.
 
 To rebuild everything first:
 

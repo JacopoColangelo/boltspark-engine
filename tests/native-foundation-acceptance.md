@@ -180,6 +180,17 @@ hosted Windows CI job.
   malformed references, duplicate IDs, cycles, and singular transforms are
   rejected; atomic saves retain a previous `.bak`
   (`tests/repro/ProjectSerializationRepro.hx`, `tests/fixtures/project/`).
+- [x] The renderer-independent ordered scene graph rejects hierarchy cycles,
+  preserves exact world matrices during affine reparenting, canonicalizes
+  selected forests, and restores parent/sibling/transform/identity/selection
+  state across complex undo/redo. Exhaustive five-root insertion permutations,
+  sparse empty-parent grouping, recursive duplicate/delete, out-of-order parent
+  records, and a 3,000-level chain pass
+  (`tests/repro/SceneHierarchyRepro.hx`).
+- [x] Nested Heaps nodes reproduce the pure scene graph's exact world matrix,
+  including signed non-uniform scale and shear, and rebuild affine correction
+  state after editable TRS channels change
+  (`tests/repro/SceneObjectAffineRepro.hx`).
 
 ## Platform and toolchain
 

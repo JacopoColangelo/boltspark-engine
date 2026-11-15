@@ -5,6 +5,9 @@ class CommandHistory {
     final undoStack:Array<EditorCommand> = [];
     final redoStack:Array<EditorCommand> = [];
     final capacity:Int;
+    var transactionDepth:Int = 0;
+    var transactionLabel:String;
+    final transactionCommands:Array<EditorCommand> = [];
 
     public var canUndo(get, never):Bool;
     public var canRedo(get, never):Bool;
@@ -19,12 +22,62 @@ class CommandHistory {
     public function execute(command:EditorCommand):Void {
         if (command == null) throw "Cannot execute a null editor command";
         command.execute();
+        if (transactionDepth > 0) {
+            transactionCommands.push(command);
+            return;
+        }
+        pushExecuted(command);
+    }
+
+    /** Begin a possibly nested transaction that will become one undo entry. */
+    public function beginTransaction(label:String):Void {
+        if (label == null || StringTools.trim(label).length == 0) {
+            throw "Command transaction label cannot be empty";
+        }
+        if (transactionDepth == 0) {
+            transactionLabel = StringTools.trim(label);
+            transactionCommands.resize(0);
+        }
+        transactionDepth++;
+    }
+
+    /** Commit the outermost active transaction. Empty transactions are ignored. */
+    public function commitTransaction():Bool {
+        if (transactionDepth <= 0) throw "No command transaction is active";
+        transactionDepth--;
+        if (transactionDepth > 0) return false;
+        if (transactionCommands.length == 0) {
+            transactionLabel = null;
+            return false;
+        }
+        var command:EditorCommand = transactionCommands.length == 1
+            && transactionCommands[0].label == transactionLabel
+            ? transactionCommands[0]
+            : new CompositeCommand(transactionLabel, transactionCommands);
+        transactionCommands.resize(0);
+        transactionLabel = null;
+        pushExecuted(command);
+        return true;
+    }
+
+    /** Roll back every command already executed in the active transaction. */
+    public function cancelTransaction():Void {
+        if (transactionDepth <= 0) return;
+        var index = transactionCommands.length - 1;
+        while (index >= 0) transactionCommands[index--].undo();
+        transactionCommands.resize(0);
+        transactionDepth = 0;
+        transactionLabel = null;
+    }
+
+    function pushExecuted(command:EditorCommand):Void {
         undoStack.push(command);
         if (undoStack.length > capacity) undoStack.shift();
         redoStack.resize(0);
     }
 
     public function undo():Bool {
+        if (transactionDepth > 0) throw "Cannot undo during a command transaction";
         if (undoStack.length == 0) return false;
         var command = undoStack.pop();
         command.undo();
@@ -33,6 +86,7 @@ class CommandHistory {
     }
 
     public function redo():Bool {
+        if (transactionDepth > 0) throw "Cannot redo during a command transaction";
         if (redoStack.length == 0) return false;
         var command = redoStack.pop();
         command.execute();
@@ -41,6 +95,7 @@ class CommandHistory {
     }
 
     public function clear():Void {
+        cancelTransaction();
         undoStack.resize(0);
         redoStack.resize(0);
     }

@@ -1,6 +1,7 @@
 import boltspark.editor.GridSnapping;
 import boltspark.editor.EditorViewport;
 import boltspark.editor.EditorObject;
+import boltspark.editor.EditorObjectKind;
 import boltspark.editor.EditorSession;
 import boltspark.editor.EditorTransform;
 import boltspark.editor.Keybindings;
@@ -37,8 +38,11 @@ class Main extends hxd.App {
     var selectionOutline:h3d.scene.Graphics;
     /** Heaps render views synchronized from the renderer-independent session. */
     final sceneObjects:Array<SceneObject> = [];
+    final sceneObjectsById:Map<Int, SceneObject> = [];
     var editorSession:EditorSession;
     var gizmo:TransformGizmo;
+    /** Root-space proxy lets the gizmo edit nested objects in world space. */
+    var gizmoProxy:h3d.scene.Object;
     /** Unreal-style snap manager driving the toolbar, gizmo drags, and inspector commits. */
     var snap:GridSnapping;
     /** Rebindable editor keybindings registry (also persisted to disk). */
@@ -61,6 +65,8 @@ class Main extends hxd.App {
     var dragStartPos:h3d.Vector;
     var dragStartQuat:h3d.Quat;
     var dragStartTransform:EditorTransform;
+    var dragStartWorldTransform:EditorTransform;
+    var dragPreviewTransform:EditorTransform;
     var inspectorEditObjectId:Int = -1;
     var inspectorEditRow:Int = -1;
     var inspectorEditAxis:Int = -1;
@@ -118,6 +124,8 @@ class Main extends hxd.App {
         cubePrimitive.addUVs();
         cubePrimitive.addNormals();
         setupViewportScene();
+        gizmoProxy = new h3d.scene.Object(s3d);
+        gizmoProxy.name = "TransformGizmoProxy";
         gizmo = new TransformGizmo(s3d);
         editorSession = new EditorSession();
         var initialEditorObject = editorSession.addInitialObject("sampleCube");
@@ -167,6 +175,31 @@ class Main extends hxd.App {
         boltUI.onSnapToGrid = snapSelectionToGrid;
         boltUI.onUndo = undoEditorCommand;
         boltUI.onRedo = redoEditorCommand;
+        boltUI.onHierarchyObjectNameChanged = function(id, name) {
+            var trimmed = StringTools.trim(name);
+            if (trimmed.length == 0) {
+                boltUI.log("hierarchy: object name cannot be empty");
+                return;
+            }
+            editorSession.renameObject(id, trimmed);
+        };
+        boltUI.onCreateChildObject = createHierarchyObject;
+        boltUI.onCreateEmptyParent = function(ids) {
+            editorSession.createEmptyParent(ids, "GameObject");
+        };
+        boltUI.onDuplicateObjects = function(ids) editorSession.duplicateObjects(ids);
+        boltUI.onCopyObjects = function(ids) editorSession.copyObjects(ids);
+        boltUI.onPasteObjects = function(parentId) editorSession.pasteObjects(parentId);
+        boltUI.onUnparentObjects = function(ids) {
+            editorSession.unparentObjects(ids, true);
+        };
+        boltUI.onSelectSubtree = editorSession.selectSubtree;
+        boltUI.onCanHierarchyDrop = function(ids, parentId) {
+            return editorSession.canReparentObjects(ids, parentId);
+        };
+        boltUI.onHierarchyDrop = function(ids, parentId, siblingIndex, preserveWorld) {
+            editorSession.reparentObjects(ids, parentId, siblingIndex, preserveWorld);
+        };
         boltUI.onOpenApplicationWindow = function(kind) {
             var message = applicationWindows.open(kind);
             if (message.indexOf("could not") >= 0) {
@@ -329,19 +362,20 @@ class Main extends hxd.App {
         var selected = getSelectedObject();
         if (selected == null) return;
         var commandBefore = atomicTransformStart(selected);
+        var previous = selected.captureTransform();
         // Inspector commits are deliberate typed values, so they are never
         // snapped (matching Unreal's details panel); only gizmo drags snap,
         // incrementally, and Ctrl+End performs an explicit absolute snap.
-        var targetX = selected.mesh.x;
-        var targetY = selected.mesh.y;
-        var targetZ = selected.mesh.z;
+        var desired = previous.clone();
         switch (axis) {
-            case 0: targetX = value;
-            case 1: targetY = value;
-            default: targetZ = value;
+            case 0: desired.positionX = value;
+            case 1: desired.positionY = value;
+            default: desired.positionZ = value;
         }
-        var placed = WorldBounds.placeInside(selected.mesh, targetX, targetY, targetZ);
+        selected.applyTransform(desired);
+        var placed = containSceneObject(selected);
         if (!placed) {
+            selected.applyTransform(previous);
             boltUI.log('world bounds: ${selected.name} is too large to reposition');
         }
         var actual = axis == 0 ? selected.mesh.x
@@ -357,12 +391,7 @@ class Main extends hxd.App {
         var selected = getSelectedObject();
         if (selected == null) return;
         var commandBefore = atomicTransformStart(selected);
-        var previousPosition = new h3d.Vector(
-            selected.mesh.x, selected.mesh.y, selected.mesh.z);
-        var previousRotation = new h3d.Quat();
-        previousRotation.load(selected.mesh.getRotationQuat());
-        var previousHint = selected.rotationHint.clone();
-        var previousHintValid = selected.rotationHintValid;
+        var previous = selected.captureTransform();
         var current = rotationDegrees(selected);
         switch (axis) {
             case 0: current.x = degrees;
@@ -371,18 +400,21 @@ class Main extends hxd.App {
         }
         var quat = new h3d.Quat();
         quat.initRotation(degToRad(current.z), degToRad(current.y), degToRad(current.x));
-        selected.mesh.setRotationQuat(quat);
-        selected.rotationHint.load(current);
-        selected.rotationHintValid = true;
+        var desired = selected.captureTransform();
+        desired.rotationX = quat.x;
+        desired.rotationY = quat.y;
+        desired.rotationZ = quat.z;
+        desired.rotationW = quat.w;
+        desired.rotationHintX = current.x;
+        desired.rotationHintY = current.y;
+        desired.rotationHintZ = current.z;
+        desired.rotationHintValid = true;
+        selected.applyTransform(desired);
         var beforeContainX = selected.mesh.x;
         var beforeContainY = selected.mesh.y;
         var beforeContainZ = selected.mesh.z;
-        if (!WorldBounds.contain(selected.mesh)) {
-            selected.mesh.setPosition(
-                previousPosition.x, previousPosition.y, previousPosition.z);
-            selected.mesh.setRotationQuat(previousRotation);
-            selected.rotationHint.load(previousHint);
-            selected.rotationHintValid = previousHintValid;
+        if (!containSceneObject(selected)) {
+            selected.applyTransform(previous);
             logWorldBound(selected);
         } else if (different(beforeContainX, selected.mesh.x)
                 || different(beforeContainY, selected.mesh.y)
@@ -425,10 +457,9 @@ class Main extends hxd.App {
             }
         }
         var bounded = WorldBounds.fitScale(
-            selected.mesh, targetX, targetY, targetZ);
-        selected.mesh.scaleX = bounded.x;
-        selected.mesh.scaleY = bounded.y;
-        selected.mesh.scaleZ = bounded.z;
+            selected.mesh, targetX, targetY, targetZ,
+            function(x, y, z) applySceneObjectScale(selected, x, y, z));
+        applySceneObjectScale(selected, bounded.x, bounded.y, bounded.z);
         if (different(bounded.x, targetX) || different(bounded.y, targetY)
                 || different(bounded.z, targetZ)) logWorldBound(selected);
         refreshScaleRendering(selected);
@@ -465,23 +496,34 @@ class Main extends hxd.App {
         var selected = getSelectedObject();
         if (selected == null) return;
         var commandBefore = selected.captureTransform();
+        var desired = commandBefore.clone();
         var rowName:String;
         switch (row) {
             case 0:
-                WorldBounds.placeInside(selected.mesh, 0, 0, 0);
+                desired.positionX = 0;
+                desired.positionY = 0;
+                desired.positionZ = 0;
                 rowName = "position";
             case 1:
-                selected.mesh.setRotationQuat(new h3d.Quat());
-                selected.rotationHint.set(0, 0, 0);
-                selected.rotationHintValid = true;
-                WorldBounds.contain(selected.mesh);
+                desired.rotationX = 0;
+                desired.rotationY = 0;
+                desired.rotationZ = 0;
+                desired.rotationW = 1;
+                desired.rotationHintX = 0;
+                desired.rotationHintY = 0;
+                desired.rotationHintZ = 0;
+                desired.rotationHintValid = true;
                 rowName = "rotation";
             default:
-                selected.mesh.scaleX = 1;
-                selected.mesh.scaleY = 1;
-                selected.mesh.scaleZ = 1;
-                WorldBounds.contain(selected.mesh);
+                desired.scaleX = 1;
+                desired.scaleY = 1;
+                desired.scaleZ = 1;
                 rowName = "scale";
+        }
+        selected.applyTransform(desired);
+        if (!containSceneObject(selected)) {
+            selected.applyTransform(commandBefore);
+            logWorldBound(selected);
         }
         if (row == 2) refreshScaleRendering(selected);
         pushInspectorTransform(selected);
@@ -517,7 +559,7 @@ class Main extends hxd.App {
         currentTool = tool;
         gizmo.setTool(tool);
         var selected = getSelectedObject();
-        gizmo.attach(selected == null ? null : selected.mesh);
+        attachGizmo(selected);
         if (verboseLogging) {
             var toolNames = ["Move", "Rotate", "Scale"];
             logActivity('viewport tool: ${toolNames[tool]} gizmo active');
@@ -545,6 +587,10 @@ class Main extends hxd.App {
     function onViewportPush(x:Float, y:Float):Bool {
         var selected = getSelectedObject();
         if (selected == null) return false;
+        var model = editorSession.findObject(selected.id);
+        if (model == null) return false;
+        var world = model.worldTransform;
+        applyGizmoProxy(world);
         var pointer = viewportPointer(x, y);
         var handle = gizmo.pick(viewportRay(x, y), pointer.x, pointer.y);
         if (handle < 0) return false;
@@ -555,15 +601,18 @@ class Main extends hxd.App {
         dragLastY = y;
         dragVirtualX = x;
         dragVirtualY = y;
-        dragStartScaleX = selected.mesh.scaleX;
-        dragStartScaleY = selected.mesh.scaleY;
-        dragStartScaleZ = selected.mesh.scaleZ;
+        dragStartScaleX = world.scaleX;
+        dragStartScaleY = world.scaleY;
+        dragStartScaleZ = world.scaleZ;
         // Capture the full starting transform for incremental snapping.
-        dragStartPos = new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z);
+        dragStartPos = new h3d.Vector(world.positionX, world.positionY, world.positionZ);
         dragStartQuat = new h3d.Quat();
-        dragStartQuat.load(selected.mesh.getRotationQuat());
-        dragStartTransform = selected.captureTransform();
-        gizmo.beginDrag(handle, selected.mesh, viewportRay(x, y), pointer.x, pointer.y);
+        dragStartQuat.set(world.rotationX, world.rotationY,
+            world.rotationZ, world.rotationW);
+        dragStartTransform = model.transform.clone();
+        dragStartWorldTransform = world.clone();
+        dragPreviewTransform = dragStartTransform.clone();
+        gizmo.beginDrag(handle, gizmoProxy, viewportRay(x, y), pointer.x, pointer.y);
         // Capture all gizmo anchors before raw input can invoke its callback.
         beginRelativeDrag();
         if (verboseLogging) {
@@ -571,8 +620,8 @@ class Main extends hxd.App {
             logActivity('gizmo: drag ${selected.name} ${handleName}');
             printActivity('[gizmo] drag start object=${selected.name} handle=${handleName}'
                 + ' space=${localTransformSpace ? "Local" : "World"}'
-                + ' at=(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
-                + ' ${round2(selected.mesh.z)})');
+                + ' at=(${round2(world.positionX)}, ${round2(world.positionY)},'
+                + ' ${round2(world.positionZ)})');
         }
         return true;
     }
@@ -662,15 +711,20 @@ class Main extends hxd.App {
         gizmoHandle = -1;
         gizmoWorldBounded = false;
         dragStartTransform = null;
+        dragStartWorldTransform = null;
+        dragPreviewTransform = null;
         endRelativeDrag();
         gizmo.endDrag();
     }
 
     /** Apply the current virtual drag pointer to the gizmo and the inspector. */
     function applyDragTransform(selected:SceneObject):Void {
+        var model = editorSession.findObject(selected.id);
+        if (model == null || dragStartWorldTransform == null) return;
         var pointer = viewportPointer(dragVirtualX, dragVirtualY);
         var next = gizmo.dragTo(pointer.x, pointer.y);
         if (next == null) return;
+        var desiredWorld = dragStartWorldTransform.clone();
         switch (next) {
             case MovePosition(nx, ny, nz):
                 // Unreal-style incremental snapping: the drag delta is
@@ -682,11 +736,12 @@ class Main extends hxd.App {
                 var snapped = snap.snapPositionIncremental(dragStartPos,
                     new h3d.Vector(nx, ny, nz),
                     localTransformSpace ? dragStartQuat : null);
-                if (!WorldBounds.placeInside(
-                        selected.mesh, snapped.x, snapped.y, snapped.z)
-                        || different(selected.mesh.x, snapped.x)
-                        || different(selected.mesh.y, snapped.y)
-                        || different(selected.mesh.z, snapped.z)) {
+                desiredWorld.positionX = WorldBounds.clampCoordinate(snapped.x);
+                desiredWorld.positionY = WorldBounds.clampCoordinate(snapped.y);
+                desiredWorld.positionZ = WorldBounds.clampCoordinate(snapped.z);
+                if (different(desiredWorld.positionX, snapped.x)
+                        || different(desiredWorld.positionY, snapped.y)
+                        || different(desiredWorld.positionZ, snapped.z)) {
                     gizmoWorldBounded = true;
                 }
             case RotateQuat(q):
@@ -694,27 +749,14 @@ class Main extends hxd.App {
                 // The center arc-ball is intentionally freeform even while
                 // rotation snapping is enabled: quantizing its three Euler
                 // components would make a camera-space tumble feel stepped.
-                var previousPosition = new h3d.Vector(
-                    selected.mesh.x, selected.mesh.y, selected.mesh.z);
-                var previousRotation = new h3d.Quat();
-                previousRotation.load(selected.mesh.getRotationQuat());
                 var targetRotation = gizmoHandle == TransformGizmo.HANDLE_CENTER
                     ? q
                     : snap.snapQuatIncremental(dragStartQuat, q);
-                selected.mesh.setRotationQuat(targetRotation);
-                var beforeContainX = selected.mesh.x;
-                var beforeContainY = selected.mesh.y;
-                var beforeContainZ = selected.mesh.z;
-                if (!WorldBounds.contain(selected.mesh)) {
-                    selected.mesh.setPosition(previousPosition.x,
-                        previousPosition.y, previousPosition.z);
-                    selected.mesh.setRotationQuat(previousRotation);
-                    gizmoWorldBounded = true;
-                } else if (different(beforeContainX, selected.mesh.x)
-                        || different(beforeContainY, selected.mesh.y)
-                        || different(beforeContainZ, selected.mesh.z)) {
-                    gizmoWorldBounded = true;
-                }
+                desiredWorld.rotationX = targetRotation.x;
+                desiredWorld.rotationY = targetRotation.y;
+                desiredWorld.rotationZ = targetRotation.z;
+                desiredWorld.rotationW = targetRotation.w;
+                desiredWorld.rotationHintValid = false;
             case ScaleValues(sx, sy, sz):
                 if (scaleProportionsLinked) {
                     var ratio = linkedGizmoScaleRatio(sx, sy, sz);
@@ -730,17 +772,25 @@ class Main extends hxd.App {
                 var targetX = clampedScale(snapped.x, dragStartScaleX);
                 var targetY = clampedScale(snapped.y, dragStartScaleY);
                 var targetZ = clampedScale(snapped.z, dragStartScaleZ);
-                var bounded = WorldBounds.fitScale(
-                    selected.mesh, targetX, targetY, targetZ);
-                selected.mesh.scaleX = bounded.x;
-                selected.mesh.scaleY = bounded.y;
-                selected.mesh.scaleZ = bounded.z;
-                if (different(bounded.x, targetX) || different(bounded.y, targetY)
-                        || different(bounded.z, targetZ)) {
-                    gizmoWorldBounded = true;
-                }
-                refreshScaleRendering(selected);
+                desiredWorld.scaleX = targetX;
+                desiredWorld.scaleY = targetY;
+                desiredWorld.scaleZ = targetZ;
         }
+        var previousPreview = dragPreviewTransform == null
+            ? dragStartTransform : dragPreviewTransform;
+        var local = editorSession.hierarchy.localTransformForWorld(
+            model, desiredWorld, model.parent);
+        selected.applyTransform(local);
+        if (!containSceneObject(selected)) {
+            selected.applyTransform(previousPreview);
+            gizmoWorldBounded = true;
+            return;
+        }
+        local = selected.captureTransform();
+        dragPreviewTransform = local;
+        var actualWorld = worldTransformForLocal(model, local);
+        applyGizmoProxy(actualWorld);
+        refreshScaleRendering(selected);
         pushInspectorTransform(selected);
     }
 
@@ -752,28 +802,44 @@ class Main extends hxd.App {
     function snapSelectionToGrid():Void {
         var selected = getSelectedObject();
         if (selected == null || gizmoDragging) return;
-        var commandBefore = selected.captureTransform();
+        var model = editorSession.findObject(selected.id);
+        if (model == null) return;
+        var commandBefore = model.transform.clone();
+        var worldBefore = model.worldTransform;
         var step = snap.translationStep;
         var grid = snap.snapPositionToGrid(
-            new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z));
-        var previousX = selected.mesh.x;
-        var previousY = selected.mesh.y;
-        var previousZ = selected.mesh.z;
-        var placed = WorldBounds.placeInside(selected.mesh, grid.x, grid.y, grid.z);
-        var constrained = !placed || different(selected.mesh.x, grid.x)
-            || different(selected.mesh.y, grid.y) || different(selected.mesh.z, grid.z);
-        if (selected.mesh.x == previousX && selected.mesh.y == previousY
-                && selected.mesh.z == previousZ) {
+            new h3d.Vector(worldBefore.positionX,
+                worldBefore.positionY, worldBefore.positionZ));
+        if (worldBefore.positionX == grid.x && worldBefore.positionY == grid.y
+                && worldBefore.positionZ == grid.z) {
             logActivity('snapping: ${selected.name} already on the ${round2(step)} grid');
             return;
         }
+        var desired = worldBefore.clone();
+        desired.positionX = WorldBounds.clampCoordinate(grid.x);
+        desired.positionY = WorldBounds.clampCoordinate(grid.y);
+        desired.positionZ = WorldBounds.clampCoordinate(grid.z);
+        var local = editorSession.hierarchy.localTransformForWorld(
+            model, desired, model.parent);
+        selected.applyTransform(local);
+        var placed = containSceneObject(selected);
+        if (!placed) {
+            selected.applyTransform(commandBefore);
+            logWorldBound(selected);
+            return;
+        }
+        local = selected.captureTransform();
+        var actualWorld = worldTransformForLocal(model, local);
+        var constrained = different(actualWorld.positionX, grid.x)
+            || different(actualWorld.positionY, grid.y)
+            || different(actualWorld.positionZ, grid.z);
         pushInspectorTransform(selected);
         editorSession.commitAppliedTransform(selected.id, commandBefore,
-            selected.captureTransform(), 'Snap ${selected.name} to Grid');
+            local, 'Snap ${selected.name} to Grid');
         if (constrained) logWorldBound(selected);
         logActivity('snapping: ${selected.name} to grid (step ${round2(step)}) '
-            + 'position = (${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
-            + ' ${round2(selected.mesh.z)})');
+            + 'position = (${round2(actualWorld.positionX)}, ${round2(actualWorld.positionY)},'
+            + ' ${round2(actualWorld.positionZ)})');
     }
 
     /** Optional diagnostic feedback for viewport snap toggle/preset changes. */
@@ -827,11 +893,13 @@ class Main extends hxd.App {
             case TransformGizmo.TOOL_ROTATE: 'Rotate ${selected.name}';
             default: 'Scale ${selected.name}';
         };
-        if (dragStartTransform != null) {
+        if (dragStartTransform != null && dragPreviewTransform != null) {
             editorSession.commitAppliedTransform(selected.id, dragStartTransform,
-                selected.captureTransform(), commandName);
+                dragPreviewTransform, commandName);
         }
         dragStartTransform = null;
+        dragStartWorldTransform = null;
+        dragPreviewTransform = null;
         if (!verboseLogging) return;
         var at = '(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
             + ' ${round2(selected.mesh.z)})';
@@ -857,7 +925,11 @@ class Main extends hxd.App {
         var nearestDistance = Math.POSITIVE_INFINITY;
         var nearestObject:Null<SceneObject> = null;
         for (sceneObject in sceneObjects) {
-            var collider = sceneObject.mesh.getCollider();
+            var renderMesh = sceneObject.renderMesh;
+            if (renderMesh == null) continue;
+            // Pick this object's own geometry, not a recursive child collider;
+            // empty hierarchy parents must not steal their children's hits.
+            var collider = renderMesh.getGlobalCollider();
             if (collider == null) continue;
             var distance = collider.rayIntersection(ray, true);
             if (distance >= 0 && distance < nearestDistance) {
@@ -875,13 +947,19 @@ class Main extends hxd.App {
     }
 
     function createSceneObjectView(object:EditorObject):SceneObject {
-        var mesh = new h3d.scene.Mesh(cubePrimitive, s3d);
-        mesh.name = object.name;
-        mesh.material.color.setColor(Theme.CUBE_ORANGE);
-        mesh.material.shadows = false;
-        mesh.material.specularAmount = 0.18;
-        mesh.material.specularPower = 24;
-        var sceneObject = new SceneObject(object.id, mesh, object.persistentId);
+        var node:h3d.scene.Object;
+        if (object.kind == EditorObjectKind.Cube) {
+            var mesh = new h3d.scene.Mesh(cubePrimitive, s3d);
+            mesh.material.color.setColor(Theme.CUBE_ORANGE);
+            mesh.material.shadows = false;
+            mesh.material.specularAmount = 0.18;
+            mesh.material.specularPower = 24;
+            node = mesh;
+        } else {
+            node = new h3d.scene.Object(s3d);
+        }
+        node.name = object.name;
+        var sceneObject = new SceneObject(object.id, node, object.persistentId);
         sceneObject.applyTransform(object.transform);
         refreshScaleRendering(sceneObject);
         return sceneObject;
@@ -892,16 +970,37 @@ class Main extends hxd.App {
         var index = sceneObjects.length - 1;
         while (index >= 0) {
             if (editorSession.findObject(sceneObjects[index].id) == null) {
+                sceneObjectsById.remove(sceneObjects[index].id);
                 sceneObjects[index].mesh.remove();
                 sceneObjects.splice(index, 1);
             }
             index--;
         }
 
-        var ordered:Array<SceneObject> = [];
+        // Ensure every renderer node exists before linking parent references.
         for (object in editorSession.objects) {
             var sceneObject = findSceneObject(object.id);
-            if (sceneObject == null) sceneObject = createSceneObjectView(object);
+            if (sceneObject == null) {
+                sceneObject = createSceneObjectView(object);
+                sceneObjectsById.set(object.id, sceneObject);
+                sceneObjects.push(sceneObject);
+            }
+        }
+
+        var ordered:Array<SceneObject> = [];
+        for (object in editorSession.hierarchy.flatten()) {
+            var sceneObject = findSceneObject(object.id);
+            var parentView = object.parent == null
+                ? null : findSceneObject(object.parent.id);
+            var desiredParent:h3d.scene.Object = parentView == null
+                ? s3d : parentView.mesh;
+            if (sceneObject.mesh.parent != desiredParent) {
+                if (parentView == null) desiredParent.addChild(sceneObject.mesh);
+                else desiredParent.addChildAt(sceneObject.mesh, object.siblingIndex);
+            } else if (parentView != null
+                    && desiredParent.getChildIndex(sceneObject.mesh) != object.siblingIndex) {
+                desiredParent.addChildAt(sceneObject.mesh, object.siblingIndex);
+            }
             sceneObject.name = object.name;
             sceneObject.applyTransform(object.transform);
             refreshScaleRendering(sceneObject);
@@ -917,7 +1016,7 @@ class Main extends hxd.App {
         refreshHierarchy();
         refreshSelectionOutline();
         var selected = getSelectedObject();
-        gizmo.attach(selected == null ? null : selected.mesh);
+        attachGizmo(selected);
         refreshSelectionInspector();
         boltUI.setHistoryState(editorSession.history.undoLabel,
             editorSession.history.redoLabel);
@@ -925,8 +1024,9 @@ class Main extends hxd.App {
 
     /** Keep back-face culling aligned with a reflected transform's winding. */
     function refreshScaleRendering(sceneObject:SceneObject):Void {
-        var mesh = sceneObject.mesh;
-        var mirrored = ScalePolicy.isMirrored(mesh.scaleX, mesh.scaleY, mesh.scaleZ);
+        var mesh = sceneObject.renderMesh;
+        if (mesh == null) return;
+        var mirrored = mesh.getAbsPos().getDeterminant() < 0;
         // A camera inside a closed one-sided mesh sees only back faces. Draw
         // both sides in that editor-only condition so extreme but valid scale
         // values cannot make an object appear to have been deleted.
@@ -936,6 +1036,27 @@ class Main extends hxd.App {
         mesh.material.mainPass.culling = culling;
         var shadowPass = mesh.material.getPass("shadow");
         if (shadowPass != null) shadowPass.culling = culling;
+    }
+
+    /**
+     * Rebuild SceneObject's exact affine correction after WorldBounds adjusts
+     * editable local channels. A sheared nested object cannot be measured with
+     * the old correction matrix left in place.
+     */
+    function containSceneObject(sceneObject:SceneObject):Bool {
+        WorldBounds.contain(sceneObject.mesh);
+        sceneObject.applyTransform(sceneObject.captureTransform());
+        return WorldBounds.containsObject(sceneObject.mesh);
+    }
+
+    /** Scale one render view while preserving and rebuilding affine shear. */
+    function applySceneObjectScale(sceneObject:SceneObject,
+            x:Float, y:Float, z:Float):Void {
+        var transform = sceneObject.captureTransform();
+        transform.scaleX = x;
+        transform.scaleY = y;
+        transform.scaleZ = z;
+        sceneObject.applyTransform(transform);
     }
 
     function cameraInsideMesh(mesh:h3d.scene.Mesh):Bool {
@@ -981,6 +1102,13 @@ class Main extends hxd.App {
         logActivity("scene: created " + name);
     }
 
+    function createHierarchyObject(parentId:Int, empty:Bool):Void {
+        var runtimeId = editorSession.nextRuntimeId;
+        var name = empty ? "GameObject" : "Cube" + runtimeId;
+        editorSession.createObject(name, new EditorTransform(), parentId,
+            empty ? EditorObjectKind.Empty : EditorObjectKind.Cube);
+    }
+
     function deleteSceneObjects(ids:Array<Int>):Void {
         var deletedNames = editorSession.deleteObjects(ids);
         if (deletedNames.length == 0) {
@@ -1018,15 +1146,59 @@ class Main extends hxd.App {
         return findSceneObject(editorSession.selectedObjectId);
     }
 
+    function attachGizmo(selected:Null<SceneObject>):Void {
+        if (selected == null) {
+            gizmo.attach(null);
+            return;
+        }
+        var model = editorSession.findObject(selected.id);
+        if (model == null) {
+            gizmo.attach(null);
+            return;
+        }
+        applyGizmoProxy(model.worldTransform);
+        gizmo.attach(gizmoProxy);
+    }
+
+    function applyGizmoProxy(transform:EditorTransform):Void {
+        gizmoProxy.defaultTransform = null;
+        gizmoProxy.setPosition(transform.positionX,
+            transform.positionY, transform.positionZ);
+        gizmoProxy.setRotationQuat(new h3d.Quat(transform.rotationX,
+            transform.rotationY, transform.rotationZ, transform.rotationW));
+        gizmoProxy.scaleX = transform.scaleX;
+        gizmoProxy.scaleY = transform.scaleY;
+        gizmoProxy.scaleZ = transform.scaleZ;
+    }
+
+    function worldTransformForLocal(model:EditorObject,
+            local:EditorTransform):EditorTransform {
+        var matrix = model.parent == null
+            ? local.toMatrix()
+            : editorSession.hierarchy.worldMatrix(model.parent)
+                .multiplied(local.toMatrix());
+        return EditorTransform.fromMatrix(matrix, local);
+    }
+
     function findSceneObject(id:Int):Null<SceneObject> {
-        for (sceneObject in sceneObjects) if (sceneObject.id == id) return sceneObject;
-        return null;
+        return sceneObjectsById.get(id);
     }
 
     function refreshHierarchy():Void {
         var entries:Array<HierarchyEntry> = [];
-        for (object in editorSession.objects) {
-            entries.push(new HierarchyEntry(object.id, object.name));
+        var depths:Map<Int, Int> = [];
+        var siblingCounts:Map<Int, Int> = [];
+        for (object in editorSession.hierarchy.flatten()) {
+            var parentId = object.parent == null ? -1 : object.parent.id;
+            var depth = parentId < 0 ? 0 : depths.get(parentId) + 1;
+            var siblingIndex = siblingCounts.exists(parentId)
+                ? siblingCounts.get(parentId) : 0;
+            siblingCounts.set(parentId, siblingIndex + 1);
+            depths.set(object.id, depth);
+            entries.push(new HierarchyEntry(object.id, object.name,
+                object.persistentId, parentId,
+                depth, object.children.length > 0, object.kind,
+                object.children.length, siblingIndex));
         }
         boltUI.setHierarchyEntries(entries);
     }
@@ -1122,7 +1294,9 @@ class Main extends hxd.App {
         selectionOutline.lineStyle(2.0, Theme.ACCENT, 1);
         for (sceneObject in sceneObjects) {
             if (editorSession.selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
-            drawSelectionEdges(selectionOutline, sceneObject.mesh);
+            if (sceneObject.renderMesh != null) {
+                drawSelectionEdges(selectionOutline, sceneObject.renderMesh);
+            }
         }
     }
 
@@ -1140,7 +1314,7 @@ class Main extends hxd.App {
      * the camera.
      */
     function drawSelectionEdges(graphic:h3d.scene.Graphics, mesh:h3d.scene.Mesh):Void {
-        var transform = mesh.getTransform();
+        var transform = mesh.getAbsPos();
         inline function corner(sx:Float, sy:Float, sz:Float):h3d.Vector {
             return new h3d.Vector(sx * 0.5, sy * 0.5, sz * 0.5)
                 .transformed(transform);

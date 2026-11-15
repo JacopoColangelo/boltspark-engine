@@ -35,6 +35,10 @@ class InputAdapter {
     public var onEscapePressed:Null<Void->Void>;
     public var onUndoPressed:Null<Void->Void>;
     public var onRedoPressed:Null<Void->Void>;
+    public var onCopyPressed:Null<Void->Void>;
+    public var onPastePressed:Null<Void->Void>;
+    public var onDuplicatePressed:Null<Void->Void>;
+    public var onRenamePressed:Null<Void->Void>;
 
     final scene:h2d.Scene;
     final keybindings:Keybindings;
@@ -49,6 +53,10 @@ class InputAdapter {
     var snapHoldKeyDown:Int = -1;
     var undoKeyDown:Int = -1;
     var redoKeyDown:Int = -1;
+    var copyKeyDown:Int = -1;
+    var pasteKeyDown:Int = -1;
+    var duplicateKeyDown:Int = -1;
+    var renameKeyDown:Int = -1;
 
     public function new(scene:h2d.Scene, keybindings:Keybindings,
             ?state:UiInputState) {
@@ -146,6 +154,32 @@ class InputAdapter {
                         redoKeyDown = event.keyCode;
                     }
                 }
+                if (keybindings.matches(EditorAction.CopySelection, event.keyCode, ctrlDown)) {
+                    if (copyKeyDown < 0) {
+                        if (onCopyPressed != null) onCopyPressed();
+                        copyKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.Paste, event.keyCode, ctrlDown)) {
+                    if (pasteKeyDown < 0) {
+                        if (onPastePressed != null) onPastePressed();
+                        pasteKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.DuplicateSelection,
+                        event.keyCode, ctrlDown)) {
+                    if (duplicateKeyDown < 0) {
+                        if (onDuplicatePressed != null) onDuplicatePressed();
+                        duplicateKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.RenameSelection,
+                        event.keyCode, ctrlDown)) {
+                    if (renameKeyDown < 0) {
+                        if (onRenamePressed != null) onRenamePressed();
+                        renameKeyDown = event.keyCode;
+                    }
+                }
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
                     onEscapePressed();
                 }
@@ -158,6 +192,10 @@ class InputAdapter {
                 if (event.keyCode == snapToGridKeyDown) snapToGridKeyDown = -1;
                 if (event.keyCode == undoKeyDown) undoKeyDown = -1;
                 if (event.keyCode == redoKeyDown) redoKeyDown = -1;
+                if (event.keyCode == copyKeyDown) copyKeyDown = -1;
+                if (event.keyCode == pasteKeyDown) pasteKeyDown = -1;
+                if (event.keyCode == duplicateKeyDown) duplicateKeyDown = -1;
+                if (event.keyCode == renameKeyDown) renameKeyDown = -1;
                 if (event.keyCode == snapHoldKeyDown) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -181,6 +219,10 @@ class InputAdapter {
                 snapToGridKeyDown = -1;
                 undoKeyDown = -1;
                 redoKeyDown = -1;
+                copyKeyDown = -1;
+                pasteKeyDown = -1;
+                duplicateKeyDown = -1;
+                renameKeyDown = -1;
                 if (snapHoldKeyDown >= 0) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;

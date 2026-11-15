@@ -13,6 +13,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Rotation snapping applies to the axis rings while the omni arc-ball always remains freeform. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions—including **Ctrl+Z/Ctrl+Y** Undo/Redo—can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
 - The release executable, taskbar, native windows, and main editor title strip share the embedded multi-resolution Boltspark icon. The main editor and auxiliary application windows use native Windows dark title bars. Opening the File menu prepares the small keybindings host in the background; closing its window hides it while retaining the HWND, DX12 device, and font cache, so subsequent opens do not launch or initialize another process.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
+- Scene objects form an ordered, deeply nested hierarchy. Rows expand and collapse, retain ancestor paths while searching, support inline rename and multi-row drag/drop reparenting, and expose create-child, empty-parent grouping, duplicate, copy/paste, unparent, subtree-selection, and recursive delete actions. Structural edits preserve world transforms by default, can explicitly preserve local transforms with **Alt**, and undo/redo restores exact parent, sibling, transform, identity, and selection state.
 - Inspector numeric fields support compact up/down stepping, horizontal drag scrubbing, and keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
 - Position, Rotation, and Scale rows have one-click canonical resets; Scale can link its axes to preserve the current X/Y/Z proportions across field edits and gizmo drags, while signed values and pivot-crossing gizmo drags support mirrored transforms without singular zero scale.
 - The editor world is bounded to ±8 km from the origin on every axis. Every transform path constrains complete transformed geometry instead of deleting objects or imposing an arbitrary scale-factor cap; the viewport far plane covers the bounded world, and camera-enclosing meshes remain visible from inside while editing.
@@ -25,10 +26,10 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
   IDs, strict relative paths, generic versioned component envelopes, reference
   validation, unknown-field preservation, atomic save + backup, fixtures, and a
   bounded undo/redo command history. A renderer-independent `EditorSession` now
-  owns object models, selection, and history; create, delete, rename, Inspector
-  edits, resets, snapping, and complete gizmo drags are undoable through the
-  Edit menu or rebindable Undo/Redo shortcuts. Project open/save and the asset
-  browser are still later integration work.
+  owns the ordered scene graph, local affine transforms, selection, clipboard,
+  and history. Parent references, sibling order, exact quaternion/shear state,
+  and object kinds map to and from `SceneDocument`; project open/save UI and the
+  asset browser are still later integration work.
 
 ## Hard platform policy
 
@@ -104,7 +105,7 @@ src/
     windows/                  — native top-level editor-window routing and H2D content
   boltspark/project/          — versioned project/scene data, validation, atomic storage
   boltspark/editor/           — pure editor session/model plus viewport and gizmos
-    commands/                 — concrete create/delete/rename/transform history
+    commands/                 — object, transform, duplicate, and hierarchy history
   res/fonts/                  — embedded Inter and JetBrains Mono TTF faces
 tests/
   native-foundation-acceptance.md

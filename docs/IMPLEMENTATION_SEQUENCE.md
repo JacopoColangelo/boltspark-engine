@@ -227,5 +227,37 @@ Redo are available through the Edit menu and rebindable shortcuts.
 - [x] The running DX12 editor passes a window-scoped gizmo → Ctrl+Z → Ctrl+Y
   regression (`tests/native/Test-CommandHistory.ps1`).
 
+## Gate 11 — Ordered nested scene graph and affine parenting
+
+`SceneHierarchy` is now the authoritative parent/child/root owner for each
+`EditorSession`. It supports iterative traversal at deep nesting levels,
+cycle-safe reparent validation, exact sibling placement, and lazily evaluated
+world matrices. Local transforms retain quaternion, signed scale, and affine
+shear, so preserving world space across rotated non-uniform parents does not
+silently alter geometry.
+
+The native hierarchy exposes folding, ancestor-aware search, inline rename,
+multi-selection drag/drop, child/empty creation, grouping, duplicate,
+copy/paste, unparent, subtree selection, and recursive deletion. Every durable
+operation is reversible. Nested Heaps render nodes remain a projection of the
+pure model, including exact-affine correction matrices and world-space gizmos.
+
+**Exit criteria**
+- [x] Self-parenting, descendant cycles, and cross-scene links are rejected.
+- [x] Multi-object reparenting canonicalizes selected forests, preserves display
+  order, and restores exact parent/sibling/local-transform state on undo.
+- [x] World-preserving reparenting retains affine shear; **Alt** drag/drop is the
+  explicit local-preserving mode.
+- [x] Duplicate, clipboard paste, grouping, and recursive delete retain complete
+  subtrees and act as one history entry.
+- [x] Scene serialization round-trips parent references, sibling order, kinds,
+  quaternion/hint state, signed scale, and shear; parent records may appear
+  after children and complete scene duplication remaps all identities.
+- [x] A 3,000-level hierarchy traverses, evaluates world transforms, validates,
+  and serializes without recursive stack growth.
+- [x] `tests/repro/SceneHierarchyRepro.hx` exhausts sibling-selection insertion
+  boundaries and complex undo/redo; `SceneObjectAffineRepro.hx` verifies the
+  nested Heaps bridge and shear-correction rebuild under HashLink.
+
 External mixed-DPI, physical device-removal, and second-machine checks remain
 open but are non-blocking until M9 under `tests/validation-policy.json`.

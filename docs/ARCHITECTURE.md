@@ -64,7 +64,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | `UiText.hx` / `UiTextInput.hx` | Editor text rasterized from embedded Inter or JetBrains Mono TTF faces at its exact requested size; missing glyphs are inserted into a shared per-face atlas on demand. Console and numeric values retain JetBrains Mono Regular at 12px. |
 | `UiIcons.hx` / `shaders/UiIconShader.hx` | Exact-size analytic icon shapes with no icon-image sampling. One/1.5/two-pixel optical weights are fitted to the physical pixel grid; derivatives anti-alias curves and diagonals. |
 | `InputAdapter.hx` | One window event target routes key/focus/pointer state into `UiInputState`, dispatches rebound editor actions, and reports unmatched key-up diagnostics. |
-| `EditorShell.hx` | Owns chrome geometry: draws top bar, side panels, console area, status bar into one `h2d.Graphics`; positions widgets; exposes editor command callbacks upward. Rebuilds static geometry only on resize. |
+| `EditorShell.hx` | Owns chrome geometry and hierarchy interaction: nested filtering/folding, range selection, inline rename, context actions, and validated drag/drop targets; exposes editor command callbacks upward. Rebuilds static geometry only on resize. |
 | `windows/ApplicationWindowManager.hx` | Starts and owns one reusable native host process per application-level editor window. This is the safe multi-window boundary for the locked Heaps 2.1 DX12 driver, whose swap chain is process-window scoped. Opening the relevant parent menu prepares a hidden host; parent/host show/quit commands travel over a private stdin pipe. |
 | `windows/KeybindingsWindowApp.hx` / `KeybindingsWindowContent.hx` | Native top-level Editor Keybindings window and its retained-H2D content. Close/Escape hides the hosted HWND; reopening reuses its existing DX12 device and font cache. Persisted changes synchronize to the running editor through the validated keybinding store. |
 | `widgets/UiButton.hx` | `h2d.Interactive` hit region + centered label; hover/push/release-outside color states; click callback. |
@@ -78,9 +78,10 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | Module | Responsibility |
 |---|---|
 | `editor/EditorViewport.hx` | One source of truth for render-zone composition and viewport/window/backbuffer coordinate conversion used by rendering, rays, and gizmos. |
-| `editor/EditorSession.hx` | Renderer-independent owner of editor objects, durable/runtime IDs, selection, and bounded command history. `Main` mirrors this model into Heaps scene objects. |
-| `editor/commands/` | Concrete create/delete/rename/transform commands plus bounded execute/undo/redo history and failure-safe composites. Structural commands restore hierarchy order, identity, and selection. |
-| `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, and atomic storage with backup. |
+| `editor/EditorSession.hx` / `SceneHierarchy.hx` | Renderer-independent owner of the ordered scene graph, durable/runtime IDs, selection, clipboard, and bounded history. Hierarchy mutation is centralized; iterative traversal and revision-stamped world matrices avoid recursion and eager subtree invalidation. `Main` mirrors this model into nested Heaps nodes. |
+| `editor/EditorTransform.hx` / `TransformMatrix.hx` | Exact local affine state: position, normalized quaternion interpretation, signed non-zero scale, and shear. Matrix decomposition retains the shear required by world-preserving reparenting between rotated, non-uniform ancestors. |
+| `editor/commands/` | Concrete create/delete/duplicate/reparent/rename/transform commands plus bounded execute/undo/redo history and failure-safe composites. Structural commands restore parent, sibling order, transform, identity, and selection. |
+| `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, atomic storage with backup, and `SceneSerializer` mapping for hierarchy/object-kind/exact-transform state. |
 | `tests/repro/` | Portable math/UI/data/command tests plus native-module regressions. |
 | `tests/native/` | Tracked HWND lifecycle, command-history, DPI, forced DX12 reset, smoke, and performance probes; outputs go to ignored `bin/test-results/`. |
 
@@ -106,6 +107,10 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 12. **Verification code is tracked; evidence is generated.** Test programs and
     native probes live under `tests/`, while machine-specific logs, screenshots,
     bytecode, and measurements remain ignored under `bin/test-results/`.
+13. **Hierarchy state has one owner.** Parent/child/root collections are changed
+    only through `SceneHierarchy`; UI rows and Heaps objects are projections.
+    Reparenting rejects cross-scene links and cycles, preserves world matrices by
+    default, and records exact reversible forest changes.
 
 ## Current scope boundary
 

@@ -72,9 +72,20 @@ class WorldBounds {
         var dy = containmentOffset(bounds.yMin, bounds.yMax);
         var dz = containmentOffset(bounds.zMin, bounds.zMax);
         if (dx != 0 || dy != 0 || dz != 0) {
-            // Scene objects currently live directly under the identity scene
-            // root, so local and world translation deltas are identical.
-            object.setPosition(object.x + dx, object.y + dy, object.z + dz);
+            if (object.parent == null
+                    || Std.isOfType(object.parent, h3d.scene.Scene)) {
+                object.setPosition(object.x + dx, object.y + dy, object.z + dz);
+            } else {
+                // Containment offsets are world-space. Convert the desired
+                // shifted pivot back through the parent inverse before writing
+                // local channels for nested scene objects.
+                var world = object.localToGlobal(new h3d.col.Point());
+                world.x += dx;
+                world.y += dy;
+                world.z += dz;
+                object.parent.globalToLocal(world);
+                object.setPosition(world.x, world.y, world.z);
+            }
         }
         return containsObject(object);
     }
@@ -83,10 +94,13 @@ class WorldBounds {
      * Find the closest scale on the path from the current value to `target`
      * whose complete transformed bounds still fit in the world. This avoids a
      * dimensionless scale-factor limit: primitive dimensions, rotation, and
-     * distance from the origin all participate in the result.
+     * distance from the origin all participate in the result. An optional
+     * setter lets exact-affine scene bridges rebuild their shear correction
+     * for each binary-search probe.
      */
     public static function fitScale(object:h3d.scene.Object,
-            targetX:Float, targetY:Float, targetZ:Float):h3d.Vector {
+            targetX:Float, targetY:Float, targetZ:Float,
+            ?applyScale:Float->Float->Float->Void):h3d.Vector {
         var startX = object.scaleX;
         var startY = object.scaleY;
         var startZ = object.scaleZ;
@@ -94,13 +108,13 @@ class WorldBounds {
         targetY = finiteScaleTarget(targetY, startY);
         targetZ = finiteScaleTarget(targetZ, startZ);
 
-        setScale(object, targetX, targetY, targetZ);
+        applyObjectScale(object, targetX, targetY, targetZ, applyScale);
         if (containsObject(object)) {
-            setScale(object, startX, startY, startZ);
+            applyObjectScale(object, startX, startY, startZ, applyScale);
             return new h3d.Vector(targetX, targetY, targetZ);
         }
 
-        setScale(object, startX, startY, startZ);
+        applyObjectScale(object, startX, startY, startZ, applyScale);
         if (!containsObject(object)) {
             return new h3d.Vector(startX, startY, startZ);
         }
@@ -112,10 +126,10 @@ class WorldBounds {
         var high = 1.0;
         for (_ in 0...SCALE_SEARCH_STEPS) {
             var middle = (low + high) * 0.5;
-            setScale(object,
+            applyObjectScale(object,
                 startX + (targetX - startX) * middle,
                 startY + (targetY - startY) * middle,
-                startZ + (targetZ - startZ) * middle);
+                startZ + (targetZ - startZ) * middle, applyScale);
             if (containsObject(object)) low = middle else high = middle;
         }
 
@@ -123,7 +137,7 @@ class WorldBounds {
             startX + (targetX - startX) * low,
             startY + (targetY - startY) * low,
             startZ + (targetZ - startZ) * low);
-        setScale(object, startX, startY, startZ);
+        applyObjectScale(object, startX, startY, startZ, applyScale);
         return result;
     }
 
@@ -162,10 +176,15 @@ class WorldBounds {
         return SCALE_PROBE_LIMIT;
     }
 
-    static inline function setScale(object:h3d.scene.Object,
-            x:Float, y:Float, z:Float):Void {
-        object.scaleX = x;
-        object.scaleY = y;
-        object.scaleZ = z;
+    static inline function applyObjectScale(object:h3d.scene.Object,
+            x:Float, y:Float, z:Float,
+            applyScale:Null<Float->Float->Float->Void>):Void {
+        if (applyScale != null) {
+            applyScale(x, y, z);
+        } else {
+            object.scaleX = x;
+            object.scaleY = y;
+            object.scaleZ = z;
+        }
     }
 }

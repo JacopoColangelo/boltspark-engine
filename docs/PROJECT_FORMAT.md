@@ -38,6 +38,9 @@ Every entity contains:
 
 - stable `id`, display `name`, and nullable `parentId`;
 - Position, editor Rotator, and signed non-zero Scale values;
+- optional exact quaternion, affine shear, and Rotator-hint-validity fields
+  written by the editor (legacy schema-1 readers can continue using the TRS
+  fields, while Boltspark can reconstruct world-preserving nested transforms);
 - an array of versioned component envelopes.
 
 A component envelope has `type`, integer `version`, and object-valued `data`.
@@ -61,9 +64,14 @@ remain future M3 work.
 
 `src/boltspark/editor/commands/` provides bounded execute/undo/redo history,
 redo-branch invalidation, and composite commands with rollback if a child fails.
-`EditorSession` now owns renderer-independent object models and routes create,
-delete, rename, and transform changes through concrete commands. Inspector
-scrubs and gizmo previews commit as one transform command; deletion undo restores
-durable IDs, hierarchy order, and selection. This integration is headlessly
-tested, and Undo/Redo is exposed by the native editor. Mapping the session to
-`SceneDocument` remains the next project-session boundary.
+`EditorSession` owns renderer-independent objects and an ordered scene graph.
+Create, recursive delete, duplicate, reparent/reorder, rename, and transform
+changes use concrete commands. Inspector scrubs and gizmo previews commit as one
+transform command; structural undo restores durable IDs, parent/sibling order,
+exact local affine state, and selection.
+
+`SceneSerializer` maps this graph to and from `SceneDocument`. Entities are
+written in stable hierarchy pre-order; loading constructs every object before a
+second safe parenting pass, so a valid document may reference a parent that
+appears later in its entity array. Scene duplication remaps every scene/entity
+identity and parent reference. Project open/save UI remains a later boundary.

@@ -57,6 +57,22 @@ class CommandHistoryRepro {
             if (Std.string(error) == "failing composite unexpectedly succeeded") throw error;
         }
         assertTrue(value.value == beforeFailure, "composite failure did not roll back children");
+        var transactionValue = {value: 0};
+        var transactionHistory = new CommandHistory(8);
+        transactionHistory.beginTransaction("Atomic gesture");
+        transactionHistory.execute(new IntegerCommand("first", transactionValue, 4));
+        transactionHistory.execute(new IntegerCommand("second", transactionValue, 6));
+        assertTrue(transactionHistory.commitTransaction()
+            && transactionValue.value == 10
+            && transactionHistory.undoLabel == "Atomic gesture",
+            "transaction did not become one history entry");
+        assertTrue(transactionHistory.undo() && transactionValue.value == 0,
+            "transaction undo was not atomic");
+        transactionHistory.beginTransaction("Cancelled gesture");
+        transactionHistory.execute(new IntegerCommand("temporary", transactionValue, 9));
+        transactionHistory.cancelTransaction();
+        assertTrue(transactionValue.value == 0,
+            "cancelled transaction did not roll back executed commands");
         Sys.println("[command-history] execute, composite, undo, redo, branch, and capacity passed");
     }
 
