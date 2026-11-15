@@ -124,7 +124,9 @@ Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C supp
 The repository has advanced beyond the original one-window proof: it now has
 resizable persisted panel regions, bounded picking, hierarchy/Inspector editing,
 three transform gizmos, native application windows, and reusable BoltUI/data
-foundations. It is still not a complete editor or the final immediate-mode API.
+foundations. A renderer-independent editor session now makes create, delete,
+rename, and transform operations undoable while preserving stable IDs and
+selection. It is still not a complete editor or the final immediate-mode API.
 Integrated project open/save, asset import, plugins, custom render passes, PBR,
 and HIDE migration remain outside the current implementation boundary.
 

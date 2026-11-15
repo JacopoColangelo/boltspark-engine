@@ -21,7 +21,8 @@ import sys.io.File;
  */
 class Keybindings {
     static inline var FILE_NAME:String = "keybindings.json";
-    static inline var SCHEMA_VERSION:Int = 1;
+    static inline var SCHEMA_VERSION:Int = 2;
+    static inline var VERSION_ONE_ACTION_COUNT:Int = 6;
 
     final directory:Null<String>;
     final filePath:Null<String>;
@@ -92,6 +93,8 @@ class Keybindings {
             case EditorAction.DeleteSelection: "Delete Selection";
             case EditorAction.SnapToGrid: "Snap Selection to Grid";
             case EditorAction.HoldSnapOff: "Hold to Disable Move Snap";
+            case EditorAction.Undo: "Undo";
+            case EditorAction.Redo: "Redo";
             default: "Unknown Action";
         };
     }
@@ -131,6 +134,8 @@ class Keybindings {
         bindings[EditorAction.DeleteSelection] = {keyCode: hxd.Key.DELETE, ctrl: false};
         bindings[EditorAction.SnapToGrid] = {keyCode: hxd.Key.END, ctrl: true};
         bindings[EditorAction.HoldSnapOff] = {keyCode: hxd.Key.V, ctrl: false};
+        bindings[EditorAction.Undo] = {keyCode: hxd.Key.Z, ctrl: true};
+        bindings[EditorAction.Redo] = {keyCode: hxd.Key.Y, ctrl: true};
         lastError = "";
         if (!quiet) {
             var saveError = save();
@@ -229,8 +234,12 @@ class Keybindings {
             return false;
         }
 
-        if (!Reflect.isObject(data)
-                || Reflect.field(data, "version") != SCHEMA_VERSION
+        if (!Reflect.isObject(data)) {
+            lastError = 'Keybindings at ${filePath} have an unsupported format; using defaults.';
+            return false;
+        }
+        var storedVersion = Reflect.field(data, "version");
+        if ((storedVersion != 1 && storedVersion != SCHEMA_VERSION)
                 || !Std.isOfType(Reflect.field(data, "bindings"), Array)) {
             lastError = 'Keybindings at ${filePath} have an unsupported format; using defaults.';
             return false;
@@ -243,13 +252,17 @@ class Keybindings {
         var loaded:Array<Null<{keyCode:Int, ctrl:Bool}>> = [];
         for (_ in 0...EditorAction.ACTION_COUNT) loaded.push(null);
         var chords:Map<String, Bool> = [];
+        var expectedActions = storedVersion == 1
+            ? VERSION_ONE_ACTION_COUNT
+            : (EditorAction.ACTION_COUNT : Int);
         for (entry in stored) {
             if (!Reflect.isObject(entry)) return invalidStoredBindings();
             var action = Reflect.field(entry, "action");
             var keyCode = Reflect.field(entry, "key");
             var ctrl = Reflect.field(entry, "ctrl") == true;
             if (!isActionIndex(action) || !isBindableKey(keyCode)
-                    || keyCode == hxd.Key.ESCAPE || loaded[action] != null) {
+                    || action >= expectedActions || keyCode == hxd.Key.ESCAPE
+                    || loaded[action] != null) {
                 return invalidStoredBindings();
             }
             var chord = (ctrl ? "1:" : "0:") + keyCode;
@@ -257,14 +270,31 @@ class Keybindings {
             chords.set(chord, true);
             loaded[action] = {keyCode: keyCode, ctrl: ctrl};
         }
-        for (action in 0...EditorAction.ACTION_COUNT) {
+        for (action in 0...expectedActions) {
             if (loaded[action] == null) return invalidStoredBindings();
+        }
+        // Version 1 predates Undo/Redo. Preserve every user binding and append
+        // their defaults when those chords are still available.
+        for (action in expectedActions...(EditorAction.ACTION_COUNT : Int)) {
+            var fallback = bindings[action];
+            var chord = (fallback.ctrl ? "1:" : "0:") + fallback.keyCode;
+            if (chords.exists(chord)) return invalidStoredBindings();
+            chords.set(chord, true);
+            loaded[action] = {keyCode: fallback.keyCode, ctrl: fallback.ctrl};
         }
         for (action in 0...EditorAction.ACTION_COUNT) {
             bindings[action] = loaded[action];
         }
-        persistedContents = contents;
         lastError = "";
+        if (storedVersion == SCHEMA_VERSION) {
+            persistedContents = contents;
+        } else {
+            // Rewrite the complete migrated map once so both editor windows
+            // subsequently observe the same version-2 payload.
+            persistedContents = null;
+            var migrationError = save();
+            if (migrationError != null) lastError = migrationError;
+        }
         if (notify && onChanged != null) onChanged();
         return true;
     }

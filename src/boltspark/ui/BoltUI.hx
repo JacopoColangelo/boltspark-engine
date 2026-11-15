@@ -37,6 +37,8 @@ class BoltUI {
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onRotationChanged:Null<Int->Float->Void>;
     public var onScaleChanged:Null<Int->Float->Void>;
+    public var onTransformEditBegin:Null<Int->Int->Void>;
+    public var onTransformEditEnd:Null<Int->Int->Void>;
     /** Row index: 0 Position, 1 Rotation, 2 Scale. */
     public var onTransformReset:Null<Int->Void>;
     public var onScaleLinkChanged:Null<Bool->Void>;
@@ -57,6 +59,8 @@ class BoltUI {
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Start an editor-window host before the user reaches its menu leaf. */
     public var onPrepareApplicationWindow:Null<ApplicationWindowKind->Void>;
+    public var onUndo:Null<Void->Void>;
+    public var onRedo:Null<Void->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window, snapping:GridSnapping,
             keybindings:Keybindings) {
@@ -73,6 +77,12 @@ class BoltUI {
         shell.onTransformChanged = function(axis, value) if (onTransformChanged != null) onTransformChanged(axis, value);
         shell.onRotationChanged = function(axis, value) if (onRotationChanged != null) onRotationChanged(axis, value);
         shell.onScaleChanged = function(axis, value) if (onScaleChanged != null) onScaleChanged(axis, value);
+        shell.onTransformEditBegin = function(row, axis) {
+            if (onTransformEditBegin != null) onTransformEditBegin(row, axis);
+        };
+        shell.onTransformEditEnd = function(row, axis) {
+            if (onTransformEditEnd != null) onTransformEditEnd(row, axis);
+        };
         shell.onTransformReset = function(row) if (onTransformReset != null) onTransformReset(row);
         shell.onScaleLinkChanged = function(linked) {
             if (onScaleLinkChanged != null) onScaleLinkChanged(linked);
@@ -99,6 +109,8 @@ class BoltUI {
         shell.onPrepareApplicationWindow = function(kind) {
             if (onPrepareApplicationWindow != null) onPrepareApplicationWindow(kind);
         };
+        shell.onUndo = function() if (onUndo != null) onUndo();
+        shell.onRedo = function() if (onRedo != null) onRedo();
     }
 
     /** Editor console access. */
@@ -147,6 +159,11 @@ class BoltUI {
 
     public function setObjectName(name:String):Void {
         shell.setObjectName(name);
+    }
+
+    public function setHistoryState(undoLabel:Null<String>,
+            redoLabel:Null<String>):Void {
+        shell.setHistoryState(undoLabel, redoLabel);
     }
 
     /** Live transform field update during viewport gizmo drags. */

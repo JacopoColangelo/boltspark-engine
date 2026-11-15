@@ -32,6 +32,29 @@ class SceneObject {
         };
     }
 
+    /** Capture the exact renderer transform for an editor command preview. */
+    public function captureTransform():EditorTransform {
+        var rotation = mesh.getRotationQuat();
+        return new EditorTransform(mesh.x, mesh.y, mesh.z,
+            rotation.x, rotation.y, rotation.z, rotation.w,
+            rotationHint.x, rotationHint.y, rotationHint.z,
+            rotationHintValid, mesh.scaleX, mesh.scaleY, mesh.scaleZ);
+    }
+
+    /** Apply a renderer-independent session transform without Euler conversion. */
+    public function applyTransform(transform:EditorTransform):Void {
+        mesh.setPosition(transform.positionX, transform.positionY,
+            transform.positionZ);
+        mesh.setRotationQuat(new h3d.Quat(transform.rotationX,
+            transform.rotationY, transform.rotationZ, transform.rotationW));
+        mesh.scaleX = transform.scaleX;
+        mesh.scaleY = transform.scaleY;
+        mesh.scaleZ = transform.scaleZ;
+        rotationHint.set(transform.rotationHintX, transform.rotationHintY,
+            transform.rotationHintZ);
+        rotationHintValid = transform.rotationHintValid;
+    }
+
     public var name(get, set):String;
 
     function get_name():String {

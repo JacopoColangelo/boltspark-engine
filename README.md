@@ -10,7 +10,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter and JetBrains Mono, exact-size pixel-grid-fitted analytic icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics. The Output Log stays focused on actionable warnings and errors instead of echoing routine selections, tool switches, and transform edits; launch with `BOLTSPARK_VERBOSE_LOGS` set to restore detailed interaction telemetry for diagnosis.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and scale-invariant two-pixel selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - All three transform tools drive viewport gizmos: Move offers axis, two-axis plane, and center free-view-plane drags; Rotate offers axis rings plus a true virtual-sphere omni arc-ball; Scale offers axis/plane/uniform scaling. Arc-ball motion keeps the same response and rotation axis when the pointer enters or exits its virtual sphere, while large coalesced pointer deltas are subdivided so fast rim crossings cannot collapse. Successive Bell-surface points preserve off-center view-axis roll, while a linear pointer-travel angle keeps long relative-mode drags unbounded. Its accumulated quaternion remains untouched and normalized during long drags; an internal per-object Euler hint selects a stable equivalent branch, while the Inspector presents Unreal-style Rotator values in `(-180°, 180°]`. A clickable WORLD/LOCAL viewport control changes the shared axis frame (WORLD is the default), all changes flow through the editor command path with live inspector updates, and the default shortcuts are **1** (Move), **E** (Rotate), and **R** (Scale).
-- Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Rotation snapping applies to the axis rings while the omni arc-ball always remains freeform. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
+- Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Rotation snapping applies to the axis rings while the omni arc-ball always remains freeform. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions—including **Ctrl+Z/Ctrl+Y** Undo/Redo—can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
 - The release executable, taskbar, native windows, and main editor title strip share the embedded multi-resolution Boltspark icon. The main editor and auxiliary application windows use native Windows dark title bars. Opening the File menu prepares the small keybindings host in the background; closing its window hides it while retaining the HWND, DX12 device, and font cache, so subsequent opens do not launch or initialize another process.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
 - Inspector numeric fields support compact up/down stepping, horizontal drag scrubbing, and keyboard editing with focus, validation, Enter-to-apply, and Escape-to-cancel.
@@ -24,8 +24,11 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - Versioned project/scene serialization foundations are in place with durable
   IDs, strict relative paths, generic versioned component envelopes, reference
   validation, unknown-field preservation, atomic save + backup, fixtures, and a
-  bounded undo/redo command history. These are tested foundations; project
-  open/save and asset-browser UI are still later integration work.
+  bounded undo/redo command history. A renderer-independent `EditorSession` now
+  owns object models, selection, and history; create, delete, rename, Inspector
+  edits, resets, snapping, and complete gizmo drags are undoable through the
+  Edit menu or rebindable Undo/Redo shortcuts. Project open/save and the asset
+  browser are still later integration work.
 
 ## Hard platform policy
 
@@ -59,7 +62,7 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -Check              # validate the Windows build environment
 .\tools\build.ps1 -Run                # run the development HashLink build
 .\tools\test.ps1 -Portable            # clean-worker compile + headless tests
-.\tools\test.ps1 -Build -NativeSmoke  # full local build/tests + DX12 smoke
+.\tools\test.ps1 -Build -NativeSmoke -CommandHistory  # full tests + DX12/history smoke
 ```
 
 The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library, PIX runtime, and verified FreeType source only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable, `freetype.hdll`, licenses, and its other required runtime files.
@@ -100,7 +103,8 @@ src/
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
     windows/                  — native top-level editor-window routing and H2D content
   boltspark/project/          — versioned project/scene data, validation, atomic storage
-  boltspark/editor/commands/  — bounded execute/undo/redo command history
+  boltspark/editor/           — pure editor session/model plus viewport and gizmos
+    commands/                 — concrete create/delete/rename/transform history
   res/fonts/                  — embedded Inter and JetBrains Mono TTF faces
 tests/
   native-foundation-acceptance.md

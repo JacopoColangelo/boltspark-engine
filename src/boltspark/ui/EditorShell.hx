@@ -114,6 +114,9 @@ class EditorShell {
     public var onTransformChanged:Null<Int->Float->Void>;
     public var onRotationChanged:Null<Int->Float->Void>;
     public var onScaleChanged:Null<Int->Float->Void>;
+    /** Bracket one Inspector transform gesture for command coalescing. */
+    public var onTransformEditBegin:Null<Int->Int->Void>;
+    public var onTransformEditEnd:Null<Int->Int->Void>;
     /** Row index: 0 Position, 1 Rotation, 2 Scale. */
     public var onTransformReset:Null<Int->Void>;
     public var onScaleLinkChanged:Null<Bool->Void>;
@@ -131,6 +134,8 @@ class EditorShell {
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Opportunistically initialize a hidden host before its menu command runs. */
     public var onPrepareApplicationWindow:Null<ApplicationWindowKind->Void>;
+    public var onUndo:Null<Void->Void>;
+    public var onRedo:Null<Void->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
@@ -152,6 +157,8 @@ class EditorShell {
     /** Whether a hold-to-disable press was actually forwarded past the text guard. */
     var snapHoldForwarded:Bool = false;
     var lastGeometry:Null<DockLayoutGeometry>;
+    var historyUndoLabel:Null<String>;
+    var historyRedoLabel:Null<String>;
 
     public function new(parent:h2d.Object, ctx:UiContext, input:InputAdapter,
             snapping:GridSnapping) {
@@ -268,6 +275,31 @@ class EditorShell {
                                 }
                             }]
                         }]);
+                };
+            } else if (menuName == "Edit") {
+                button.onClick = function() {
+                    if (menuDropdown.isOpen) {
+                        menuDropdown.close();
+                        return;
+                    }
+                    closePaletteIfOpen();
+                    menuDropdown.open(capturedButton.x, Theme.TITLE_BAR_HEIGHT, [{
+                        label: historyUndoLabel == null
+                            ? "Undo"
+                            : "Undo " + historyUndoLabel,
+                        onClick: function() {
+                            input.clearFocus();
+                            if (onUndo != null) onUndo();
+                        }
+                    }, {
+                        label: historyRedoLabel == null
+                            ? "Redo"
+                            : "Redo " + historyRedoLabel,
+                        onClick: function() {
+                            input.clearFocus();
+                            if (onRedo != null) onRedo();
+                        }
+                    }]);
                 };
             } else {
                 button.onClick = function() {
@@ -410,6 +442,16 @@ class EditorShell {
                         if (onRotationChanged != null) onRotationChanged(capturedIndex, value);
                     } else if (onScaleChanged != null) onScaleChanged(capturedIndex, value);
                 };
+                field.onEditBegin = function() {
+                    if (onTransformEditBegin != null) {
+                        onTransformEditBegin(capturedRow, capturedIndex);
+                    }
+                };
+                field.onEditEnd = function() {
+                    if (onTransformEditEnd != null) {
+                        onTransformEditEnd(capturedRow, capturedIndex);
+                    }
+                };
                 field.onEditRejected = function(message:String) log("inspector: " + message);
                 rowFields.push(field);
             }
@@ -523,6 +565,14 @@ class EditorShell {
             if (anyTextCaptureActive()) return;
             deleteSelection();
         };
+        input.onUndoPressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onUndo != null) onUndo();
+        };
+        input.onRedoPressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onRedo != null) onRedo();
+        };
         // Tool shortcuts (1 Move / E Rotate / R Scale by default) share the
         // text-capture guard: typing in a field must not hijack the keypress.
         input.onShortcutPressed = function(tool:Int) {
@@ -620,6 +670,12 @@ class EditorShell {
     }
 
     public inline function log(line:String):Void console.log(line);
+
+    public function setHistoryState(undoLabel:Null<String>,
+            redoLabel:Null<String>):Void {
+        historyUndoLabel = undoLabel;
+        historyRedoLabel = redoLabel;
+    }
 
     public function update(dt:Float):Void {
         if (ctx.width != lastWidth || ctx.height != lastHeight) resize();

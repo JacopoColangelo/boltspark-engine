@@ -19,6 +19,9 @@ class NumericDragField extends h2d.Object {
 
     public var onValueChanged:Null<Float->Void>;
     public var onEditRejected:Null<String->Void>;
+    /** Brackets one arrow step, text commit, or complete scrub gesture. */
+    public var onEditBegin:Null<Void->Void>;
+    public var onEditEnd:Null<Void->Void>;
 
     public var value(default, null):Float;
     public final min:Float;
@@ -169,6 +172,7 @@ class NumericDragField extends h2d.Object {
                     var delta = context.window.mouseX - scrubStartX;
                     if (!dragging && Math.abs(delta) >= SCRUB_THRESHOLD) {
                         dragging = true;
+                        if (onEditBegin != null) onEditBegin();
                         beginUnboundedScrub();
                     }
                     if (dragging) {
@@ -182,6 +186,7 @@ class NumericDragField extends h2d.Object {
                     var wasDragging = dragging;
                     endScrubCapture();
                     dragging = false;
+                    if (wasDragging && onEditEnd != null) onEditEnd();
                     if (!wasDragging && pointerInside) {
                         focusInput();
                     } else if (!pointerInside) {
@@ -189,8 +194,10 @@ class NumericDragField extends h2d.Object {
                     }
                     captured.propagate = false;
                 case EFocusLost:
+                    var wasDragging = dragging;
                     dragging = false;
                     endScrubCapture();
+                    if (wasDragging && onEditEnd != null) onEditEnd();
                     context.restoreArrowCursor();
                     captured.propagate = false;
                 case _:
@@ -216,7 +223,9 @@ class NumericDragField extends h2d.Object {
         endUnboundedScrub();
         releaseNativeCapture();
         if (endingCapture) return;
+        var wasDragging = dragging;
         dragging = false;
+        if (wasDragging && onEditEnd != null) onEditEnd();
         context.restoreArrowCursor();
     }
 
@@ -269,7 +278,9 @@ class NumericDragField extends h2d.Object {
     }
 
     function stepBy(direction:Int):Void {
+        if (onEditBegin != null) onEditBegin();
         applyValue(value + direction * step, true);
+        if (onEditEnd != null) onEditEnd();
     }
 
     function applyValue(next:Float, notify:Bool):Void {
@@ -311,7 +322,9 @@ class NumericDragField extends h2d.Object {
             if (onEditRejected != null) onEditRejected('Value must be between ${min} and ${max}.');
             return;
         }
+        if (onEditBegin != null) onEditBegin();
         applyValue(parsed, true);
+        if (onEditEnd != null) onEditEnd();
     }
 
     function allowsCharacter(charCode:Int):Bool {

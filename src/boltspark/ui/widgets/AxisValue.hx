@@ -6,6 +6,8 @@ import boltspark.ui.UiContext;
 class AxisValue extends h2d.Object {
     public var onCommit:Null<Float->Void>;
     public var onEditRejected:Null<String->Void>;
+    public var onEditBegin:Null<Void->Void>;
+    public var onEditEnd:Null<Void->Void>;
 
     final field:NumericDragField;
 
@@ -20,6 +22,12 @@ class AxisValue extends h2d.Object {
         };
         field.onEditRejected = function(message) {
             if (onEditRejected != null) onEditRejected(message);
+        };
+        field.onEditBegin = function() {
+            if (onEditBegin != null) onEditBegin();
+        };
+        field.onEditEnd = function() {
+            if (onEditEnd != null) onEditEnd();
         };
     }
 

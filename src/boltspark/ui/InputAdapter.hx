@@ -33,6 +33,8 @@ class InputAdapter {
     public var onSnapHoldChanged:Null<Bool->Void>;
     /** Escape (outside text fields and captures): closes menus and windows. */
     public var onEscapePressed:Null<Void->Void>;
+    public var onUndoPressed:Null<Void->Void>;
+    public var onRedoPressed:Null<Void->Void>;
 
     final scene:h2d.Scene;
     final keybindings:Keybindings;
@@ -45,6 +47,8 @@ class InputAdapter {
     var shortcutKeyDown:Int = -1;
     var snapToGridKeyDown:Int = -1;
     var snapHoldKeyDown:Int = -1;
+    var undoKeyDown:Int = -1;
+    var redoKeyDown:Int = -1;
 
     public function new(scene:h2d.Scene, keybindings:Keybindings,
             ?state:UiInputState) {
@@ -130,6 +134,18 @@ class InputAdapter {
                         snapHoldKeyDown = event.keyCode;
                     }
                 }
+                if (keybindings.matches(EditorAction.Undo, event.keyCode, ctrlDown)) {
+                    if (undoKeyDown < 0) {
+                        if (onUndoPressed != null) onUndoPressed();
+                        undoKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.Redo, event.keyCode, ctrlDown)) {
+                    if (redoKeyDown < 0) {
+                        if (onRedoPressed != null) onRedoPressed();
+                        redoKeyDown = event.keyCode;
+                    }
+                }
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
                     onEscapePressed();
                 }
@@ -140,6 +156,8 @@ class InputAdapter {
                 if (event.keyCode == deleteKeyDown) deleteKeyDown = -1;
                 if (event.keyCode == shortcutKeyDown) shortcutKeyDown = -1;
                 if (event.keyCode == snapToGridKeyDown) snapToGridKeyDown = -1;
+                if (event.keyCode == undoKeyDown) undoKeyDown = -1;
+                if (event.keyCode == redoKeyDown) redoKeyDown = -1;
                 if (event.keyCode == snapHoldKeyDown) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -161,6 +179,8 @@ class InputAdapter {
                 deleteKeyDown = -1;
                 shortcutKeyDown = -1;
                 snapToGridKeyDown = -1;
+                undoKeyDown = -1;
+                redoKeyDown = -1;
                 if (snapHoldKeyDown >= 0) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;

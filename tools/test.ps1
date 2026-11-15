@@ -2,6 +2,7 @@ param(
     [switch]$Portable,
     [switch]$Build,
     [switch]$NativeSmoke,
+    [switch]$CommandHistory,
     [switch]$WindowLifecycle,
     [switch]$DpiProbe,
     [switch]$DeviceReset
@@ -17,6 +18,7 @@ $haxeExe = Join-Path $haxeDevDir 'haxe.exe'
 $hlExe = Join-Path $hashLinkDir 'hl.exe'
 $binDir = Join-Path $repoRoot 'bin'
 $testOutput = Join-Path $binDir 'test-results'
+$validationPolicyPath = Join-Path $repoRoot 'tests\validation-policy.json'
 
 function Assert-LastExitCode([string]$message) {
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
@@ -59,6 +61,17 @@ foreach ($compilerRuntime in $compilerRuntimes.Keys) {
 
 New-Item -ItemType Directory -Force $testOutput | Out-Null
 
+if (-not (Test-Path $validationPolicyPath)) {
+    throw "Tracked validation policy is missing: $validationPolicyPath"
+}
+$validationPolicy = Get-Content $validationPolicyPath -Raw | ConvertFrom-Json
+if ($validationPolicy.version -ne 1) {
+    throw "Unsupported validation policy version in $validationPolicyPath."
+}
+if ($validationPolicy.ignoreExternalHardwareValidation -eq $true) {
+    Write-Host "[policy] External hardware validation deferred until $($validationPolicy.revisitAt)." -ForegroundColor Yellow
+}
+
 Push-Location $repoRoot
 try {
     & (Join-Path $PSScriptRoot 'check-policy.ps1')
@@ -99,6 +112,8 @@ try {
             'RotationEulerRepro',
             'BoltUiCoreRepro',
             'CommandHistoryRepro',
+            'EditorSessionRepro',
+            'KeybindingsMigrationRepro',
             'ProjectSerializationRepro'
         )) {
             Invoke-Haxe ($directClassPaths + @('--interp', '-main', $test)) `
@@ -128,6 +143,8 @@ try {
         @{ Name = 'RotationEulerRepro'; Output = 'rotation-euler-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'BoltUiCoreRepro'; Output = 'bolt-ui-core-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'CommandHistoryRepro'; Output = 'command-history-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
+        @{ Name = 'EditorSessionRepro'; Output = 'editor-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
+        @{ Name = 'KeybindingsMigrationRepro'; Output = 'keybindings-migration-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') }
     )
     foreach ($test in $hlTests) {
@@ -159,6 +176,10 @@ try {
     if ($NativeSmoke) {
         & (Join-Path $repoRoot 'tests\native\Test-NativeSmoke.ps1')
         Assert-LastExitCode 'Native smoke test'
+    }
+    if ($CommandHistory) {
+        & (Join-Path $repoRoot 'tests\native\Test-CommandHistory.ps1')
+        Assert-LastExitCode 'Native command-history test'
     }
     if ($WindowLifecycle) {
         & (Join-Path $repoRoot 'tests\native\Test-WindowLifecycle.ps1')

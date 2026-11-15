@@ -16,8 +16,9 @@ This command does not need Neko, HashLink runtime DLLs, or a GPU. It:
 1. enforces the native H2D + `hldx` + DX12 dependency policy;
 2. compiles the complete application to HashLink bytecode using the tracked
    source classpaths directly;
-3. runs the portable arcball, Euler, BoltUI-core, command-history, and
-   project/scene-serialization tests through the Haxe interpreter.
+3. runs the portable arcball, Euler, BoltUI-core, command-history,
+   editor-session, keybinding-migration, and project/scene-serialization tests
+   through the Haxe interpreter.
 
 The pinned compiler executable and its five adjacent Windows runtime DLLs are
 tracked as one hash-verified set; native HashLink/DX12 runtime modules remain
@@ -48,12 +49,13 @@ To rebuild everything first:
 Optional switches add real-window checks:
 
 ```powershell
-.\tools\test.ps1 -Build -NativeSmoke -WindowLifecycle -DpiProbe -DeviceReset
+.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -WindowLifecycle -DpiProbe -DeviceReset
 ```
 
 | Switch | Coverage |
 |---|---|
 | `-NativeSmoke` | Development and packaged release HWND creation, icon assignment, positive DX12-driver identity, empty stderr, and clean `WM_CLOSE`. |
+| `-CommandHistory` | Native gizmo, Inspector, Create, and Delete commands followed by rebindable Ctrl+Z/Ctrl+Y; verifies transform, renderer-view, identity, and selection restoration in the running DX12 editor. |
 | `-WindowLifecycle` | Small/large/baseline resize, maximize/restore, minimize/restore, splitter persistence, empty-space deselection, and cube picking after splitter movement. |
 | `-DpiProbe` | Current-monitor Win32 process awareness, `GetDpiForWindow`, and agreement with hldx's per-window display scale. |
 | `-DeviceReset` | Heaps DX12's public forced context-loss path, device/context recreation, resource restoration callback, and post-reset HWND responsiveness. |
@@ -80,5 +82,11 @@ in-application frame telemetry. Results are written beneath
 The current-monitor DPI probe does not prove transitions between physical
 monitors with different scale factors. The forced DX12 reset verifies Heaps'
 recreation path but is not a genuine driver-triggered `DXGI_ERROR_DEVICE_REMOVED`
-event. Those checks, and second-machine confirmation, remain explicit manual
-hardware gates and must not be marked complete from software simulation alone.
+event.
+
+The tracked flag `ignoreExternalHardwareValidation` in
+`tests/validation-policy.json` currently defers those checks and second-machine
+confirmation until M9 release hardening because the required external hardware
+and fault conditions are unavailable. The test runner reports that policy on
+every invocation. Deferred means non-blocking for current development—not
+passed—and the checklist items remain open until real evidence exists.

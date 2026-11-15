@@ -1,5 +1,8 @@
 import boltspark.editor.GridSnapping;
 import boltspark.editor.EditorViewport;
+import boltspark.editor.EditorObject;
+import boltspark.editor.EditorSession;
+import boltspark.editor.EditorTransform;
 import boltspark.editor.Keybindings;
 import boltspark.editor.RotationEuler;
 import boltspark.editor.ScalePolicy;
@@ -32,10 +35,9 @@ class Main extends hxd.App {
     var cubePrimitive:h3d.prim.Cube;
     var groundGrid:h3d.scene.Graphics;
     var selectionOutline:h3d.scene.Graphics;
+    /** Heaps render views synchronized from the renderer-independent session. */
     final sceneObjects:Array<SceneObject> = [];
-    final selectedObjectIds:Array<Int> = [];
-    var nextObjectId:Int = 1;
-    var selectedObjectId:Int = -1;
+    var editorSession:EditorSession;
     var gizmo:TransformGizmo;
     /** Unreal-style snap manager driving the toolbar, gizmo drags, and inspector commits. */
     var snap:GridSnapping;
@@ -58,6 +60,11 @@ class Main extends hxd.App {
     // starting a drag never jumps the object onto the grid.
     var dragStartPos:h3d.Vector;
     var dragStartQuat:h3d.Quat;
+    var dragStartTransform:EditorTransform;
+    var inspectorEditObjectId:Int = -1;
+    var inspectorEditRow:Int = -1;
+    var inspectorEditAxis:Int = -1;
+    var inspectorEditBefore:Null<EditorTransform>;
     // Gizmo drag pointer tracking. During a drag the window enters
     // relative mouse mode: the OS cursor is hidden and locked while raw
     // hardware deltas drive a virtual pointer, so drags continue
@@ -112,7 +119,9 @@ class Main extends hxd.App {
         cubePrimitive.addNormals();
         setupViewportScene();
         gizmo = new TransformGizmo(s3d);
-        addSceneObject("sampleCube", 0);
+        editorSession = new EditorSession();
+        var initialEditorObject = editorSession.addInitialObject("sampleCube");
+        synchronizeSceneObjects();
 
         s3d.camera.pos.set(5.8, 4.2, 6.4);
         s3d.camera.target.set(0, 0, 0);
@@ -144,6 +153,8 @@ class Main extends hxd.App {
         boltUI.onTransformChanged = applyTransformChange;
         boltUI.onRotationChanged = applyRotationChange;
         boltUI.onScaleChanged = applyScaleChange;
+        boltUI.onTransformEditBegin = beginInspectorTransformEdit;
+        boltUI.onTransformEditEnd = endInspectorTransformEdit;
         boltUI.onTransformReset = resetTransformRow;
         boltUI.onScaleLinkChanged = setScaleProportionsLinked;
         boltUI.onToolChanged = setEditorTool;
@@ -154,6 +165,8 @@ class Main extends hxd.App {
         boltUI.onViewportRelease = onViewportRelease;
         boltUI.onSnapChanged = onSnapChanged;
         boltUI.onSnapToGrid = snapSelectionToGrid;
+        boltUI.onUndo = undoEditorCommand;
+        boltUI.onRedo = redoEditorCommand;
         boltUI.onOpenApplicationWindow = function(kind) {
             var message = applicationWindows.open(kind);
             if (message.indexOf("could not") >= 0) {
@@ -177,8 +190,9 @@ class Main extends hxd.App {
         if (keybindings.lastError != "") {
             boltUI.log("keybindings: " + keybindings.lastError);
         }
+        editorSession.onChanged = synchronizeEditorSession;
         refreshHierarchy();
-        selectSceneObject(sceneObjects[0].id);
+        editorSession.selectObject(initialEditorObject.id);
 
         boltUI.onObjectNameChanged = function(name:String) {
             var selected = getSelectedObject();
@@ -189,9 +203,9 @@ class Main extends hxd.App {
                 refreshSelectionInspector();
                 return;
             }
-            selected.name = trimmedName;
-            refreshHierarchy();
-            logActivity("command: object name = " + trimmedName);
+            if (editorSession.renameObject(selected.id, trimmedName)) {
+                logActivity("command: object name = " + trimmedName);
+            }
         };
     }
 
@@ -260,9 +274,61 @@ class Main extends hxd.App {
         return RotationEuler.normalized(result);
     }
 
+    /** Capture one complete Inspector gesture so scrubbing creates one command. */
+    function beginInspectorTransformEdit(row:Int, axis:Int):Void {
+        var selected = getSelectedObject();
+        if (selected == null || gizmoDragging) return;
+        inspectorEditObjectId = selected.id;
+        inspectorEditRow = row;
+        inspectorEditAxis = axis;
+        inspectorEditBefore = selected.captureTransform();
+    }
+
+    function endInspectorTransformEdit(row:Int, axis:Int):Void {
+        if (inspectorEditObjectId < 0 || row != inspectorEditRow
+                || axis != inspectorEditAxis) {
+            clearInspectorTransformEdit();
+            return;
+        }
+        var selected = findSceneObject(inspectorEditObjectId);
+        var before = inspectorEditBefore;
+        clearInspectorTransformEdit();
+        if (selected == null || before == null) return;
+        editorSession.commitAppliedTransform(selected.id, before,
+            selected.captureTransform(), inspectorTransformLabel(
+                selected.name, row, axis));
+    }
+
+    function clearInspectorTransformEdit():Void {
+        inspectorEditObjectId = -1;
+        inspectorEditRow = -1;
+        inspectorEditAxis = -1;
+        inspectorEditBefore = null;
+    }
+
+    function inspectorTransformLabel(name:String, row:Int, axis:Int):String {
+        var rows = ["Position", "Rotation", "Scale"];
+        return 'Edit ${name} ${rows[row]} ${axisName(axis).toUpperCase()}';
+    }
+
+    /** Capture an atomic transform callback that is not inside a UI gesture. */
+    function atomicTransformStart(selected:SceneObject):Null<EditorTransform> {
+        return inspectorEditObjectId == selected.id
+            ? null
+            : selected.captureTransform();
+    }
+
+    function commitAtomicTransform(selected:SceneObject,
+            before:Null<EditorTransform>, description:String):Void {
+        if (before == null) return;
+        editorSession.commitAppliedTransform(selected.id, before,
+            selected.captureTransform(), description);
+    }
+
     function applyTransformChange(axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
+        var commandBefore = atomicTransformStart(selected);
         // Inspector commits are deliberate typed values, so they are never
         // snapped (matching Unreal's details panel); only gizmo drags snap,
         // incrementally, and Ctrl+End performs an explicit absolute snap.
@@ -282,12 +348,15 @@ class Main extends hxd.App {
             : axis == 1 ? selected.mesh.y : selected.mesh.z;
         if (placed && different(actual, value)) logWorldBound(selected);
         pushInspectorTransform(selected);
+        commitAtomicTransform(selected, commandBefore,
+            inspectorTransformLabel(selected.name, 0, axis));
         logActivity('command: ${selected.name} position.${axisName(axis)} = ${round2(actual)}');
     }
 
     function applyRotationChange(axis:Int, degrees:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
+        var commandBefore = atomicTransformStart(selected);
         var previousPosition = new h3d.Vector(
             selected.mesh.x, selected.mesh.y, selected.mesh.z);
         var previousRotation = new h3d.Quat();
@@ -323,12 +392,15 @@ class Main extends hxd.App {
         pushInspectorTransform(selected);
         var applied = rotationDegrees(selected);
         var actual = axis == 0 ? applied.x : axis == 1 ? applied.y : applied.z;
+        commitAtomicTransform(selected, commandBefore,
+            inspectorTransformLabel(selected.name, 1, axis));
         logActivity('command: ${selected.name} rotation.${axisName(axis)} = ${round2(actual)} deg');
     }
 
     function applyScaleChange(axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
+        var commandBefore = atomicTransformStart(selected);
         var previous = switch (axis) {
             case 0: selected.mesh.scaleX;
             case 1: selected.mesh.scaleY;
@@ -362,11 +434,15 @@ class Main extends hxd.App {
         refreshScaleRendering(selected);
         pushInspectorTransform(selected);
         if (scaleProportionsLinked) {
+            commitAtomicTransform(selected, commandBefore,
+                'Edit ${selected.name} Proportional Scale');
             logActivity('command: ${selected.name} proportional scale = '
                 + scaleDescription(selected.mesh));
         } else {
             var actual = axis == 0 ? selected.mesh.scaleX
                 : axis == 1 ? selected.mesh.scaleY : selected.mesh.scaleZ;
+            commitAtomicTransform(selected, commandBefore,
+                inspectorTransformLabel(selected.name, 2, axis));
             logActivity('command: ${selected.name} scale.${axisName(axis)} = ${round2(actual)}');
         }
     }
@@ -388,6 +464,7 @@ class Main extends hxd.App {
     function resetTransformRow(row:Int):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
+        var commandBefore = selected.captureTransform();
         var rowName:String;
         switch (row) {
             case 0:
@@ -408,6 +485,8 @@ class Main extends hxd.App {
         }
         if (row == 2) refreshScaleRendering(selected);
         pushInspectorTransform(selected);
+        editorSession.commitAppliedTransform(selected.id, commandBefore,
+            selected.captureTransform(), 'Reset ${selected.name} ${rowName}');
         logActivity('command: ${selected.name} reset ${rowName}');
     }
 
@@ -483,6 +562,7 @@ class Main extends hxd.App {
         dragStartPos = new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z);
         dragStartQuat = new h3d.Quat();
         dragStartQuat.load(selected.mesh.getRotationQuat());
+        dragStartTransform = selected.captureTransform();
         gizmo.beginDrag(handle, selected.mesh, viewportRay(x, y), pointer.x, pointer.y);
         // Capture all gizmo anchors before raw input can invoke its callback.
         beginRelativeDrag();
@@ -581,6 +661,7 @@ class Main extends hxd.App {
         gizmoDragging = false;
         gizmoHandle = -1;
         gizmoWorldBounded = false;
+        dragStartTransform = null;
         endRelativeDrag();
         gizmo.endDrag();
     }
@@ -671,6 +752,7 @@ class Main extends hxd.App {
     function snapSelectionToGrid():Void {
         var selected = getSelectedObject();
         if (selected == null || gizmoDragging) return;
+        var commandBefore = selected.captureTransform();
         var step = snap.translationStep;
         var grid = snap.snapPositionToGrid(
             new h3d.Vector(selected.mesh.x, selected.mesh.y, selected.mesh.z));
@@ -686,6 +768,8 @@ class Main extends hxd.App {
             return;
         }
         pushInspectorTransform(selected);
+        editorSession.commitAppliedTransform(selected.id, commandBefore,
+            selected.captureTransform(), 'Snap ${selected.name} to Grid');
         if (constrained) logWorldBound(selected);
         logActivity('snapping: ${selected.name} to grid (step ${round2(step)}) '
             + 'position = (${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
@@ -732,12 +816,23 @@ class Main extends hxd.App {
         var selected = getSelectedObject();
         if (selected == null || handle < 0) {
             gizmoWorldBounded = false;
+            dragStartTransform = null;
             return;
         }
         if (gizmoWorldBounded) logWorldBound(selected);
         gizmoWorldBounded = false;
-        if (!verboseLogging) return;
         var handleName = gizmo.describe(handle);
+        var commandName = switch (currentTool) {
+            case TransformGizmo.TOOL_MOVE: 'Move ${selected.name}';
+            case TransformGizmo.TOOL_ROTATE: 'Rotate ${selected.name}';
+            default: 'Scale ${selected.name}';
+        };
+        if (dragStartTransform != null) {
+            editorSession.commitAppliedTransform(selected.id, dragStartTransform,
+                selected.captureTransform(), commandName);
+        }
+        dragStartTransform = null;
+        if (!verboseLogging) return;
         var at = '(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
             + ' ${round2(selected.mesh.z)})';
         var rotation = rotationDegrees(selected);
@@ -779,18 +874,53 @@ class Main extends hxd.App {
         }
     }
 
-    function addSceneObject(name:String, x:Float, z:Float = 0):SceneObject {
+    function createSceneObjectView(object:EditorObject):SceneObject {
         var mesh = new h3d.scene.Mesh(cubePrimitive, s3d);
-        mesh.name = name;
-        if (!WorldBounds.placeInside(mesh, x, 0, z)) mesh.setPosition(0, 0, 0);
+        mesh.name = object.name;
         mesh.material.color.setColor(Theme.CUBE_ORANGE);
         mesh.material.shadows = false;
         mesh.material.specularAmount = 0.18;
         mesh.material.specularPower = 24;
-        var sceneObject = new SceneObject(nextObjectId++, mesh);
+        var sceneObject = new SceneObject(object.id, mesh, object.persistentId);
+        sceneObject.applyTransform(object.transform);
         refreshScaleRendering(sceneObject);
-        sceneObjects.push(sceneObject);
         return sceneObject;
+    }
+
+    /** Mirror the pure EditorSession model into Heaps scene objects. */
+    function synchronizeSceneObjects():Void {
+        var index = sceneObjects.length - 1;
+        while (index >= 0) {
+            if (editorSession.findObject(sceneObjects[index].id) == null) {
+                sceneObjects[index].mesh.remove();
+                sceneObjects.splice(index, 1);
+            }
+            index--;
+        }
+
+        var ordered:Array<SceneObject> = [];
+        for (object in editorSession.objects) {
+            var sceneObject = findSceneObject(object.id);
+            if (sceneObject == null) sceneObject = createSceneObjectView(object);
+            sceneObject.name = object.name;
+            sceneObject.applyTransform(object.transform);
+            refreshScaleRendering(sceneObject);
+            ordered.push(sceneObject);
+        }
+        sceneObjects.resize(ordered.length);
+        for (index in 0...ordered.length) sceneObjects[index] = ordered[index];
+    }
+
+    /** Refresh renderer and UI after execute, undo, redo, or selection. */
+    function synchronizeEditorSession():Void {
+        synchronizeSceneObjects();
+        refreshHierarchy();
+        refreshSelectionOutline();
+        var selected = getSelectedObject();
+        gizmo.attach(selected == null ? null : selected.mesh);
+        refreshSelectionInspector();
+        boltUI.setHistoryState(editorSession.history.undoLabel,
+            editorSession.history.redoLabel);
     }
 
     /** Keep back-face culling aligned with a reflected transform's winding. */
@@ -821,12 +951,12 @@ class Main extends hxd.App {
     }
 
     function createCube():Void {
-        createCubeAtPosition(nextObjectId * 1.5, 0);
+        createCubeAtPosition(editorSession.nextRuntimeId * 1.5, 0);
     }
 
     function createCubeAtViewport(viewX:Float, viewY:Float):Void {
         var ray = viewportRay(viewX, viewY);
-        var x = nextObjectId * 1.5;
+        var x = editorSession.nextRuntimeId * 1.5;
         var z = 0.0;
         if (Math.abs(ray.ly) > 0.0001) {
             var distance = -ray.py / ray.ly;
@@ -839,70 +969,53 @@ class Main extends hxd.App {
     }
 
     function createCubeAtPosition(x:Float, z:Float):Void {
-        var name = "Cube" + nextObjectId;
-        var sceneObject = addSceneObject(name, x, z);
-        refreshHierarchy();
-        selectSceneObject(sceneObject.id);
+        var runtimeId = editorSession.nextRuntimeId;
+        var name = "Cube" + runtimeId;
+        // The current palette creates a unit cube with identity rotation/scale;
+        // constrain its half-unit geometry before it enters session history.
+        var pivotLimit = WorldBounds.HALF_EXTENT - 0.5;
+        var transform = new EditorTransform(
+            Math.max(-pivotLimit, Math.min(pivotLimit, x)), 0,
+            Math.max(-pivotLimit, Math.min(pivotLimit, z)));
+        editorSession.createObject(name, transform);
         logActivity("scene: created " + name);
     }
 
     function deleteSceneObjects(ids:Array<Int>):Void {
-        var deletedNames:Array<String> = [];
-        var index = sceneObjects.length - 1;
-        while (index >= 0) {
-            var sceneObject = sceneObjects[index];
-            if (ids.indexOf(sceneObject.id) >= 0) {
-                deletedNames.push(sceneObject.name);
-                sceneObject.mesh.remove();
-                sceneObjects.splice(index, 1);
-            }
-            index--;
-        }
+        var deletedNames = editorSession.deleteObjects(ids);
         if (deletedNames.length == 0) {
             boltUI.log("scene: selected objects no longer exist");
-            selectSceneObject(-1);
+            editorSession.selectObject(-1);
             return;
         }
-        refreshHierarchy();
-        var nextSelection = sceneObjects.length == 0 ? -1 : sceneObjects[sceneObjects.length - 1].id;
-        selectSceneObject(nextSelection);
         for (name in deletedNames) logActivity("scene: deleted " + name);
     }
 
     function selectSceneObject(id:Int):Void {
-        selectSceneObjects(id < 0 ? [] : [id], id);
+        editorSession.selectObject(id);
     }
 
     function selectSceneObjects(ids:Array<Int>, primaryId:Int):Void {
-        selectedObjectIds.resize(0);
-        for (id in ids) {
-            if (selectedObjectIds.indexOf(id) >= 0) continue;
-            if (findSceneObject(id) != null) selectedObjectIds.push(id);
-        }
-        selectedObjectId = selectedObjectIds.indexOf(primaryId) >= 0
-            ? primaryId
-            : (selectedObjectIds.length == 0 ? -1 : selectedObjectIds[selectedObjectIds.length - 1]);
-        refreshSelectionOutline();
-        gizmo.attach(getSelectedObject() == null ? null : getSelectedObject().mesh);
-        refreshSelectionInspector();
+        clearInspectorTransformEdit();
+        editorSession.selectObjects(ids, primaryId);
     }
 
     /** Push the primary selection's full inspector state through BoltUI. */
     function refreshSelectionInspector():Void {
         var selected = getSelectedObject();
         if (selected == null) {
-            boltUI.setSelectedObjects(selectedObjectIds, -1, "");
+            boltUI.setSelectedObjects(editorSession.selectedObjectIds, -1, "");
             return;
         }
         var rotation = rotationDegrees(selected);
-        boltUI.setSelectedObjects(selectedObjectIds, selected.id,
+        boltUI.setSelectedObjects(editorSession.selectedObjectIds, selected.id,
             selected.name, selected.mesh.x, selected.mesh.y, selected.mesh.z,
             rotation.x, rotation.y, rotation.z,
             selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
     }
 
     function getSelectedObject():Null<SceneObject> {
-        return findSceneObject(selectedObjectId);
+        return findSceneObject(editorSession.selectedObjectId);
     }
 
     function findSceneObject(id:Int):Null<SceneObject> {
@@ -912,10 +1025,38 @@ class Main extends hxd.App {
 
     function refreshHierarchy():Void {
         var entries:Array<HierarchyEntry> = [];
-        for (sceneObject in sceneObjects) {
-            entries.push(new HierarchyEntry(sceneObject.id, sceneObject.name));
+        for (object in editorSession.objects) {
+            entries.push(new HierarchyEntry(object.id, object.name));
         }
         boltUI.setHierarchyEntries(entries);
+    }
+
+    function undoEditorCommand():Void {
+        if (gizmoDragging || inspectorEditObjectId >= 0) return;
+        var label = editorSession.history.undoLabel;
+        if (!editorSession.undo()) return;
+        logActivity('command: undo ${label}');
+        printHistoryTransform("undo", label);
+    }
+
+    function redoEditorCommand():Void {
+        if (gizmoDragging || inspectorEditObjectId >= 0) return;
+        var label = editorSession.history.redoLabel;
+        if (!editorSession.redo()) return;
+        logActivity('command: redo ${label}');
+        printHistoryTransform("redo", label);
+    }
+
+    function printHistoryTransform(action:String, label:Null<String>):Void {
+        if (!verboseLogging) return;
+        var selected = getSelectedObject();
+        if (selected == null) {
+            printActivity('[history] ${action} label=${label} selection=none');
+            return;
+        }
+        printActivity('[history] ${action} label=${label} object=${selected.name}'
+            + ' position=(${round2(selected.mesh.x)}, ${round2(selected.mesh.y)},'
+            + ' ${round2(selected.mesh.z)})');
     }
 
     function setupViewportScene():Void {
@@ -980,7 +1121,7 @@ class Main extends hxd.App {
         selectionOutline.clear();
         selectionOutline.lineStyle(2.0, Theme.ACCENT, 1);
         for (sceneObject in sceneObjects) {
-            if (selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
+            if (editorSession.selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
             drawSelectionEdges(selectionOutline, sceneObject.mesh);
         }
     }

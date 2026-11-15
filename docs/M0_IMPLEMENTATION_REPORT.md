@@ -39,7 +39,7 @@ Environment: user-level env vars point at the project toolchain (`HAXEPATH`, `HA
 - Editor shell: compact square-edged top bar and toolbar, the embedded Boltspark icon in place of the old procedural mark/text, searchable hierarchy (clickable `sampleCube` item), **transparent 3D viewport** (starter bug fixed: it used to fill the whole window with an opaque background, hiding `s3d`), continuous Object/Transform inspector groups, row resets, ratio-preserving linked Scale, timestamped editor console, and a slim status bar. Resize-aware layout.
 - UI edge quality: embedded Inter Regular, SemiBold, and Bold TTF faces are rasterized by FreeType at each exact requested UI size (11/13/15px), with native TrueType hinting, correct pen advances and an on-demand internal glyph atlas. JetBrains Mono Regular now follows the same runtime path at its existing 12px size for console lines and numeric values, preserving the former 17px line height, 13px baseline, 7px digit advance, and fixed-width behavior. Small icons and symbols remain texture-free analytic signed-distance shapes, now rasterized at their exact integer size with pixel-grid-fitted 1/1.5/2px optical weights and derivative anti-aliasing on curves and diagonals.
 - Command flow: widgets → shell callbacks → `Main` → engine objects (no direct widget→engine mutation).
-- Viewport transform snapping now has independent translation/rotation/scale toggles and preset ramps. V temporarily bypasses translation snapping, Ctrl+End performs an explicit absolute grid snap, and File → Editor Settings → Editor Keybindings opens a separate native top-level hldx/DX12 application window for persisted, conflict-checked shortcuts with defaults 1/E/R for Move/Rotate/Scale. Changes synchronize back to the running editor. Both HWNDs use native dark title bars; close/reopen hides and restores the same keybindings host rather than rebuilding its process, device, and font cache. The host HWND is owned by the launching editor and explicitly activated on show, so its first open cannot be placed behind the editor.
+- Viewport transform snapping now has independent translation/rotation/scale toggles and preset ramps. V temporarily bypasses translation snapping, Ctrl+End performs an explicit absolute grid snap, and File → Editor Settings → Editor Keybindings opens a separate native top-level hldx/DX12 application window for persisted, conflict-checked shortcuts with defaults 1/E/R for Move/Rotate/Scale and Ctrl+Z/Ctrl+Y for Undo/Redo. Changes synchronize back to the running editor. Both HWNDs use native dark title bars; close/reopen hides and restores the same keybindings host rather than rebuilding its process, device, and font cache. The host HWND is owned by the launching editor and explicitly activated on show, so its first open cannot be placed behind the editor.
 
 ### Build tools
 - The initial M0 scripts were consolidated into `tools/build.ps1`. It supports environment validation (`-Check`), explicit dependency installation (`-InstallDependencies`), development/release builds (default), and running the development build (`-Run`).
@@ -119,7 +119,8 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
   backend-independent input state tracks physical downs and reports unmatched
   releases as `orphanUp`, including releases after focus-loss clears held keys.
   It remains diagnostic and does not trigger editor commands.
-- Second-machine confirmation of the acceptance checklist is pending.
+- Second-machine confirmation is unavailable and explicitly deferred until M9
+  by `tests/validation-policy.json`; it remains open rather than passed.
 - Stale machine-level env vars on C: (dead paths) need admin to remove.
 - A cosmetic artifact: cube bottom edge shows slight z-fighting speckle at some angles (unlit cube, default renderer). Harmless at M0; will be revisited with the renderer work.
 
@@ -136,16 +137,17 @@ This historical M0 queue has advanced substantially. Gate 4 foundations and
 Gate 5 viewport embedding are implemented, while project/scene integration is
 now the next product-facing boundary. Current priorities are:
 
-1. Complete physical mixed-DPI and second-machine validation; the current
-   monitor is DPI-aware and reports a matching Win32/hldx scale.
-2. Migrate concrete editor edits onto the tested command-history foundation so
-   general Undo/Redo can be exposed safely.
-3. Integrate the versioned project/scene contracts into project open/save and
-   scene loading, followed by asset registry/import metadata.
-4. Continue incremental BoltUI widget migration onto stable IDs, generic layout,
+1. Integrate the renderer-independent editor session with the versioned
+   project/scene contracts for project open/save and scene loading. Concrete
+   create/delete/rename/transform edits now use command history and expose
+   Undo/Redo.
+2. Follow project/scene loading with asset registry/import metadata.
+3. Continue incremental BoltUI widget migration onto stable IDs, generic layout,
    and pooled draw commands.
-5. Keep genuine driver-triggered DXGI device removal as a hardware gate; the
-   explicit Heaps context-loss/recreation path is now covered automatically.
+4. Keep genuine driver-triggered DXGI device removal, physical mixed-DPI, and
+   second-machine confirmation open but non-blocking under the tracked
+   `ignoreExternalHardwareValidation` policy until M9 release hardening; the
+   explicit Heaps context-loss/recreation path remains covered automatically.
 
 ## 10. Post-M0 foundation update — 2026-11-15
 
@@ -153,8 +155,9 @@ now the next product-facing boundary. Current priorities are:
   compiles the complete project and runs GPU-independent tests on hosted Windows
   CI; native mode adds HashLink/CArray, FreeType, and optional HWND/DX12 probes.
 - Native smoke, resize/maximize/restore, dock-splitter + picking, current-monitor
-  DPI awareness, and forced DX12 context recreation now have tracked probes in
-  `tests/native/`. Machine-specific outputs remain under `bin/test-results/`.
+  DPI awareness, command-history Undo/Redo, and forced DX12 context recreation
+  now have tracked probes in `tests/native/`. Machine-specific outputs remain
+  under `bin/test-results/`.
 - BoltUI now has explicit frame boundaries, scoped stable IDs, persistent state,
   an input snapshot with unmatched-key-up diagnostics, row/column/stack layout,
   contract diagnostics, and pooled draw commands used by editor chrome.
@@ -164,4 +167,5 @@ now the next product-facing boundary. Current priorities are:
 - Initial M3 data foundations now include versioned project/scene schemas,
   durable IDs, safe relative paths, unknown-field preservation, reference and
   cycle validation, atomic saves with backup, fixtures, and command history.
-  They are foundations only; user-facing project open/save is not yet claimed.
+  A pure editor session now integrates concrete create/delete/rename/transform
+  commands with Undo/Redo. User-facing project open/save is not yet claimed.

@@ -126,7 +126,8 @@ The editor clips `s3d` rendering to the computed viewport rectangle with Heaps' 
 The scissored viewport, unified coordinate conversion, repeated window/dock
 resize, selection path, current-monitor DPI awareness, and Heaps forced-context
 reset are implemented and tracked by native probes. Physical mixed-DPI monitor
-transitions and a genuine driver-triggered DXGI removal remain hardware gates.
+transitions and a genuine driver-triggered DXGI removal remain hardware gates,
+deferred until M9 by `tests/validation-policy.json`.
 
 ## 6. Input model
 
@@ -155,6 +156,7 @@ Use H2D `Interactive` for the first button proof. Before implementing docking, a
 - Never keep stale GPU resources across device loss/reset; add a device-loss/recreate test before custom render targets.
 - Continue migrating hardcoded physical metrics toward logical UI units. The
   native DPI scale is now observable and tested on the current monitor, but
-  full mixed-DPI rendering requires physical monitor validation.
+  full mixed-DPI rendering requires physical monitor validation currently
+  deferred by the tracked validation policy.
 - Keep rendering state and editor domain state separate.
 - No agent may alter the native backend or add a new UI library without an ADR and passing the acceptance suite.

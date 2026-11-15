@@ -5,6 +5,10 @@ Evidence files are under `bin/` unless noted otherwise.
 Reusable Haxe tests and native probes are tracked under `tests/repro/` and
 `tests/native/`; fresh outputs are generated under `bin/test-results/`.
 
+External hardware-only checks are currently deferred by the tracked
+`ignoreExternalHardwareValidation` flag in `tests/validation-policy.json` until
+M9 release hardening. They remain unchecked and must not be described as passed.
+
 ## Build/runtime
 
 - [x] Windows 11 x64 machine and GPU/driver recorded (`docs/TOOLCHAIN_VERSIONS.md`).
@@ -50,11 +54,11 @@ Reusable Haxe tests and native probes are tracked under `tests/repro/` and
   a responsive native window (`tests/native/Test-WindowLifecycle.ps1`).
 - [x] The reference monitor reports a per-monitor-aware process, Win32 96 DPI,
   and matching hldx 1× display scale (`tests/native/Test-DpiAwareness.ps1`).
-- [ ] Physical transitions between monitors at multiple Windows scaling factors remain pending.
+- [ ] **Deferred by validation policy:** physical transitions between monitors at multiple Windows scaling factors.
 - [x] Heaps' explicit DX12 context-loss path disposes/recreates the driver,
   invokes resource restoration, leaves the HWND responsive, and closes cleanly
   (`tests/native/Test-DeviceReset.ps1`).
-- [ ] Genuine driver/OS-triggered DXGI device-removal recovery remains a separate hardware gate.
+- [ ] **Deferred by validation policy:** genuine driver/OS-triggered DXGI device-removal recovery.
 - [x] Text is legible at baseline window size (1440x900 default; verified at 1296x900 after resize).
 - [x] Inter Regular, SemiBold, and Bold are rasterized from embedded TTF data by FreeType at exact 11/13/15px sizes, using native face hinting and correct pen advances; un-preloaded characters are cached on demand (`bin/ui-freetype-native-hint.png`, `bin/ui-freetype-release.png`, `bin/freetype-runtime-repro.log`). JetBrains Mono Regular uses the same path at 12px for console and numeric values while preserving its former 17px line height, 13px baseline, 7px digit advance, and zero-kerning fixed-width layout (`bin/console-freetype.png`, `bin/numeric-freetype.png`, `bin/text-freetype-evidence.txt`).
 - [x] Scene-hierarchy object labels are vertically centered from the exact Inter line metrics instead of the stale 4px offset; their text body now aligns with the disclosure/cube icon row (`bin/hierarchy-alignment.png`).
@@ -104,6 +108,9 @@ Executed on 2026-11-14 with window-scoped native key/mouse events against the Ha
 - [x] The keybindings HWND is assigned the launching editor as its native owner before its first show, then explicitly restored/raised/activated. A first-open menu probe confirmed `GW_OWNER == editor HWND`, preventing the settings window from opening behind the editor (`tests/native/historical/verify-first-keybindings-open.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] Rebind capture ignores modifier-only events: Ctrl then T captured `Ctrl+T` for Rotate in the separate window, persisted a complete versioned JSON map, synchronized into the already-running main editor, and immediately selected Rotate there (`bin/keybindings-native-window-rebound.png`, `bin/native-window-evidence.txt`). Duplicate chords are rejected and malformed/partial persisted maps leave the complete live/default map intact in `Keybindings.hx`.
 - [x] Shortcut commands, hold snapping, snap-to-grid, and Delete remain suppressed while an inspector/search text control owns keyboard capture.
+- [x] Undo and Redo are exposed through the native Edit menu and rebindable
+  Ctrl+Z/Ctrl+Y defaults. Version-1 keybinding maps migrate to version 2 by
+  retaining existing actions and appending the two history bindings.
 
 ## Viewport transform gizmo (Move tool)
 
@@ -159,6 +166,15 @@ hosted Windows CI job.
 - [x] Bounded command history passes execute, composite rollback ordering,
   undo, redo, redo-branch invalidation, and capacity tests
   (`tests/repro/CommandHistoryRepro.hx`).
+- [x] The renderer-independent editor session routes create, delete, rename,
+  Inspector transforms, resets, snapping, and complete gizmo drags through
+  history. Structural undo restores stable identity, hierarchy order, and
+  selection; transform undo preserves exact quaternion and Euler-hint state
+  (`tests/repro/EditorSessionRepro.hx`). A native window-scoped probe moved the
+  sample cube to `(-1, 0, 0)`, then verified Ctrl+Z restored `(0, 0, 0)` and
+  Ctrl+Y restored `(-1, 0, 0)`. The same run stepped Inspector Position X,
+  then exercised native Create/Delete undo and redo with Cube2 identity and
+  selection restoration (`tests/native/Test-CommandHistory.ps1`).
 - [x] Versioned project/scene fixtures round-trip with stable IDs, signed
   transforms, unknown fields, and component envelopes preserved. Unsafe paths,
   malformed references, duplicate IDs, cycles, and singular transforms are
@@ -173,7 +189,7 @@ hosted Windows CI job.
 - [x] Record GPU model, driver version (`docs/TOOLCHAIN_VERSIONS.md`). D3D12 feature level recorded from hardware class (12_1); Heaps DX12Driver does not expose a device feature-level query at M0 — direct runtime feature-level read is deferred to a later milestone if needed.
 - [x] Confirm `compile.hxml` selects `hldx` + `-D dx12` and does not reference `hlsdl` (enforced by `tools/build.ps1 -Check`).
 - [x] Root-cause diagnosis for the initial DX12 startup failure documented with an isolated repro (`tests/repro/DxCArrayRepro.hx` + analysis in `docs/M0_IMPLEMENTATION_REPORT.md`).
-- [ ] Repeat the native acceptance subset on a second Windows 11 / DX12 machine;
+- [ ] **Deferred by validation policy:** repeat the native acceptance subset on a second Windows 11 / DX12 machine;
   only the primary RTX 3080 development machine is currently evidenced.
 
 ## Performance baseline
@@ -192,4 +208,7 @@ hosted Windows CI job.
 (The baseline is observational rather than a product budget; longer soak,
 GPU-memory, and representative-project measurements remain later work.)
 
-**Do not mark this gate complete until the checklist is executed on a real Windows 11 target machine.** — Executed on the primary dev machine beginning 2026-11-11 and revalidated with tracked probes on 2026-11-15; second-machine confirmation remains open.
+The native foundation gate was executed on the primary Windows 11/DX12 machine
+beginning 2026-11-11 and revalidated with tracked probes on 2026-11-15. The
+three external hardware items remain visibly open but are non-blocking until M9
+under `tests/validation-policy.json`.

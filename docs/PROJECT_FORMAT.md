@@ -61,5 +61,9 @@ remain future M3 work.
 
 `src/boltspark/editor/commands/` provides bounded execute/undo/redo history,
 redo-branch invalidation, and composite commands with rollback if a child fails.
-It is headlessly tested. Existing editor callbacks still need incremental
-migration onto concrete commands before the editor can expose general Undo/Redo.
+`EditorSession` now owns renderer-independent object models and routes create,
+delete, rename, and transform changes through concrete commands. Inspector
+scrubs and gizmo previews commit as one transform command; deletion undo restores
+durable IDs, hierarchy order, and selection. This integration is headlessly
+tested, and Undo/Redo is exposed by the native editor. Mapping the session to
+`SceneDocument` remains the next project-session boundary.

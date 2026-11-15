@@ -5,15 +5,15 @@
 **Tasks**
 - Install Haxe 4.3+, a compatible HashLink x64 build, Heaps 2.1.0, `format`, and `hldx` 1.16.0 (or a documented compatible set).
 - Confirm `hl.exe` is available on `PATH` and the matching HashLink distribution provides both `directx.hdll` and `dx12.hdll`.
-- Install the DirectX 12 Agility SDK package matching `HL_DX12_AGILITY_VERSION` used by that HashLink runtime; place `D3D12Core.dll` and `d3d12SDKLayers.dll` in `D3D12` beside `hl.exe`.
-- Record exact Haxe, HashLink, HashLink native module hashes, Agility SDK version, Heaps, `format`, `hldx`, Windows build, GPU model, and driver version.
+- Verify whether the selected HashLink runtime uses the Agility SDK. The pinned official 1.16.0 binary is the standard DX12 build and requires no Agility runtime folder.
+- Record exact Haxe, HashLink, native module hashes, Agility status/version when applicable, Heaps, `format`, `hldx`, Windows build, GPU model, and driver version.
 - Do not install or depend on `hlsdl` for this Windows-first project configuration.
 
 **Exit criteria**
 - `haxe --version`, `hl --version`, and `haxelib list` are captured in `docs/TOOLCHAIN_VERSIONS.md`.
 - `haxelib path heaps`, `haxelib path format`, and `haxelib path hldx` succeed.
 - Both HashLink native modules (`directx.hdll` and `dx12.hdll`) are found by the HashLink VM.
-- Both required Agility SDK runtime DLLs are present in `D3D12` beside `hl.exe`, with a version matching the HashLink runtime build.
+- The runtime dependency set matches the selected HashLink build; for the pinned official 1.16.0 standard build, no Agility SDK DLLs are present or required.
 - `compile.hxml` explicitly includes `-D dx12`.
 - The same checkout compiles twice without dependency changes.
 
@@ -75,8 +75,8 @@ Implement in this order:
 
 The reusable core now also includes scoped stable IDs, frame lifecycle,
 backend-independent input snapshots, deterministic row/column/stack layout,
-diagnostics, and a pooled draw-command path. General widget migration and
-physical mixed-DPI validation continue incrementally.
+diagnostics, and a pooled draw-command path. General widget migration continues
+incrementally; physical mixed-DPI validation is deferred by the tracked policy.
 
 ## Gate 5 — Viewport embedding decision
 
@@ -88,13 +88,19 @@ The prototype clips `s3d` to the computed viewport rectangle with Heaps `Engine.
 - [x] Native DX12 smoke tests confirm viewport clipping, cube selection, empty-space deselection, and camera/picking alignment after a 1440x900 to 1280x800 window resize.
 - [x] Dock-splitter resize is validated against viewport framing, empty-space deselection, and object picking (`tests/native/Test-WindowLifecycle.ps1`).
 - [x] Current-monitor DPI awareness and hldx/Win32 scale agreement are validated (`tests/native/Test-DpiAwareness.ps1`, 96 DPI / 1× on the reference machine).
-- [ ] Physical cross-monitor behavior at multiple Windows scale factors remains pending.
+- [ ] Physical cross-monitor behavior at multiple Windows scale factors is deferred by `tests/validation-policy.json` until M9.
 - [x] Heaps' explicit DX12 context-loss/reset path recreates the context and restores scene resources while the editor remains responsive (`tests/native/Test-DeviceReset.ps1`).
-- [ ] A genuine driver/OS-triggered DXGI device-removal event remains a separate hardware test.
+- [ ] A genuine driver/OS-triggered DXGI device-removal event is deferred by `tests/validation-policy.json` until M9.
 
 ## DX12-specific validation
 
-DX12 is the baseline, not a later experiment. Before declaring the foundation complete, validate the matching HashLink VM, `directx.hdll`, `dx12.hdll`, Agility SDK version, `D3D12` runtime DLL placement, debug-layer behavior, and GPU support as one tested set. A future D3D11 fallback would require a separate explicit build configuration and architecture decision; it must not be automatic.
+DX12 is the baseline, not a later experiment. Validate the matching HashLink VM,
+`directx.hdll`, `dx12.hdll`, runtime dependency set, debug-layer behavior, and
+GPU support as one tested set. The pinned official HashLink 1.16.0 build does
+not use Agility; a future Agility-enabled build would require exact SDK,
+version, and folder validation. A future D3D11 fallback would require a
+separate explicit build configuration and architecture decision; it must not
+be automatic.
 
 ## Only after Gate 5
 
@@ -109,7 +115,7 @@ The initial editor scene contains selectable cube objects managed by the editor.
 - Inspector edits affect only the selected object and persist when switching selection.
 - Viewport picking selects the nearest cube; empty-space clicks clear selection.
 - Long hierarchy lists can be navigated without rows escaping the panel bounds.
-- Scene save/load, undo/redo, and general entity/component authoring remain later milestones.
+- Undo/redo is now integrated through Gate 10. Scene save/load and general entity/component authoring remain later milestones.
 
 ## Gate 7 — Editor panel usability and object creation
 
@@ -198,3 +204,28 @@ screen-space width, clips camera-crossing segments, and redraws per frame.
 - [x] Rebindable shortcuts 1/E/R switch tools with the text-editing guard; toolbar buttons share the same switch. Historical 1/2/3 probe evidence is superseded by the keybinding acceptance evidence.
 - [x] Automated evidence: `tests/native/historical/verify-transform-gizmo.ps1` drives axis, plane, ring, omni, and scale drags plus shortcut presses across three relaunched sessions; engine logs in `bin/gizmo-runlog-{move,rotate,scale}.txt`, summary in `bin/transform-gizmo-evidence.txt`. Two consecutive runs reproduced matching values.
 - [x] Focused evidence: `tests/native/historical/verify-gizmo-space-arcball.ps1` drives the Move center, presses the Rotate center and performs an arc-ball drag, then clicks the viewport toggle Local → World using window-scoped `SendMessageTimeout` only (`bin/gizmo-center-move-log.txt`, `bin/gizmo-arcball-log.txt`, `bin/gizmo-space-log.txt`).
+
+## Gate 10 — Renderer-independent editor session and concrete history
+
+`EditorSession` now owns pure editor object models, runtime and durable IDs,
+selection, and bounded command history. `Main` mirrors those models into Heaps
+scene objects instead of treating renderer objects as durable editor state.
+
+Create, delete, rename, Inspector transforms, row resets, grid snapping, and
+complete gizmo drags execute concrete commands. Inspector scrubs and live gizmo
+motion remain previews and commit one transform command at gesture end. Undo and
+Redo are available through the Edit menu and rebindable shortcuts.
+
+**Exit criteria**
+- [x] Create undo removes the object; redo restores the same durable identity.
+- [x] Delete undo restores hierarchy order and the previous multi-selection.
+- [x] Rename and transform undo/redo restore exact before/after state.
+- [x] Transform snapshots preserve the quaternion and continuous Euler hint.
+- [x] A complete Inspector scrub or gizmo drag creates one history entry.
+- [x] The session is renderer-independent and passes the headless
+  `tests/repro/EditorSessionRepro.hx` regression.
+- [x] The running DX12 editor passes a window-scoped gizmo → Ctrl+Z → Ctrl+Y
+  regression (`tests/native/Test-CommandHistory.ps1`).
+
+External mixed-DPI, physical device-removal, and second-machine checks remain
+open but are non-blocking until M9 under `tests/validation-policy.json`.

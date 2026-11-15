@@ -8,5 +8,7 @@ enum abstract EditorAction(Int) from Int to Int {
     var DeleteSelection = 3;
     var SnapToGrid = 4;
     var HoldSnapOff = 5;
-    var ACTION_COUNT = 6;
+    var Undo = 6;
+    var Redo = 7;
+    var ACTION_COUNT = 8;
 }

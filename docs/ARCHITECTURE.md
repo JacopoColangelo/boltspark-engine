@@ -78,18 +78,20 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | Module | Responsibility |
 |---|---|
 | `editor/EditorViewport.hx` | One source of truth for render-zone composition and viewport/window/backbuffer coordinate conversion used by rendering, rays, and gizmos. |
-| `editor/commands/` | Bounded execute/undo/redo history and failure-safe composite commands. Concrete editor operations are still being migrated onto it. |
+| `editor/EditorSession.hx` | Renderer-independent owner of editor objects, durable/runtime IDs, selection, and bounded command history. `Main` mirrors this model into Heaps scene objects. |
+| `editor/commands/` | Concrete create/delete/rename/transform commands plus bounded execute/undo/redo history and failure-safe composites. Structural commands restore hierarchy order, identity, and selection. |
 | `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, and atomic storage with backup. |
 | `tests/repro/` | Portable math/UI/data/command tests plus native-module regressions. |
-| `tests/native/` | Tracked HWND lifecycle, DPI, forced DX12 reset, smoke, and performance probes; outputs go to ignored `bin/test-results/`. |
+| `tests/native/` | Tracked HWND lifecycle, command-history, DPI, forced DX12 reset, smoke, and performance probes; outputs go to ignored `bin/test-results/`. |
 
 ## Key design rules established at M0
 
 1. **Transparent viewport.** The chrome never fills the center column; `s3d` shows through `s2d`. (The starter filled the whole window with an opaque background and hid the 3D scene — fixed in M0.)
 2. **Command flow, not direct widget mutation.** Widgets call shell callbacks;
-   `Main` currently maps transform/reset/proportional-scale operations to engine
-   objects. A tested command-history foundation now exists; concrete operations
-   still need migration before general Undo/Redo is exposed.
+   the pure `EditorSession` executes create/delete/rename/transform commands and
+   `Main` synchronizes their models to engine objects. Inspector scrubs and
+   complete gizmo drags retain live previews but commit one history entry.
+   Undo/Redo is exposed through the Edit menu and rebindable shortcuts.
 3. **Resize-aware, allocation-conscious.** Static chrome geometry is rebuilt only when the OS window size changes; per-frame work is limited to state synchronization.
 4. **Positive driver identification.** The app logs the driver class at startup; acceptance requires this line rather than inferring DX12 from the compile flag.
 5. **Toolchain as a locked set.** Compiler/runtime/bindings are pinned together (see `docs/TOOLCHAIN_VERSIONS.md`); `tools/build.ps1 -Check` enforces the pins.
@@ -110,6 +112,6 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 Splitters, retained text input, menus, bounded picking, native packaging, and
 current-monitor DPI awareness now exist. Still out of scope are a complete
 immediate-mode public BoltUI API, physical mixed-DPI monitor validation, a
-general dock tree/detached panels, integrated project open/save, asset import,
-the final component runtime, materials/PBR, undoable concrete editor commands,
-and Play mode. See `docs/PROJECT_FORMAT.md` for the implemented data boundary.
+    general dock tree/detached panels, integrated project open/save, asset import,
+    the final component runtime, materials/PBR, and Play mode. See
+    `docs/PROJECT_FORMAT.md` for the implemented data boundary.

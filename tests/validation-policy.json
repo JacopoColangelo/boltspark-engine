@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "ignoreExternalHardwareValidation": true,
+  "setByUserOn": "2026-11-15",
+  "revisitAt": "M9 release hardening",
+  "reason": "Required secondary hardware and fault-injection conditions are not currently available.",
+  "deferredChecks": [
+    "physical mixed-DPI transitions between monitors",
+    "genuine driver/OS-triggered DXGI device removal",
+    "native acceptance on a second Windows 11/DX12 machine"
+  ]
+}

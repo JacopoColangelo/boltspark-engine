@@ -47,3 +47,6 @@ Rules for AI agents (and humans) working in this repository. Read this before ma
 20. Keep reusable probes under `tests/native/`, never only under ignored `bin/`.
     Generated evidence belongs in `bin/test-results/`; document the exact probe
     and machine instead of committing transient bytecode or screenshots.
+21. `tests/validation-policy.json` may defer unavailable external hardware
+    checks. Deferred checks are non-blocking, not passed; keep them visibly open
+    and revisit them at the milestone named by the policy.
