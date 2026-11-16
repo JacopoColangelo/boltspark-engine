@@ -31,6 +31,7 @@ class EditorCameraController {
     public static inline var GESTURE_ORBIT:Int = 2;
 
     public static inline var DEG_TO_RAD:Float = 0.017453292519943295; // Math.PI / 180
+    public static inline var DEFAULT_FOCUS_DURATION:Float = 0.35;
 
     // Tunables. All are plain fields so future editor settings can bind them.
 
@@ -57,6 +58,12 @@ class EditorCameraController {
     public var focusPadding:Float = 1.2;
     /** Empty or point-like objects still receive a useful focus frame. */
     public var minimumFocusRadius:Float = 0.5;
+    /**
+     * Seconds used by Focus Selection. The duration is deliberately independent
+     * of travel distance so framing an object across the full editor world is
+     * just as responsive as framing a nearby object.
+     */
+    public var focusDuration:Float = DEFAULT_FOCUS_DURATION;
 
     /** Set by Main from live editor-shell focus state. */
     public var viewportFocused:Bool = false;
@@ -71,6 +78,8 @@ class EditorCameraController {
     final scratchForward = new h3d.Vector();
     final scratchRight = new h3d.Vector();
     final scratchUp = new h3d.Vector();
+    final focusStart = new h3d.Vector();
+    final focusDestination = new h3d.Vector();
 
     var yawRad:Float = 0;
     var pitchRad:Float = 0;
@@ -81,6 +90,9 @@ class EditorCameraController {
     var lookActive:Bool = false;
     var orbiting:Bool = false;
     var orbitDistance:Float = 10.0;
+    var focusActive:Bool = false;
+    var focusElapsed:Float = 0.0;
+    var activeFocusDuration:Float = 0.0;
 
     public function new(camera:h3d.Camera) {
         this.camera = camera;
@@ -93,6 +105,7 @@ class EditorCameraController {
      * navigation state; the initial framing comes from scene setup.
      */
     public function syncFromCamera():Void {
+        cancelFocusTransition();
         position.set(camera.pos.x, camera.pos.y, camera.pos.z);
         var fx = camera.target.x - camera.pos.x;
         var fy = camera.target.y - camera.pos.y;
@@ -168,6 +181,7 @@ class EditorCameraController {
     public function dollyForWheel(delta:Float):Void {
         if (delta == 0 || !viewportFocused || !keyboardEnabled
                 || lookActive || orbiting) return;
+        cancelFocusTransition();
         stopMovement();
         var forward = forwardVector();
         var step = Math.max(minWheelDolly, baseSpeed * wheelDollyScale);
@@ -180,8 +194,10 @@ class EditorCameraController {
     }
 
     /**
-     * Frame a world-space sphere while preserving the current view direction.
-     * The tighter of the horizontal and vertical FOVs determines distance.
+     * Smoothly frame a world-space sphere while preserving the current view
+     * direction. The tighter of the horizontal and vertical FOVs determines
+     * distance. Interpolation uses normalized time instead of world-unit speed,
+     * keeping focus responsive even when the object is kilometres away.
      */
     public function focusOn(center:h3d.Vector, radius:Float):Bool {
         if (center == null || !Math.isFinite(center.x)
@@ -197,18 +213,78 @@ class EditorCameraController {
         var distance = safeRadius * focusPadding
             / Math.max(0.000001, Math.sin(limitingHalfFov));
         var forward = forwardVector();
-        position.set(
-            center.x - forward.x * distance,
-            center.y - forward.y * distance,
-            center.z - forward.z * distance);
-        clampPosition();
+        focusStart.set(position.x, position.y, position.z);
+        focusDestination.set(
+            WorldBounds.clampCoordinate(center.x - forward.x * distance),
+            WorldBounds.clampCoordinate(center.y - forward.y * distance),
+            WorldBounds.clampCoordinate(center.z - forward.z * distance));
         orbitPivot.set(center.x, center.y, center.z);
-        var dx = position.x - center.x;
-        var dy = position.y - center.y;
-        var dz = position.z - center.z;
+        var dx = focusDestination.x - center.x;
+        var dy = focusDestination.y - center.y;
+        var dz = focusDestination.z - center.z;
         orbitDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        applyCamera();
+        focusElapsed = 0.0;
+        activeFocusDuration = Math.isFinite(focusDuration)
+            ? Math.max(0.0, focusDuration)
+            : DEFAULT_FOCUS_DURATION;
+        var travelX = focusDestination.x - focusStart.x;
+        var travelY = focusDestination.y - focusStart.y;
+        var travelZ = focusDestination.z - focusStart.z;
+        var travelSquared = travelX * travelX + travelY * travelY
+            + travelZ * travelZ;
+        focusActive = activeFocusDuration > 0.0 && travelSquared > 0.000000000001;
+        if (!focusActive) {
+            position.set(focusDestination.x, focusDestination.y,
+                focusDestination.z);
+            applyCamera();
+        }
         return true;
+    }
+
+    /**
+     * Smoothly frame the union of several world-space bounds, used when more
+     * than one object is selected. Objects without render geometry should be
+     * supplied as degenerate point bounds, so they still influence the frame.
+     */
+    public function focusOnBounds(boundsList:Array<h3d.col.Bounds>):Bool {
+        if (boundsList == null || boundsList.length == 0) return false;
+        var union = new h3d.col.Bounds();
+        var any = false;
+        for (bounds in boundsList) {
+            if (bounds == null || !focusBoundsUsable(bounds)) continue;
+            union.add(bounds);
+            any = true;
+        }
+        if (!any || union.isEmpty()) return false;
+        var center = new h3d.Vector(
+            (union.xMin + union.xMax) * 0.5,
+            (union.yMin + union.yMax) * 0.5,
+            (union.zMin + union.zMax) * 0.5);
+        var halfX = (union.xMax - union.xMin) * 0.5;
+        var halfY = (union.yMax - union.yMin) * 0.5;
+        var halfZ = (union.zMax - union.zMin) * 0.5;
+        return focusOn(center, Math.sqrt(halfX * halfX + halfY * halfY
+            + halfZ * halfZ));
+    }
+
+    static function focusBoundsUsable(bounds:h3d.col.Bounds):Bool {
+        return Math.isFinite(bounds.xMin) && Math.isFinite(bounds.xMax)
+            && Math.isFinite(bounds.yMin) && Math.isFinite(bounds.yMax)
+            && Math.isFinite(bounds.zMin) && Math.isFinite(bounds.zMax)
+            && bounds.xMax >= bounds.xMin && bounds.yMax >= bounds.yMin
+            && bounds.zMax >= bounds.zMin;
+    }
+
+    /** True while Focus Selection owns camera placement. */
+    public function isFocusTransitionActive():Bool {
+        return focusActive;
+    }
+
+    /** Stop a focus flight at its current position. */
+    public function cancelFocusTransition():Void {
+        focusActive = false;
+        focusElapsed = 0.0;
+        activeFocusDuration = 0.0;
     }
 
     // ------------------------------------------------------------------
@@ -216,10 +292,12 @@ class EditorCameraController {
     // ------------------------------------------------------------------
 
     public function beginLook():Void {
+        cancelFocusTransition();
         lookActive = true;
     }
 
     public function addLookDelta(dx:Float, dy:Float):Void {
+        cancelFocusTransition();
         yawRad += dx * lookSensitivity * DEG_TO_RAD;
         pitchRad = clampPitch(pitchRad - dy * lookSensitivity * DEG_TO_RAD);
     }
@@ -230,6 +308,7 @@ class EditorCameraController {
     }
 
     public function beginPan():Void {
+        cancelFocusTransition();
         // Anchor the pan depth like an orbit does: the current pivot is
         // projected onto the view axis so the pan scale matches the framing
         // under the cursor. Pan motion is perpendicular to the view axis,
@@ -247,6 +326,7 @@ class EditorCameraController {
     }
 
     public function addPanDelta(dx:Float, dy:Float):Void {
+        cancelFocusTransition();
         var forward = forwardVector();
         var right = rightVector();
         var screenUp = screenUpVector();
@@ -267,6 +347,7 @@ class EditorCameraController {
      * its depth is kept for the whole gesture.
      */
     public function beginOrbit(pivot:h3d.Vector):Void {
+        cancelFocusTransition();
         var forward = forwardVector();
         var alongAxis = (pivot.x - position.x) * forward.x
             + (pivot.y - position.y) * forward.y
@@ -297,6 +378,7 @@ class EditorCameraController {
     /** Window focus loss must never leave a stale velocity or stuck orbit. */
     public function onWindowFocusLost():Void {
         lookActive = false;
+        cancelFocusTransition();
         stopMovement();
     }
 
@@ -306,6 +388,18 @@ class EditorCameraController {
 
     public function update(dt:Float):Void {
         if (dt <= 0) return;
+        if (focusActive) {
+            // A gizmo drag disables camera input through keyboardEnabled. It
+            // must also stop an in-flight focus so the projection cannot move
+            // underneath the active transform handle.
+            if (!keyboardEnabled) {
+                cancelFocusTransition();
+            } else {
+                updateFocusTransition(dt);
+                applyCamera();
+                return;
+            }
+        }
         buildTargetVelocity();
         if (!navigationActive()) {
             // Releasing RMB must stop flight immediately. Letting the smoothed
@@ -461,6 +555,31 @@ class EditorCameraController {
             orbitPivot.y - forward.y * orbitDistance,
             orbitPivot.z - forward.z * orbitDistance);
         clampPosition();
+    }
+
+    /**
+     * Cubic smoothstep has zero velocity at both ends. Placement is evaluated
+     * directly from immutable endpoints, avoiding accumulated error and making
+     * completion independent of frame rate and travel distance.
+     */
+    function updateFocusTransition(dt:Float):Void {
+        focusElapsed += dt;
+        var progress = activeFocusDuration <= 0.0
+            ? 1.0
+            : Math.min(1.0, focusElapsed / activeFocusDuration);
+        var eased = progress * progress * (3.0 - 2.0 * progress);
+        position.set(
+            focusStart.x + (focusDestination.x - focusStart.x) * eased,
+            focusStart.y + (focusDestination.y - focusStart.y) * eased,
+            focusStart.z + (focusDestination.z - focusStart.z) * eased);
+        clampPosition();
+        if (progress >= 1.0) {
+            // Snap to the exact endpoint so no asymptotic tail or large-world
+            // floating-point residue remains after the transition.
+            position.set(focusDestination.x, focusDestination.y,
+                focusDestination.z);
+            cancelFocusTransition();
+        }
     }
 
     function applyCamera():Void {

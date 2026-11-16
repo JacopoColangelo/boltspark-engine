@@ -52,6 +52,7 @@ class MenuDropdown extends h2d.Object {
         panelSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
         panelCatch = new h2d.Interactive(1, 1, panel);
         panelCatch.backgroundColor = 0;
+        panelCatch.cursor = hxd.Cursor.Default;
         // Swallow presses on the menu body so they cannot fall through to the
         // viewport or the chrome underneath.
         panelCatch.onPush = function(event) event.propagate = false;
@@ -61,6 +62,7 @@ class MenuDropdown extends h2d.Object {
         submenuSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
         submenuCatch = new h2d.Interactive(1, 1, submenu);
         submenuCatch.backgroundColor = 0;
+        submenuCatch.cursor = hxd.Cursor.Default;
         submenuCatch.onPush = function(event) event.propagate = false;
         submenu.visible = false;
     }
@@ -163,7 +165,7 @@ class MenuDropdown extends h2d.Object {
         rowSurface.setStyle(Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
         var rowHit = new h2d.Interactive(width - PADDING * 2, ROW_HEIGHT - 1, row);
         rowHit.backgroundColor = 0;
-        rowHit.cursor = hxd.Cursor.Button;
+        rowHit.cursor = hxd.Cursor.Default;
         rowHit.onOver = function(_) {
             rowSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
             // Cascade parents open their submenu on hover; plain rows close

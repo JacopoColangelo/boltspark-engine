@@ -113,6 +113,12 @@ Executed on 2026-11-14 with window-scoped native key/mouse events against the Ha
 - [x] The keybindings HWND is assigned the launching editor as its native owner before its first show, then explicitly restored/raised/activated. A first-open menu probe confirmed `GW_OWNER == editor HWND`, preventing the settings window from opening behind the editor (`tests/native/historical/verify-first-keybindings-open.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] Rebind capture ignores modifier-only events: Ctrl then T captured `Ctrl+T` for Rotate in the separate window, persisted a complete versioned JSON map, synchronized into the already-running main editor, and immediately selected Rotate there (`bin/keybindings-native-window-rebound.png`, `bin/native-window-evidence.txt`). Duplicate chords are rejected and malformed/partial persisted maps leave the complete live/default map intact in `Keybindings.hx`.
 - [x] Shortcut commands, hold snapping, snap-to-grid, and Delete remain suppressed while an inspector/search text control owns keyboard capture.
+- [x] The Editor Keybindings window shows all 14 actions in a scrollable list with
+  a native scrollbar and no instructional/mouse helper text; shrinking the HWND
+  switches the list into its clipped scroll mode
+  (`tests/native/Test-KeybindingsList.ps1`, `bin/test-results/keybindings-list/keybindings-state.log`).
+- [x] Viewport camera settings popups and editor dropdown/menu bodies keep the
+  standard arrow cursor instead of Heaps' `Cursor.Button` pointing hand.
 - [x] Undo and Redo are exposed through the native Edit menu and rebindable
   Ctrl+Z/Ctrl+Y defaults. Historical keybinding maps migrate to version 4 by
   retaining existing actions and appending collision-free history, hierarchy,
@@ -130,9 +136,25 @@ development/release native smoke launches.
   down moves out), while RMB+wheel retains camera-speed adjustment.
 - [x] Alt+LMB orbit uses the corrected Unreal-style horizontal and vertical
   tumble directions.
-- [x] Rebindable F Focus Selection frames the primary object's complete
-  world-space bounds with aspect/FOV-aware padding, preserves view rotation,
-  and falls back to a useful radius for empty GameObjects.
+- [x] Rebindable F Focus Selection smoothly frames the complete world-space
+  bounds of every selected object (their union), with aspect/FOV-aware padding
+  and preserved view rotation; empty GameObjects contribute their world pivot,
+  and a multi-object frame visibly differs from a single-object frame
+  (`tests/repro/EditorCameraControllerRepro.hx`).
+- [x] Focus is a selection command, not viewport navigation: F works with any
+  active selection even when the pointer stays over the hierarchy panel
+  (`tests/native/Test-FocusSelection.ps1`, `bin/test-results/focus-selection/stdout.log`).
+  Text entry and an active viewport gesture still suppress it.
+- [x] Its fixed-duration cubic ease completes exactly after nearby or
+  multi-million-unit travel, while direct camera navigation and gizmo input
+  cancel the flight immediately.
+- [x] The PERSPECTIVE strip opens a camera-settings popup whose field of view is
+  a transform-style `NumericDragField` spanning 30°–140° instead of a preset
+  dropdown: click to type an exact value, drag to scrub, or step with arrows.
+  While the field owns text focus, editor shortcuts stay suppressed. A
+  window-scoped probe types and commits an exact value and confirms it reaches
+  the shared viewport FOV and the strip label
+  (`tests/native/Test-FovInput.ps1`, `bin/test-results/fov-input/stdout.log`).
 
 ## Viewport transform gizmo (Move tool)
 

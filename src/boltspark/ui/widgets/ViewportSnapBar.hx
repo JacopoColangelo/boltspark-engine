@@ -99,7 +99,7 @@ class ViewportSnapBar extends h2d.Object {
             valueSurface.setSize(VALUE_WIDTH, CELL_HEIGHT);
             var valueHit = new h2d.Interactive(VALUE_WIDTH, CELL_HEIGHT, valueCell);
             valueHit.backgroundColor = 0;
-            valueHit.cursor = hxd.Cursor.Button;
+            valueHit.cursor = hxd.Cursor.Default;
             valueHit.onOver = function(_) redrawCell(capturedMode, true);
             valueHit.onOut = function(_) redrawCell(capturedMode, false);
             valueHit.onPush = function(event) {
@@ -132,6 +132,7 @@ class ViewportSnapBar extends h2d.Object {
         popupBackground.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
         popupCatch = new h2d.Interactive(1, 1, popupRoot);
         popupCatch.backgroundColor = 0;
+        popupCatch.cursor = hxd.Cursor.Default;
         // Swallow presses on the popup body so they cannot fall through to the
         // viewport (which would run object picking underneath the menu), and
         // scroll the clipped row list with the wheel.
@@ -246,7 +247,7 @@ class ViewportSnapBar extends h2d.Object {
             rowSurface.setStyle(Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
             var rowHit = new h2d.Interactive(popupRows.width, POPUP_ROW_HEIGHT - 1, popupRows);
             rowHit.backgroundColor = 0;
-            rowHit.cursor = hxd.Cursor.Button;
+            rowHit.cursor = hxd.Cursor.Default;
             rowHit.onOver = function(_) rowSurface.setStyle(
                 Theme.SURFACE_3, Theme.ACCENT, 0);
             rowHit.onOut = function(_) rowSurface.setStyle(

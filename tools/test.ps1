@@ -6,7 +6,10 @@ param(
     [switch]$RotationHandoff,
     [switch]$WindowLifecycle,
     [switch]$DpiProbe,
-    [switch]$DeviceReset
+    [switch]$DeviceReset,
+    [switch]$FocusSelection,
+    [switch]$FovInput,
+    [switch]$KeybindingsList
 )
 
 $ErrorActionPreference = 'Stop'
@@ -205,6 +208,18 @@ try {
     if ($DeviceReset) {
         & (Join-Path $repoRoot 'tests\native\Test-DeviceReset.ps1')
         Assert-LastExitCode 'DX12 device-reset test'
+    }
+    if ($FocusSelection) {
+        & (Join-Path $repoRoot 'tests\native\Test-FocusSelection.ps1')
+        Assert-LastExitCode 'Focus-selection probe'
+    }
+    if ($FovInput) {
+        & (Join-Path $repoRoot 'tests\native\Test-FovInput.ps1')
+        Assert-LastExitCode 'FOV numeric input probe'
+    }
+    if ($KeybindingsList) {
+        & (Join-Path $repoRoot 'tests\native\Test-KeybindingsList.ps1')
+        Assert-LastExitCode 'Keybindings list probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

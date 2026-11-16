@@ -86,6 +86,8 @@ class BoltUI {
     public var onWindowFocusLost:Null<Void->Void>;
     /** G: toggle the independent editor grid. */
     public var onToggleGrid:Null<Void->Void>;
+    /** Fired with the new horizontal FOV whenever the FOV field is edited. */
+    public var onFovChanged:Null<Float->Void>;
     /** F: frame the primary selection in the viewport. */
     public var onFocusSelection:Null<Void->Void>;
 
@@ -209,6 +211,9 @@ class BoltUI {
         };
         shell.onToggleGrid = function() {
             if (onToggleGrid != null) onToggleGrid();
+        };
+        shell.onFovChanged = function(value) {
+            if (onFovChanged != null) onFovChanged(value);
         };
         shell.onFocusSelection = function() {
             if (onFocusSelection != null) onFocusSelection();

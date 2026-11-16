@@ -20,6 +20,7 @@ import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
+import boltspark.ui.widgets.NumericDragField;
 import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
 import boltspark.ui.widgets.TextInputField;
@@ -98,6 +99,17 @@ class EditorShell {
     final viewportHintText:h2d.Text;
     final viewportHintHit:h2d.Interactive;
     final snapBar:ViewportSnapBar;
+    /** View-mode popup: transform-style FOV field plus the grid toggle. */
+    final fovPopupRoot:h2d.Object;
+    final fovPopupSurface:UiSurface;
+    final fovPopupCatch:h2d.Interactive;
+    final fovTitleText:UiText;
+    final fovInput:NumericDragField;
+    final fovDegreeText:UiText;
+    final fovGridSurface:UiSurface;
+    final fovGridHit:h2d.Interactive;
+    final fovGridText:UiText;
+    var fovPopupOpen:Bool = false;
     final cameraSpeedSurface:UiSurface;
     final cameraSpeedText:UiText;
     /** Speed chip flash state: visible briefly after each speed change. */
@@ -107,6 +119,11 @@ class EditorShell {
     static inline var SPEED_CHIP_VISIBLE:Float = 1.2;
     /** Closing fade duration at the end of the flash. */
     static inline var SPEED_CHIP_FADE:Float = 0.35;
+    /** FOV popup geometry and the continuous range offered by its slider. */
+    static inline var FOV_POPUP_WIDTH:Int = 200;
+    static inline var FOV_POPUP_HEIGHT:Int = 96;
+    static inline var FOV_MIN_DEG:Float = 30.0;
+    static inline var FOV_MAX_DEG:Float = 140.0;
     final console:ConsolePanel;
     final statusDot:h2d.Graphics;
     final statusText:h2d.Text;
@@ -181,6 +198,8 @@ class EditorShell {
     public var onWindowFocusLost:Null<Void->Void>;
     /** G: toggle the independent editor grid. */
     public var onToggleGrid:Null<Void->Void>;
+    /** Fired with the new horizontal FOV whenever the FOV field is edited. */
+    public var onFovChanged:Null<Float->Void>;
     /** F: frame the primary selection in the active viewport. */
     public var onFocusSelection:Null<Void->Void>;
     public var viewportRect(default, null):LayoutRect;
@@ -516,6 +535,7 @@ class EditorShell {
                     }
                 });
             }
+            closeFovPopup();
             menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
         };
 
@@ -550,7 +570,7 @@ class EditorShell {
         // (Unreal-style viewport label dropdown).
         viewportModeHit = new h2d.Interactive(134, 24, viewportHud);
         viewportModeHit.backgroundColor = 0;
-        viewportModeHit.cursor = hxd.Cursor.Button;
+        viewportModeHit.cursor = hxd.Cursor.Default;
         viewportModeHit.onOver = function(_) {
             viewportModeSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
         };
@@ -563,6 +583,75 @@ class EditorShell {
             event.propagate = false;
         };
 
+        // Clicking the PERSPECTIVE strip opens a compact settings popup. The
+        // field of view uses the same transform-style numeric drag field as
+        // the Inspector: click to type an exact value, drag to scrub, or use
+        // the arrow buttons to step. No preset list is involved.
+        fovPopupRoot = new h2d.Object(root);
+        fovPopupRoot.visible = false;
+        fovPopupSurface = new UiSurface(ctx, fovPopupRoot);
+        fovPopupSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
+        fovPopupSurface.setSize(FOV_POPUP_WIDTH, FOV_POPUP_HEIGHT);
+        fovPopupCatch = new h2d.Interactive(
+            FOV_POPUP_WIDTH, FOV_POPUP_HEIGHT, fovPopupRoot);
+        fovPopupCatch.backgroundColor = 0;
+        // h2d.Interactive defaults to Cursor.Button (the native pointing hand),
+        // so every popup catcher must opt into the ordinary arrow cursor.
+        fovPopupCatch.cursor = hxd.Cursor.Default;
+        // Swallow presses on the popup body so they never reach viewport
+        // picking, while the numeric field's interactives stay above the catch.
+        fovPopupCatch.onPush = function(event) event.propagate = false;
+
+        fovTitleText = new UiText(ctx.captionFont, fovPopupRoot);
+        fovTitleText.text = "Field of View";
+        fovTitleText.textColor = Theme.TEXT;
+        fovTitleText.lineBreak = false;
+        fovTitleText.x = 10;
+        fovTitleText.y = 8;
+
+        fovInput = new NumericDragField(ctx, 128, 24,
+            FOV_MIN_DEG, FOV_MAX_DEG, 1, EditorViewport.VIEW_FOV_DEG,
+            function(value:Float):String return Std.string(Std.int(Math.round(value))),
+            "", Theme.TEXT, fovPopupRoot);
+        fovInput.x = 10;
+        fovInput.y = 30;
+        fovInput.onValueChanged = applyFov;
+        fovInput.onEditRejected = function(message) log("viewport: " + message);
+
+        fovDegreeText = new UiText(ctx.captionFont, fovPopupRoot);
+        fovDegreeText.text = "°";
+        fovDegreeText.textColor = Theme.MUTED;
+        fovDegreeText.lineBreak = false;
+        fovDegreeText.x = 144;
+        fovDegreeText.y = 36;
+
+        fovGridSurface = new UiSurface(ctx, fovPopupRoot);
+        fovGridSurface.setSize(FOV_POPUP_WIDTH - 12, 22);
+        fovGridSurface.x = 6;
+        fovGridSurface.y = FOV_POPUP_HEIGHT - 28;
+        fovGridSurface.setStyle(Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
+        fovGridHit = new h2d.Interactive(
+            FOV_POPUP_WIDTH - 12, 22, fovPopupRoot);
+        fovGridHit.backgroundColor = 0;
+        fovGridHit.cursor = hxd.Cursor.Default;
+        fovGridHit.x = 6;
+        fovGridHit.y = FOV_POPUP_HEIGHT - 28;
+        fovGridHit.onOver = function(_) fovGridSurface.setStyle(
+            Theme.SURFACE_3, Theme.ACCENT, 0);
+        fovGridHit.onOut = function(_) fovGridSurface.setStyle(
+            Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
+        fovGridHit.onPush = function(event) {
+            event.propagate = false;
+            closeFovPopup();
+            if (onToggleGrid != null) onToggleGrid();
+        };
+        fovGridText = new UiText(ctx.captionFont, fovPopupRoot);
+        fovGridText.text = "Toggle Editor Grid  (G)";
+        fovGridText.textColor = Theme.TEXT_SECONDARY;
+        fovGridText.lineBreak = false;
+        fovGridText.x = 16;
+        fovGridText.y = FOV_POPUP_HEIGHT - 22;
+
         viewportHintSurface = new UiSurface(ctx, viewportHud);
         viewportHintSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
         viewportHintSurface.setSize(80, 24);
@@ -574,7 +663,7 @@ class EditorShell {
         viewportHintText.lineBreak = false;
         viewportHintHit = new h2d.Interactive(80, 24, viewportHud);
         viewportHintHit.backgroundColor = 0;
-        viewportHintHit.cursor = hxd.Cursor.Button;
+        viewportHintHit.cursor = hxd.Cursor.Default;
         viewportHintHit.onOver = function(_) {
             transformSpaceHovered = true;
             refreshTransformSpaceControl();
@@ -708,9 +797,13 @@ class EditorShell {
             if (!isViewportFocused()) return;
             if (onToggleGrid != null) onToggleGrid();
         };
+        // Focus is a selection command, not viewport navigation: it stays
+        // available while the pointer is over any panel, as long as something
+        // is selected. Text entry and an in-progress viewport gesture are the
+        // only reasons to suppress it (typing "f" must not move the camera).
         input.onFocusSelectionPressed = function() {
-            if (!isViewportFocused() || cameraGesture >= 0
-                    || selectedObjectId < 0) return;
+            if (anyTextCaptureActive() || cameraGesture >= 0
+                    || selectedObjectIds.length == 0) return;
             if (onFocusSelection != null) onFocusSelection();
         };
         input.onWindowFocusLost = function() {
@@ -775,10 +868,11 @@ class EditorShell {
                 EditorCameraController.GESTURE_ORBIT, event);
             return;
         }
-        // Any viewport press dismisses the snap preset dropdown and the
-        // File menu before the press is processed.
+        // Any viewport press dismisses the snap preset dropdown, the FOV
+        // settings popup, and the File menu before the press is processed.
         snapBar.closePopup();
         menuDropdown.close();
+        closeFovPopup();
         var gizmoConsumed = onViewportPush != null
             && onViewportPush(event.relX, event.relY);
         if (!gizmoConsumed) return;
@@ -904,31 +998,51 @@ class EditorShell {
     /**
      * PERSPECTIVE · LIT strip: camera and visualization settings. The field
      * of view applies to the shared horizontal FOV that the viewport pass
-     * and the camera controller's pan scale both read.
+     * and the camera controller's pan scale both read. It is edited with a
+     * continuous slider so arbitrary values are available, not just presets.
      */
-    static final VIEW_FOV_PRESETS:Array<Int> = [50, 60, 70, 75, 90, 110];
-
     function openViewModeMenu():Void {
+        var wasOpen = fovPopupOpen;
         closePaletteIfOpen();
-        var fovRows:Array<MenuItem> = [];
-        for (preset in VIEW_FOV_PRESETS) {
-            var value = preset;
-            var active = Math.round(EditorViewport.VIEW_FOV_DEG) == value;
-            fovRows.push({
-                label: (active ? '●  ' : '    ') + value + '°',
-                onClick: function() {
-                    EditorViewport.VIEW_FOV_DEG = value;
-                    refreshViewModeLabel();
-                    log('viewport: field of view ${value}°');
-                },
-            });
+        if (wasOpen) return;
+        refreshFovPopupValue();
+        fovPopupRoot.x = Math.max(4,
+            Math.min(viewportHud.x, ctx.width - FOV_POPUP_WIDTH - 4));
+        fovPopupRoot.y = Math.max(4,
+            Math.min(viewportHud.y + 26, ctx.height - FOV_POPUP_HEIGHT - 4));
+        fovPopupRoot.visible = true;
+        fovPopupOpen = true;
+    }
+
+    function closeFovPopup():Void {
+        if (!fovPopupOpen) return;
+        fovPopupOpen = false;
+        fovPopupRoot.visible = false;
+        // A typed value may still own keyboard focus; release it so shortcuts
+        // and the next popup open start from a clean input state.
+        input.clearFocus();
+    }
+
+    /** Keep the numeric field in sync with the shared FOV. */
+    function refreshFovPopupValue():Void {
+        fovInput.setValue(EditorViewport.VIEW_FOV_DEG);
+    }
+
+    /** Single write path for FOV edits from the transform-style field. */
+    function applyFov(value:Float):Void {
+        var rounded:Float = Math.round(value);
+        if (rounded < FOV_MIN_DEG) rounded = FOV_MIN_DEG;
+        if (rounded > FOV_MAX_DEG) rounded = FOV_MAX_DEG;
+        if (rounded == EditorViewport.VIEW_FOV_DEG) {
+            refreshFovPopupValue();
+            return;
         }
-        menuDropdown.open(viewportHud.x, viewportHud.y + 26, [
-            { label: "Field of View", submenu: fovRows },
-            { label: "Toggle Editor Grid  (G)", onClick: function() {
-                if (onToggleGrid != null) onToggleGrid();
-            } },
-        ]);
+        EditorViewport.VIEW_FOV_DEG = rounded;
+        refreshFovPopupValue();
+        refreshViewModeLabel();
+        // Probe telemetry only; changing a slider value must not spam the
+        // editor's Output Log on every drag step.
+        if (onFovChanged != null) onFovChanged(rounded);
     }
 
     /** Rebuild the strip label with the live FOV and keep neighbors placed. */
@@ -1802,6 +1916,7 @@ class EditorShell {
                 if (onDeleteObjects != null) onDeleteObjects(actionIds);
             }
         }];
+        closeFovPopup();
         menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
@@ -1831,6 +1946,7 @@ class EditorShell {
             label: "Collapse All",
             onClick: collapseAllHierarchy
         }];
+        closeFovPopup();
         menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
@@ -1848,6 +1964,7 @@ class EditorShell {
 
     /** True while any text-entry control owns the keyboard. */
     function anyTextCaptureActive():Bool {
+        if (fovInput.isEditing()) return true;
         if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
         for (row in hierarchyRows) if (row.isRenaming()) return true;
         for (section in componentSections) if (section.isEditing()) return true;
@@ -1858,6 +1975,7 @@ class EditorShell {
         if (palette.visible) palette.close();
         snapBar.closePopup();
         menuDropdown.close();
+        closeFovPopup();
     }
 
     /** Redraw the clickable viewport World/Local axis-space control. */

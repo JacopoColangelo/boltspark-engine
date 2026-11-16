@@ -260,6 +260,9 @@ class Main extends hxd.App {
             cameraController.onWindowFocusLost();
         };
         boltUI.onToggleGrid = toggleEditorGrid;
+        boltUI.onFovChanged = function(value) {
+            printActivity('[viewport] fov=${Math.round(value)}°');
+        };
         boltUI.onFocusSelection = focusSelection;
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
@@ -1174,37 +1177,46 @@ class Main extends hxd.App {
         return new h3d.Vector(0, 0, 0);
     }
 
-    /** F: frame the primary selection and preserve the current view rotation. */
+    /**
+     * F: frame every selected object and preserve the current view rotation.
+     * This is a selection command rather than a viewport-navigation command,
+     * so it is intentionally routed without requiring viewport focus.
+     */
     function focusSelection():Void {
         if (gizmoDragging || cameraGesture >= 0) return;
-        var selected = getSelectedObject();
-        if (selected == null) return;
-        var bounds = selected.mesh.getBounds();
-        var populated = bounds.xMax >= bounds.xMin
-            && bounds.yMax >= bounds.yMin && bounds.zMax >= bounds.zMin
-            && Math.isFinite(bounds.xMin) && Math.isFinite(bounds.xMax)
-            && Math.isFinite(bounds.yMin) && Math.isFinite(bounds.yMax)
-            && Math.isFinite(bounds.zMin) && Math.isFinite(bounds.zMax);
-        var center:h3d.Vector;
-        var radius:Float;
-        if (populated) {
-            var halfX = (bounds.xMax - bounds.xMin) * 0.5;
-            var halfY = (bounds.yMax - bounds.yMin) * 0.5;
-            var halfZ = (bounds.zMax - bounds.zMin) * 0.5;
-            center = new h3d.Vector(
-                (bounds.xMin + bounds.xMax) * 0.5,
-                (bounds.yMin + bounds.yMax) * 0.5,
-                (bounds.zMin + bounds.zMax) * 0.5);
-            radius = Math.sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
-        } else {
-            // Empty GameObjects have no render bounds; focus their world pivot
-            // with the controller's minimum framing radius.
-            var pivot = selected.mesh.localToGlobal(new h3d.col.Point());
-            center = new h3d.Vector(pivot.x, pivot.y, pivot.z);
-            radius = 0;
+        var ids = editorSession.selectedObjectIds;
+        if (ids.length == 0) return;
+        var focusBounds:Array<h3d.col.Bounds> = [];
+        for (id in ids) {
+            var selected = findSceneObject(id);
+            if (selected == null) continue;
+            var bounds = selected.mesh.getBounds();
+            var populated = bounds.xMax >= bounds.xMin
+                && bounds.yMax >= bounds.yMin && bounds.zMax >= bounds.zMin
+                && Math.isFinite(bounds.xMin) && Math.isFinite(bounds.xMax)
+                && Math.isFinite(bounds.yMin) && Math.isFinite(bounds.yMax)
+                && Math.isFinite(bounds.zMin) && Math.isFinite(bounds.zMax);
+            if (populated) {
+                focusBounds.push(bounds);
+            } else {
+                // Empty GameObjects have no render bounds; include their world
+                // pivot as a point so a selection made only of them still frames.
+                var pivot = selected.mesh.localToGlobal(new h3d.col.Point());
+                if (Math.isFinite(pivot.x) && Math.isFinite(pivot.y)
+                        && Math.isFinite(pivot.z)) {
+                    var point = new h3d.col.Bounds();
+                    point.addPoint(pivot);
+                    focusBounds.push(point);
+                }
+            }
         }
-        if (cameraController.focusOn(center, radius)) {
-            logActivity('camera: focused ${selected.name}');
+        if (focusBounds.length == 0) return;
+        if (cameraController.focusOnBounds(focusBounds)) {
+            var label = ids.length > 1
+                ? '${ids.length} objects'
+                : (findSceneObject(ids[0]) != null
+                    ? findSceneObject(ids[0]).name : "selection");
+            logActivity('camera: focused ${label}');
         }
     }
 

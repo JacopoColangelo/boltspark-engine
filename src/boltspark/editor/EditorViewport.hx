@@ -18,7 +18,7 @@ import boltspark.ui.layout.LayoutRect;
 class EditorViewport {
     /** Shared horizontal FOV, adjustable from the viewport camera menu. The
         camera controller derives pan scale from it live. */
-    public static var VIEW_FOV_DEG:Float = 70.0;
+    public static var VIEW_FOV_DEG:Float = 90.0;
 
     final window:hxd.Window;
     final scene3d:h3d.scene.Scene;

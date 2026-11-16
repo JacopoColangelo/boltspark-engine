@@ -50,7 +50,7 @@ To rebuild everything first:
 Optional switches add real-window checks:
 
 ```powershell
-.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset
+.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList
 ```
 
 | Switch | Coverage |
@@ -61,6 +61,9 @@ Optional switches add real-window checks:
 | `-WindowLifecycle` | Small/large/baseline resize, maximize/restore, minimize/restore, splitter persistence, empty-space deselection, and cube picking after splitter movement. |
 | `-DpiProbe` | Current-monitor Win32 process awareness, `GetDpiForWindow`, and agreement with hldx's per-window display scale. |
 | `-DeviceReset` | Heaps DX12's public forced context-loss path, device/context recreation, resource restoration callback, and post-reset HWND responsiveness. |
+| `-FocusSelection` | Presses F while the pointer hovers the hierarchy panel instead of the viewport; verifies the selection-based focus command is not gated by viewport focus. |
+| `-FovInput` | Clicks the PERSPECTIVE strip, types an exact value into the transform-style FOV field, and verifies probe telemetry reports the committed field-of-view value. |
+| `-KeybindingsList` | Opens the native keybindings HWND, confirms all 14 actions are present, then shrinks the window and verifies the binding list switches to a scrollable mask. |
 
 The probes send messages only to the Boltspark HWND. They do not inject global
 mouse or keyboard input. They use isolated `LOCALAPPDATA` directories where
