@@ -81,10 +81,10 @@ From the repository root:
 ```powershell
 .\tools\build.ps1
 .\tools\test.ps1 -Portable
-.\tools\test.ps1 -Build -NativeSmoke -WindowLifecycle -DpiProbe -DeviceReset
+.\tools\test.ps1 -Build -NativeSmoke -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset
 ```
 
-The default action builds both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files). Use `.\tools\build.ps1 -Run` to launch the bytecode build; launch the native release directly from `release\Boltspark.exe`.
+The default action builds both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files and consolidated `THIRD-PARTY-LICENSES.txt`). Use `.\tools\build.ps1 -Run` to launch the bytecode build; launch the native release directly from `release\Boltspark.exe`.
 
 The scripts prefer the project-local toolchain (`toolchain/haxe-dev`, `toolchain/hashlink`, `toolchain/haxelib`) and set the required environment (`HAXE_STD_PATH`, `HAXELIB_PATH`, `NEKOPATH`) per session. Native projects use the matching Visual Studio toolset (VS2026 `v145`, VS2022 `v143`).
 
@@ -119,7 +119,7 @@ remaining physical hardware gates.
 
 ## Windows native release
 
-Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C support library, pinned PIX runtime, and pinned FreeType source. Then `.\tools\build.ps1` builds the project-local `freetype.hdll`, development bytecode, and native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules, `freetype.hdll`, licenses, and required DLLs alongside the executable. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
+Run `.\tools\build.ps1 -InstallDependencies` once to install the HashLink/C support library, pinned PIX runtime, and pinned FreeType source. Then `.\tools\build.ps1` builds the project-local `freetype.hdll`, development bytecode, and native Windows executable into `release\Boltspark.exe`. The `release\` folder includes the HashLink modules, `freetype.hdll`, one consolidated `THIRD-PARTY-LICENSES.txt`, and required DLLs alongside the executable. Canonical upstream licenses remain separate and unmodified in the source tree. Native builds require Visual Studio 2022 or newer with the Desktop C++ workload and Windows SDK.
 
 ## Important scope boundary
 

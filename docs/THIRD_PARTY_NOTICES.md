@@ -1,5 +1,11 @@
 # Third-party notices
 
+Canonical upstream license texts remain as separate, unmodified files in the
+source repository for provenance and source redistribution. Native binary
+packaging consolidates the notices and complete texts for all distributed
+components into `release/THIRD-PARTY-LICENSES.txt`; it does not ship duplicate
+per-component license files.
+
 ## Build-tool-only Haxe runtime libraries
 
 The project-local pinned Haxe development compiler is accompanied by the

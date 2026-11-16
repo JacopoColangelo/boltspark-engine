@@ -493,6 +493,105 @@ function Test-Environment {
     Write-Host "Toolchain: Haxe $haxeVersion | HashLink $hlVersion | Heaps 2.1.0 | hldx 1.16.0 | HashLink/C 1.16.0 | hlfreetype $hlFreeTypeVersion | FreeType $freeTypeVersion" -ForegroundColor Green
 }
 
+function New-ThirdPartyLicenseBundle([string]$Destination) {
+    $sections = @(
+        [ordered]@{
+            Component = 'Tabler Icons'
+            Version = '3.52.0'
+            Source = 'https://github.com/tabler/tabler-icons/tree/v3.52.0'
+            License = 'MIT License'
+            Use = 'Selected icons embedded in the BoltUI exact-size atlas.'
+            Path = (Join-Path $repoRoot 'third_party\tabler-icons\LICENSE')
+        },
+        [ordered]@{
+            Component = 'Inter'
+            Version = '4.1'
+            Source = 'https://github.com/rsms/inter'
+            License = 'SIL Open Font License 1.1'
+            Use = 'Regular, SemiBold, and Bold font faces embedded in BoltUI.'
+            Path = (Join-Path $repoRoot 'tools\font-source\Inter-LICENSE.txt')
+        },
+        [ordered]@{
+            Component = 'JetBrains Mono'
+            Version = $null
+            Source = 'https://github.com/JetBrains/JetBrainsMono'
+            License = 'SIL Open Font License 1.1'
+            Use = 'Regular font face embedded for console and numeric text.'
+            Path = (Join-Path $repoRoot 'tools\font-source\JetBrainsMono-LICENSE.txt')
+        },
+        [ordered]@{
+            Component = 'hlfreetype'
+            Version = "$hlFreeTypeVersion ($hlFreeTypeCommit)"
+            Source = 'https://github.com/dtwotwo/hlfreetype'
+            License = 'MIT License'
+            Use = 'HashLink/Heaps runtime font integration.'
+            Path = (Join-Path $hlFreeTypeRoot 'LICENSE')
+        },
+        [ordered]@{
+            Component = 'FreeType'
+            Version = $freeTypeVersion
+            Source = 'https://github.com/freetype/freetype'
+            License = 'FreeType License'
+            Use = 'Font rasterizer statically linked into freetype.hdll.'
+            Path = (Join-Path $hlFreeTypeRoot 'FreeType-LICENSE.txt')
+        },
+        [ordered]@{
+            Component = 'WinPixEventRuntime'
+            Version = $pixVersion
+            Source = "https://www.nuget.org/packages/WinPixEventRuntime/$pixVersion"
+            License = 'MIT License'
+            Use = 'PIX event runtime distributed as WinPixEventRuntime.dll.'
+            Path = (Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt')
+        }
+    )
+
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.AppendLine('BOLTSPARK ENGINE - THIRD-PARTY SOFTWARE NOTICES AND LICENSES')
+    [void]$builder.AppendLine('==========================================================')
+    [void]$builder.AppendLine()
+    [void]$builder.AppendLine('This file covers third-party software distributed with or embedded in')
+    [void]$builder.AppendLine('Boltspark Engine. Canonical upstream license files remain separate and')
+    [void]$builder.AppendLine('unaltered in the source repository; this release copy consolidates them')
+    [void]$builder.AppendLine('for convenient binary distribution.')
+    [void]$builder.AppendLine()
+    [void]$builder.AppendLine('Required FreeType acknowledgement:')
+    [void]$builder.AppendLine('This software is based in part on the work of the FreeType Team.')
+    [void]$builder.AppendLine()
+
+    $index = 1
+    foreach ($section in $sections) {
+        $licensePath = Get-RequiredFile $section.Path `
+            "Restore the canonical $($section.Component) license file."
+        $licenseText = [System.IO.File]::ReadAllText($licensePath)
+        if ([string]::IsNullOrWhiteSpace($licenseText)) {
+            throw "Canonical $($section.Component) license file is empty: $licensePath"
+        }
+
+        [void]$builder.AppendLine('----------------------------------------------------------')
+        [void]$builder.AppendLine("$index. $($section.Component)")
+        [void]$builder.AppendLine('----------------------------------------------------------')
+        [void]$builder.AppendLine("Component: $($section.Component)")
+        if ($null -ne $section.Version) {
+            [void]$builder.AppendLine("Version: $($section.Version)")
+        }
+        [void]$builder.AppendLine("Source: $($section.Source)")
+        [void]$builder.AppendLine("License: $($section.License)")
+        [void]$builder.AppendLine("Distributed use: $($section.Use)")
+        [void]$builder.AppendLine()
+        [void]$builder.AppendLine('Full license text:')
+        [void]$builder.AppendLine()
+        [void]$builder.Append($licenseText.TrimEnd())
+        [void]$builder.AppendLine()
+        [void]$builder.AppendLine()
+        $index++
+    }
+
+    $destinationDirectory = Split-Path -Parent $Destination
+    New-Item -ItemType Directory -Force $destinationDirectory | Out-Null
+    [System.IO.File]::WriteAllText($Destination, $builder.ToString(),
+        (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function New-NativeRelease {
     $visualStudio = Get-VisualStudioConfiguration
     $vsPath = $visualStudio.InstallationPath
@@ -680,6 +779,9 @@ function New-NativeRelease {
     }
 
     $stagingDir = Join-Path $buildRoot 'package'
+    if (Test-Path $stagingDir) {
+        Remove-Item -LiteralPath $stagingDir -Recurse -Force
+    }
     New-Item -ItemType Directory -Force $stagingDir | Out-Null
     Copy-Item -LiteralPath $nativeExe -Destination (Join-Path $stagingDir 'Boltspark.exe') -Force
 
@@ -690,14 +792,7 @@ function New-NativeRelease {
         @{ Source = (Join-Path $hashLinkDir 'vcruntime140.dll'); Name = 'vcruntime140.dll' },
         @{ Source = (Join-Path $nekoDir 'vcruntime140_1.dll'); Name = 'vcruntime140_1.dll' },
         @{ Source = (Join-Path $nekoDir 'msvcp140.dll'); Name = 'msvcp140.dll' },
-        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.dll'); Name = 'WinPixEventRuntime.dll' },
-        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.LICENSE.txt'); Name = 'WinPixEventRuntime-LICENSE.txt' },
-        @{ Source = (Join-Path $repoRoot 'docs\THIRD_PARTY_NOTICES.md'); Name = 'THIRD-PARTY-NOTICES.md' },
-        @{ Source = (Join-Path $repoRoot 'tools\font-source\Inter-LICENSE.txt'); Name = 'Inter-LICENSE.txt' },
-        @{ Source = (Join-Path $repoRoot 'tools\font-source\JetBrainsMono-LICENSE.txt'); Name = 'JetBrainsMono-LICENSE.txt' },
-        @{ Source = (Join-Path $repoRoot 'third_party\tabler-icons\LICENSE'); Name = 'Tabler-Icons-LICENSE.txt' },
-        @{ Source = (Join-Path $hlFreeTypeRoot 'LICENSE'); Name = 'hlfreetype-LICENSE.txt' },
-        @{ Source = (Join-Path $hlFreeTypeRoot 'FreeType-LICENSE.txt'); Name = 'FreeType-LICENSE.txt' }
+        @{ Source = (Join-Path $hashLinkDir 'WinPixEventRuntime.dll'); Name = 'WinPixEventRuntime.dll' }
     )
     foreach ($runtimeFile in $runtimeFiles) {
         if (-not (Test-Path $runtimeFile.Source)) {
@@ -705,6 +800,7 @@ function New-NativeRelease {
         }
         Copy-Item -LiteralPath $runtimeFile.Source -Destination (Join-Path $stagingDir $runtimeFile.Name) -Force
     }
+    New-ThirdPartyLicenseBundle (Join-Path $stagingDir 'THIRD-PARTY-LICENSES.txt')
 
     foreach ($module in $nativeModules) {
         $moduleFile = "$module.hdll"
@@ -721,6 +817,15 @@ function New-NativeRelease {
 
     $releaseDir = Join-Path $repoRoot 'release'
     New-Item -ItemType Directory -Force $releaseDir | Out-Null
+    $legacyLicenseNames = @(
+        'WinPixEventRuntime-LICENSE.txt',
+        'THIRD-PARTY-NOTICES.md',
+        'Inter-LICENSE.txt',
+        'JetBrainsMono-LICENSE.txt',
+        'Tabler-Icons-LICENSE.txt',
+        'hlfreetype-LICENSE.txt',
+        'FreeType-LICENSE.txt'
+    )
     $replaceNames = @(
         'Boltspark.exe',
         'libhl.dll',
@@ -730,15 +835,10 @@ function New-NativeRelease {
         'vcruntime140_1.dll',
         'msvcp140.dll',
         'WinPixEventRuntime.dll',
-        'WinPixEventRuntime-LICENSE.txt',
-        'THIRD-PARTY-NOTICES.md',
-        'Inter-LICENSE.txt',
-        'JetBrainsMono-LICENSE.txt',
-        'Tabler-Icons-LICENSE.txt',
-        'hlfreetype-LICENSE.txt',
-        'FreeType-LICENSE.txt',
+        'THIRD-PARTY-LICENSES.txt',
         'freetype.hdll'
     )
+    $replaceNames += $legacyLicenseNames
     $replaceNames += Get-ChildItem $hashLinkDir -Filter '*.hdll' -File | Select-Object -ExpandProperty Name
     foreach ($name in ($replaceNames | Select-Object -Unique)) {
         $oldFile = Join-Path $releaseDir $name
@@ -747,6 +847,11 @@ function New-NativeRelease {
         }
     }
     Copy-Item -Path (Join-Path $stagingDir '*') -Destination $releaseDir -Force
+    foreach ($legacyLicenseName in $legacyLicenseNames) {
+        if (Test-Path (Join-Path $releaseDir $legacyLicenseName)) {
+            throw "Obsolete individual license remained in release: $legacyLicenseName"
+        }
+    }
     Write-Host 'Native release built: release\Boltspark.exe' -ForegroundColor Green
 }
 

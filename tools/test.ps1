@@ -3,6 +3,7 @@ param(
     [switch]$Build,
     [switch]$NativeSmoke,
     [switch]$CommandHistory,
+    [switch]$RotationHandoff,
     [switch]$WindowLifecycle,
     [switch]$DpiProbe,
     [switch]$DeviceReset
@@ -110,6 +111,7 @@ try {
         foreach ($test in @(
             'ArcballRotationRepro',
             'RotationEulerRepro',
+            'RotationRingRepro',
             'BoltUiCoreRepro',
             'CommandHistoryRepro',
             'EditorSessionRepro',
@@ -144,6 +146,7 @@ try {
         @{ Name = 'ArcballRotationRepro'; Output = 'arcball-rotation-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'EditorCameraControllerRepro'; Output = 'editor-camera-controller-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'RotationEulerRepro'; Output = 'rotation-euler-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
+        @{ Name = 'RotationRingRepro'; Output = 'rotation-ring-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'BoltUiCoreRepro'; Output = 'bolt-ui-core-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'CommandHistoryRepro'; Output = 'command-history-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'EditorSessionRepro'; Output = 'editor-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
@@ -186,6 +189,10 @@ try {
     if ($CommandHistory) {
         & (Join-Path $repoRoot 'tests\native\Test-CommandHistory.ps1')
         Assert-LastExitCode 'Native command-history test'
+    }
+    if ($RotationHandoff) {
+        & (Join-Path $repoRoot 'tests\native\Test-RotationRingHandoff.ps1')
+        Assert-LastExitCode 'Native arcball-to-ring rotation test'
     }
     if ($WindowLifecycle) {
         & (Join-Path $repoRoot 'tests\native\Test-WindowLifecycle.ps1')

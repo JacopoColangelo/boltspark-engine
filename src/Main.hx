@@ -935,18 +935,25 @@ class Main extends hxd.App {
                         || different(desiredWorld.positionZ, snapped.z)) {
                     gizmoWorldBounded = true;
                 }
-            case RotateQuat(q):
-                // Axis rings use Unreal-style incremental degree snapping.
-                // The center arc-ball is intentionally freeform even while
-                // rotation snapping is enabled: quantizing its three Euler
-                // components would make a camera-space tumble feel stepped.
-                var targetRotation = gizmoHandle == TransformGizmo.HANDLE_CENTER
-                    ? q
-                    : snap.snapQuatIncremental(dragStartQuat, q);
+            case RotateAxis(axisX, axisY, axisZ, radians):
+                // Snap only the torus' scalar angle, then compose that
+                // press-time world-axis increment with the complete start
+                // quaternion. An arbitrary prior arcball orientation must not
+                // be decomposed into three coupled Euler deltas.
+                var targetRotation = snap.snapAxisRotationIncremental(
+                    dragStartQuat, new h3d.Vector(axisX, axisY, axisZ), radians);
                 desiredWorld.rotationX = targetRotation.x;
                 desiredWorld.rotationY = targetRotation.y;
                 desiredWorld.rotationZ = targetRotation.z;
                 desiredWorld.rotationW = targetRotation.w;
+                desiredWorld.rotationHintValid = false;
+            case RotateQuat(q):
+                // The center arcball remains freeform even while ring snapping
+                // is enabled; stepping camera-space tumble feels discontinuous.
+                desiredWorld.rotationX = q.x;
+                desiredWorld.rotationY = q.y;
+                desiredWorld.rotationZ = q.z;
+                desiredWorld.rotationW = q.w;
                 desiredWorld.rotationHintValid = false;
             case ScaleValues(sx, sy, sz):
                 if (scaleProportionsLinked) {

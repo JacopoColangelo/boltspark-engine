@@ -10,6 +10,7 @@ $outputDir = Join-Path $repoRoot 'bin\test-results\native-smoke'
 $runtime = Join-Path $repoRoot 'toolchain\hashlink\hl.exe'
 $bytecode = Join-Path $repoRoot 'bin\boltspark.hl'
 $release = Join-Path $repoRoot 'release\Boltspark.exe'
+$licenseBundle = Join-Path $repoRoot 'release\THIRD-PARTY-LICENSES.txt'
 
 New-Item -ItemType Directory -Force $outputDir | Out-Null
 
@@ -64,6 +65,49 @@ function Assert-WindowIcons([IntPtr]$window) {
     }
 }
 
+function Assert-ConsolidatedLicenses {
+    if (-not (Test-Path $licenseBundle)) {
+        throw 'Packaged release is missing THIRD-PARTY-LICENSES.txt.'
+    }
+    if ((Get-Item $licenseBundle).Length -lt 20000) {
+        throw 'Packaged third-party license bundle is unexpectedly short.'
+    }
+    $contents = Get-Content $licenseBundle -Raw
+    foreach ($requiredText in @(
+        'Component: Tabler Icons',
+        'Copyright (c) 2020-2026',
+        'Component: Inter',
+        'Copyright (c) 2016 The Inter Project Authors',
+        'Component: JetBrains Mono',
+        'Copyright 2020 The JetBrains Mono Project Authors',
+        'Component: hlfreetype',
+        'Copyright (c) 2026 dtwotwo',
+        'Component: FreeType',
+        'This software is based in part on the work of the FreeType Team.',
+        'Component: WinPixEventRuntime',
+        'Copyright (c) Microsoft Corporation.',
+        'SIL OPEN FONT LICENSE Version 1.1',
+        'The FreeType Project LICENSE'
+    )) {
+        if (-not $contents.Contains($requiredText)) {
+            throw "Packaged third-party license bundle is missing: $requiredText"
+        }
+    }
+    foreach ($obsoleteName in @(
+        'WinPixEventRuntime-LICENSE.txt',
+        'THIRD-PARTY-NOTICES.md',
+        'Inter-LICENSE.txt',
+        'JetBrainsMono-LICENSE.txt',
+        'Tabler-Icons-LICENSE.txt',
+        'hlfreetype-LICENSE.txt',
+        'FreeType-LICENSE.txt'
+    )) {
+        if (Test-Path (Join-Path (Split-Path -Parent $release) $obsoleteName)) {
+            throw "Packaged release retained obsolete individual license: $obsoleteName"
+        }
+    }
+}
+
 if (-not $ReleaseOnly) {
     if (-not (Test-Path $runtime) -or -not (Test-Path $bytecode)) {
         throw 'Development runtime/build missing. Run tools\build.ps1 first.'
@@ -97,6 +141,7 @@ if (-not $DevelopmentOnly) {
     if (-not (Test-Path $release)) {
         throw 'Native release missing. Run tools\build.ps1 first.'
     }
+    Assert-ConsolidatedLicenses
     $process = Start-Process $release `
         -WorkingDirectory (Split-Path -Parent $release) -PassThru
     try {

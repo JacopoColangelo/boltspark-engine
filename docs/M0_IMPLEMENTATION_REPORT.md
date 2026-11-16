@@ -174,3 +174,8 @@ now the next product-facing boundary. Current priorities are:
 - The editor's former hand-drawn analytic glyphs were superseded on 2026-11-16
   by a pinned Tabler Icons 3.52.0 exact-size atlas. The MIT text and mapping are
   tracked under `third_party/tabler-icons/` and staged into native releases.
+- Rotation-ring snapping now quantizes the captured torus angle before
+  composing it with the complete drag-start quaternion. This removes the
+  coupled Euler-branch jumps that occurred when a ring followed an arbitrary
+  arcball tumble; portable and native handoff regressions cover world/local
+  axes, snap-bin boundaries, and the freeform no-snap path.

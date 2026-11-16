@@ -17,9 +17,10 @@ package boltspark.editor;
  *    absolute snap and is an explicit Ctrl+End command.
  *  - Translation deltas snap componentwise against the translation grid
  *    (units, matching Unreal's centimeter-based uu).
- *  - Rotation-ring deltas snap per Euler axis (degrees) — Unreal snaps the
- *    per-axis rotation values shown in the details panel, so quaternions are
- *    converted to Euler, delta-snapped, and rebuilt. The omni arc-ball is
+ *  - A rotation ring snaps its accumulated angle around the press-time world
+ *    axis before that axis-angle increment is composed with the drag-start
+ *    quaternion. This remains single-axis after an arbitrary arc-ball rotation
+ *    and never depends on an Euler decomposition branch. The omni arc-ball is
  *    deliberately freeform and bypasses this manager.
  *  - Scale deltas snap componentwise against the scale step. A signed dead
  *    zone prevents singular zero scale while still allowing mirrored values.
@@ -219,26 +220,37 @@ class GridSnapping {
             start.z + snappedZ);
     }
 
+    /** Quantize one accumulated ring angle without decomposing orientation. */
+    public function snapRotationDeltaRadians(deltaRadians:Float):Float {
+        return enableRotation
+            ? degToRad(snapValue(radToDeg(deltaRadians), rotationStep))
+            : deltaRadians;
+    }
+
     /**
-     * Incremental rotation snapping: convert the drag-start and target
-     * orientations to Euler angles, snap each per-axis delta onto the
-     * rotation grid, and rebuild the quaternion. Euler deltas are wrapped
-     * into (-180, 180] so quaternion branch cuts cannot fake huge deltas.
+     * Apply an optionally snapped torus rotation to an arbitrary drag-start
+     * orientation. `worldAxis` is captured when the drag begins. In Local mode
+     * it is already the selected local axis transformed by `start`; therefore
+     * premultiplication has the same result as a local postmultiplication while
+     * avoiding any Euler conversion.
      */
-    public function snapQuatIncremental(start:h3d.Quat, target:h3d.Quat):h3d.Quat {
-        if (!enableRotation) return target;
-        var startEuler = start.toEuler();
-        var targetEuler = target.toEuler();
-        var step = rotationStep;
-        var snapped = new h3d.Quat();
-        snapped.initRotation(
-            startEuler.x + degToRad(
-                snapValue(wrappedDegDelta(radToDeg(targetEuler.x - startEuler.x)), step)),
-            startEuler.y + degToRad(
-                snapValue(wrappedDegDelta(radToDeg(targetEuler.y - startEuler.y)), step)),
-            startEuler.z + degToRad(
-                snapValue(wrappedDegDelta(radToDeg(targetEuler.z - startEuler.z)), step)));
-        return snapped;
+    public function snapAxisRotationIncremental(start:h3d.Quat,
+            worldAxis:h3d.Vector, deltaRadians:Float):h3d.Quat {
+        var axisLengthSq = worldAxis.lengthSq();
+        if (!Math.isFinite(axisLengthSq) || axisLengthSq <= 0.000000000001) {
+            throw "Rotation ring axis must be finite and non-zero";
+        }
+        var inverseLength = 1 / Math.sqrt(axisLengthSq);
+        var increment = new h3d.Quat();
+        increment.initRotateAxis(
+            worldAxis.x * inverseLength,
+            worldAxis.y * inverseLength,
+            worldAxis.z * inverseLength,
+            snapRotationDeltaRadians(deltaRadians));
+        var result = new h3d.Quat();
+        result.multiply(increment, start);
+        result.normalize();
+        return result;
     }
 
     /**
@@ -258,14 +270,6 @@ class GridSnapping {
             ScalePolicy.clamp(snappedX, targetX == 0 ? startX : targetX, scaleMinimum),
             ScalePolicy.clamp(snappedY, targetY == 0 ? startY : targetY, scaleMinimum),
             ScalePolicy.clamp(snappedZ, targetZ == 0 ? startZ : targetZ, scaleMinimum));
-    }
-
-    /** Wrap a signed Euler delta in degrees into (-180, 180]. */
-    static function wrappedDegDelta(delta:Float):Float {
-        delta = delta % 360;
-        if (delta > 180) delta -= 360;
-        if (delta < -180) delta += 360;
-        return delta;
     }
 
     static function clampIndex(index:Int, count:Int):Int {

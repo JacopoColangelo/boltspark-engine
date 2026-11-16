@@ -10,6 +10,8 @@ import h2d.BlendMode;
  */
 enum GizmoResult {
 	MovePosition(x:Float, y:Float, z:Float);
+	/** Press-time world axis plus the accumulated torus angle in radians. */
+	RotateAxis(axisX:Float, axisY:Float, axisZ:Float, radians:Float);
 	RotateQuat(q:h3d.Quat);
 	ScaleValues(sx:Float, sy:Float, sz:Float);
 }
@@ -492,13 +494,10 @@ class TransformGizmo {
 		ringDelta = (dx * ringScreenTangent.x + dy * ringScreenTangent.y)
 			/ ringScreenTangentLengthSq;
 		if (Math.abs(ringDelta) < 1e-9) return null;
-		var quat = new h3d.Quat();
-		quat.initRotateAxis(ringAxis.x, ringAxis.y, ringAxis.z, ringDelta);
-		var result = new h3d.Quat();
-		// Rotating around the object's local ring axis equals premultiplying
-		// the same rotation expressed on the ring's world axis.
-		result.multiply(quat, startQuat);
-		return RotateQuat(result);
+		// Preserve the scalar torus angle until Main applies optional snapping.
+		// Converting this arbitrary post-arcball orientation to Euler angles here
+		// would couple the other two axes and jump between decomposition branches.
+		return RotateAxis(ringAxis.x, ringAxis.y, ringAxis.z, ringDelta);
 	}
 
 	function dragRotateOmni(px:Float, py:Float):Null<GizmoResult> {
