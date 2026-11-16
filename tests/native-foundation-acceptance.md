@@ -109,8 +109,25 @@ Executed on 2026-11-14 with window-scoped native key/mouse events against the Ha
 - [x] Rebind capture ignores modifier-only events: Ctrl then T captured `Ctrl+T` for Rotate in the separate window, persisted a complete versioned JSON map, synchronized into the already-running main editor, and immediately selected Rotate there (`bin/keybindings-native-window-rebound.png`, `bin/native-window-evidence.txt`). Duplicate chords are rejected and malformed/partial persisted maps leave the complete live/default map intact in `Keybindings.hx`.
 - [x] Shortcut commands, hold snapping, snap-to-grid, and Delete remain suppressed while an inspector/search text control owns keyboard capture.
 - [x] Undo and Redo are exposed through the native Edit menu and rebindable
-  Ctrl+Z/Ctrl+Y defaults. Version-1 keybinding maps migrate to version 2 by
-  retaining existing actions and appending the two history bindings.
+  Ctrl+Z/Ctrl+Y defaults. Historical keybinding maps migrate to version 4 by
+  retaining existing actions and appending collision-free history, hierarchy,
+  grid, and F Focus Selection bindings.
+
+## Viewport camera navigation
+
+Executed on 2026-11-16 through the production-controller HashLink regression
+(`tests/repro/EditorCameraControllerRepro.hx`) and followed by successful DX12
+development/release native smoke launches.
+
+- [x] Hover alone leaves WASD/QE inert; RMB capture enables flight, and RMB
+  release immediately clears smoothed velocity.
+- [x] An idle wheel over the viewport dollies along the view axis (up moves in,
+  down moves out), while RMB+wheel retains camera-speed adjustment.
+- [x] Alt+LMB orbit uses the corrected Unreal-style horizontal and vertical
+  tumble directions.
+- [x] Rebindable F Focus Selection frames the primary object's complete
+  world-space bounds with aspect/FOV-aware padding, preserves view rotation,
+  and falls back to a useful radius for empty GameObjects.
 
 ## Viewport transform gizmo (Move tool)
 

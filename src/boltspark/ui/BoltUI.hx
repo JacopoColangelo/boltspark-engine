@@ -80,12 +80,14 @@ class BoltUI {
     public var onViewportCameraMove:Null<Int->Float->Float->Void>;
     /** Camera gesture end: kind + viewport-local pointer (-1 when cancelled). */
     public var onViewportCameraEnd:Null<Int->Float->Float->Void>;
-    /** Viewport focus (hover or owned gesture) changed. */
+    /** Viewport contextual focus (hover or owned gesture) changed. */
     public var onViewportFocusChanged:Null<Bool->Void>;
     /** The native window lost keyboard focus. */
     public var onWindowFocusLost:Null<Void->Void>;
     /** G: toggle the independent editor grid. */
     public var onToggleGrid:Null<Void->Void>;
+    /** F: frame the primary selection in the viewport. */
+    public var onFocusSelection:Null<Void->Void>;
 
     public function new(parent:h2d.Scene, window:hxd.Window, snapping:GridSnapping,
             keybindings:Keybindings) {
@@ -208,10 +210,15 @@ class BoltUI {
         shell.onToggleGrid = function() {
             if (onToggleGrid != null) onToggleGrid();
         };
-        // The shell owns the viewport focus notion (hover + gesture capture,
-        // suppressed while typing); the input adapter consults it before
-        // letting camera-key-bound shortcuts fire.
-        input.viewportFocusQuery = function() return shell.isViewportFocused();
+        shell.onFocusSelection = function() {
+            if (onFocusSelection != null) onFocusSelection();
+        };
+        // Camera-key-bound shortcuts are suppressed only while RMB fly
+        // navigation is actually captured. Hover alone must leave E and the
+        // other editor shortcuts available, matching Unreal's input model.
+        input.viewportNavigationQuery = function() {
+            return shell.isViewportNavigationActive();
+        };
     }
 
     /** Editor console access. */

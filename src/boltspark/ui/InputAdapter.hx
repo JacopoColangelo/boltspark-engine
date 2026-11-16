@@ -41,10 +41,12 @@ class InputAdapter {
     public var onRenamePressed:Null<Void->Void>;
     /** G (rebindable): toggle the independent editor grid. */
     public var onToggleGridPressed:Null<Void->Void>;
+    /** F (rebindable): frame the primary selection in the viewport. */
+    public var onFocusSelectionPressed:Null<Void->Void>;
     /** The native window lost keyboard focus; release held navigation state. */
     public var onWindowFocusLost:Null<Void->Void>;
-    /** Returns true while the editor viewport owns keyboard navigation. */
-    public var viewportFocusQuery:Null<Void->Bool>;
+    /** Returns true only while RMB fly navigation owns the viewport. */
+    public var viewportNavigationQuery:Null<Void->Bool>;
 
     final scene:h2d.Scene;
     final keybindings:Keybindings;
@@ -64,6 +66,7 @@ class InputAdapter {
     var duplicateKeyDown:Int = -1;
     var renameKeyDown:Int = -1;
     var toggleGridKeyDown:Int = -1;
+    var focusSelectionKeyDown:Int = -1;
 
     public function new(scene:h2d.Scene, keybindings:Keybindings,
             ?state:UiInputState) {
@@ -199,6 +202,15 @@ class InputAdapter {
                         toggleGridKeyDown = event.keyCode;
                     }
                 }
+                if (keybindings.matches(EditorAction.FocusSelection,
+                        event.keyCode, ctrlDown)) {
+                    if (focusSelectionKeyDown < 0) {
+                        if (onFocusSelectionPressed != null) {
+                            onFocusSelectionPressed();
+                        }
+                        focusSelectionKeyDown = event.keyCode;
+                    }
+                }
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
                     onEscapePressed();
                 }
@@ -216,6 +228,9 @@ class InputAdapter {
                 if (event.keyCode == duplicateKeyDown) duplicateKeyDown = -1;
                 if (event.keyCode == renameKeyDown) renameKeyDown = -1;
                 if (event.keyCode == toggleGridKeyDown) toggleGridKeyDown = -1;
+                if (event.keyCode == focusSelectionKeyDown) {
+                    focusSelectionKeyDown = -1;
+                }
                 if (event.keyCode == snapHoldKeyDown) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -244,6 +259,7 @@ class InputAdapter {
                 duplicateKeyDown = -1;
                 renameKeyDown = -1;
                 toggleGridKeyDown = -1;
+                focusSelectionKeyDown = -1;
                 if (snapHoldKeyDown >= 0) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -264,9 +280,9 @@ class InputAdapter {
         if (report != null) report.text = statusLine();
     }
 
-    /** WASD/QE fly the editor camera while the viewport is focused; a
-        single-key shortcut bound to one of them (Rotate on E by default)
-        must not fire during flight. */
+    /** WASD/QE fly the editor camera only while RMB look is held; a single-key
+        shortcut bound to one of them (Rotate on E by default) must not fire
+        during that flight gesture. */
     public static function isCameraNavigationKey(keyCode:Int):Bool {
         return keyCode == hxd.Key.W || keyCode == hxd.Key.A
             || keyCode == hxd.Key.S || keyCode == hxd.Key.D
@@ -274,6 +290,6 @@ class InputAdapter {
     }
 
     function viewportNavigationActive():Bool {
-        return viewportFocusQuery != null && viewportFocusQuery();
+        return viewportNavigationQuery != null && viewportNavigationQuery();
     }
 }

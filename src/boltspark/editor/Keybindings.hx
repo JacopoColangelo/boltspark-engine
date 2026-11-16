@@ -21,9 +21,10 @@ import sys.io.File;
  */
 class Keybindings {
     static inline var FILE_NAME:String = "keybindings.json";
-    static inline var SCHEMA_VERSION:Int = 3;
+    static inline var SCHEMA_VERSION:Int = 4;
     static inline var VERSION_ONE_ACTION_COUNT:Int = 6;
     static inline var VERSION_TWO_ACTION_COUNT:Int = 8;
+    static inline var VERSION_THREE_ACTION_COUNT:Int = 13;
 
     final directory:Null<String>;
     final filePath:Null<String>;
@@ -101,6 +102,7 @@ class Keybindings {
             case EditorAction.DuplicateSelection: "Duplicate Selection";
             case EditorAction.RenameSelection: "Rename Selection";
             case EditorAction.ToggleGrid: "Toggle Editor Grid";
+            case EditorAction.FocusSelection: "Focus Selection";
             default: "Unknown Action";
         };
     }
@@ -149,6 +151,7 @@ class Keybindings {
         // G toggles the independent editor grid (Game View); registered like
         // every other action so it is rebindable and persisted.
         bindings[EditorAction.ToggleGrid] = {keyCode: hxd.Key.G, ctrl: false};
+        bindings[EditorAction.FocusSelection] = {keyCode: hxd.Key.F, ctrl: false};
         lastError = "";
         if (!quiet) {
             var saveError = save();
@@ -252,7 +255,7 @@ class Keybindings {
             return false;
         }
         var storedVersion = Reflect.field(data, "version");
-        if ((storedVersion != 1 && storedVersion != 2
+        if ((storedVersion != 1 && storedVersion != 2 && storedVersion != 3
                 && storedVersion != SCHEMA_VERSION)
                 || !Std.isOfType(Reflect.field(data, "bindings"), Array)) {
             lastError = 'Keybindings at ${filePath} have an unsupported format; using defaults.';
@@ -270,7 +273,9 @@ class Keybindings {
             ? VERSION_ONE_ACTION_COUNT
             : (storedVersion == 2
                 ? VERSION_TWO_ACTION_COUNT
-                : (EditorAction.ACTION_COUNT : Int));
+                : (storedVersion == 3
+                    ? VERSION_THREE_ACTION_COUNT
+                    : (EditorAction.ACTION_COUNT : Int)));
         for (entry in stored) {
             if (!Reflect.isObject(entry)) return invalidStoredBindings();
             var action = Reflect.field(entry, "action");
@@ -289,11 +294,11 @@ class Keybindings {
         for (action in 0...expectedActions) {
             if (loaded[action] == null) return invalidStoredBindings();
         }
-        // Older versions predate Undo/Redo and/or hierarchy clipboard actions.
-        // Preserve every user binding and append collision-free defaults. If
-        // an older user already claimed a new action's default chord, give the
-        // new action a deterministic spare binding instead of rejecting the
-        // complete historical map.
+        // Older versions predate Undo/Redo, hierarchy clipboard actions,
+        // and/or viewport focus. Preserve every user binding and append
+        // collision-free defaults. If an older user already claimed a new
+        // action's default chord, give the new action a deterministic spare
+        // binding instead of rejecting the complete historical map.
         for (action in expectedActions...(EditorAction.ACTION_COUNT : Int)) {
             var fallback = bindings[action];
             var chord = (fallback.ctrl ? "1:" : "0:") + fallback.keyCode;
@@ -312,7 +317,7 @@ class Keybindings {
             persistedContents = contents;
         } else {
             // Rewrite the complete migrated map once so both editor windows
-            // subsequently observe the same version-3 payload.
+            // subsequently observe the same current-schema payload.
             persistedContents = null;
             var migrationError = save();
             if (migrationError != null) lastError = migrationError;

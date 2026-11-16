@@ -34,9 +34,10 @@ on pull requests.
 ```
 
 The default native path first runs `tools/build.ps1 -Check`, then compiles and
-runs all portable tests as HashLink bytecode plus the Heaps affine scene-object
-bridge, DX12 `hl.CArray`, and FreeType native-module regressions. It expects a
-previous build to have created `bin/freetype.hdll`.
+runs all portable tests as HashLink bytecode plus the editor-camera navigation
+test, Heaps affine scene-object bridge, DX12 `hl.CArray`, and FreeType
+native-module regressions. It expects a previous build to have created
+`bin/freetype.hdll`.
 
 To rebuild everything first:
 

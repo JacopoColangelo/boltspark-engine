@@ -142,6 +142,7 @@ try {
 
     $hlTests = @(
         @{ Name = 'ArcballRotationRepro'; Output = 'arcball-rotation-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
+        @{ Name = 'EditorCameraControllerRepro'; Output = 'editor-camera-controller-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'RotationEulerRepro'; Output = 'rotation-euler-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'BoltUiCoreRepro'; Output = 'bolt-ui-core-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'CommandHistoryRepro'; Output = 'command-history-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },

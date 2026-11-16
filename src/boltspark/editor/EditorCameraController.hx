@@ -11,16 +11,18 @@ package boltspark.editor;
  * frame, which keeps the view roll-free (up is always world +Y) and pitch
  * clamped.
  *
- * Movement is frame-rate independent: a desired velocity is built from the
- * WASDQE key state each frame and the actual velocity converges on it with
- * exponential smoothing scaled by delta time.
+ * Movement is frame-rate independent: while RMB free-look is active, a
+ * desired velocity is built from the WASDQE key state each frame and the
+ * actual velocity converges on it with exponential smoothing scaled by delta
+ * time. Hovering the viewport alone never enables fly navigation.
  *
  * Pointer gestures are fed as viewport-local pixel deltas (y grows downward):
  *  - RMB look:    yaw += dx, pitch -= dy (FPS free-look).
+ *  - Wheel hover: dolly forward/backward without entering fly mode.
  *  - MMB pan:     the world follows the cursor, scaled by pivot distance.
  *  - Alt+LMB orbit: the camera swings around the navigation pivot; the pivot
- *    depth is captured once so the orbit never jumps, and dragging up raises
- *    the camera over the pivot (grab-the-object feel).
+ *    depth is captured once so the orbit never jumps, using Unreal-style
+ *    tumble direction.
  */
 class EditorCameraController {
     /** Camera gesture kinds shared with the editor shell input layer. */
@@ -36,6 +38,10 @@ class EditorCameraController {
     public var lookSensitivity:Float = 0.22;
     /** Multiplicative speed change per mouse-wheel step. */
     public var wheelStep:Float = 1.15;
+    /** Fraction of base movement speed travelled by one hover-wheel step. */
+    public var wheelDollyScale:Float = 0.2;
+    /** Smallest useful hover-wheel movement in world units. */
+    public var minWheelDolly:Float = 0.25;
     public var minSpeed:Float = 0.25;
     public var maxSpeed:Float = 512.0;
     /** Temporary Shift boost / Ctrl precision multipliers. */
@@ -47,6 +53,10 @@ class EditorCameraController {
     public var pitchLimit:Float = 89.0;
     /** Default base movement speed in world units per second. */
     public var defaultSpeed:Float = 10.0;
+    /** Margin around an object framed by the Focus Selection command. */
+    public var focusPadding:Float = 1.2;
+    /** Empty or point-like objects still receive a useful focus frame. */
+    public var minimumFocusRadius:Float = 0.5;
 
     /** Set by Main from live editor-shell focus state. */
     public var viewportFocused:Bool = false;
@@ -66,6 +76,9 @@ class EditorCameraController {
     var pitchRad:Float = 0;
     var baseSpeed:Float = 10.0;
     var viewportWidth:Float = 1200.0;
+    var viewportHeight:Float = 675.0;
+    /** True only between an accepted RMB press and its matching release. */
+    var lookActive:Bool = false;
     var orbiting:Bool = false;
     var orbitDistance:Float = 10.0;
 
@@ -99,8 +112,9 @@ class EditorCameraController {
         velocity.set(0, 0, 0);
     }
 
-    public function setViewportWidth(width:Float):Void {
+    public function setViewportSize(width:Float, height:Float):Void {
         if (width > 1) viewportWidth = width;
+        if (height > 1) viewportHeight = height;
     }
 
     public function baseSpeedValue():Float {
@@ -109,9 +123,11 @@ class EditorCameraController {
 
     /**
      * 0 = normal, 1 = Shift boost, 2 = Ctrl precision. Ctrl wins when both
-     * are held so precision movement stays predictable.
+     * are held so precision movement stays predictable. Modifiers are camera
+     * controls only during an active RMB free-look session.
      */
     public function modifierState():Int {
+        if (!navigationActive()) return 0;
         if (hxd.Key.isDown(hxd.Key.CTRL)) return 2;
         return hxd.Key.isDown(hxd.Key.SHIFT) ? 1 : 0;
     }
@@ -138,24 +154,80 @@ class EditorCameraController {
      * normalization), which lowers speed; an upward step raises it.
      */
     public function adjustSpeedForWheel(delta:Float):Void {
-        if (delta == 0) return;
+        if (delta == 0 || !navigationActive()) return;
         baseSpeed *= delta > 0 ? 1 / wheelStep : wheelStep;
         if (baseSpeed < minSpeed) baseSpeed = minSpeed;
         if (baseSpeed > maxSpeed) baseSpeed = maxSpeed;
+    }
+
+    /**
+     * Wheel over an idle hovered viewport: scroll up moves into the scene and
+     * scroll down moves out. This is intentionally independent of RMB flight,
+     * where the same wheel continues to adjust movement speed instead.
+     */
+    public function dollyForWheel(delta:Float):Void {
+        if (delta == 0 || !viewportFocused || !keyboardEnabled
+                || lookActive || orbiting) return;
+        stopMovement();
+        var forward = forwardVector();
+        var step = Math.max(minWheelDolly, baseSpeed * wheelDollyScale);
+        var distance = -delta * step;
+        position.x += forward.x * distance;
+        position.y += forward.y * distance;
+        position.z += forward.z * distance;
+        clampPosition();
+        applyCamera();
+    }
+
+    /**
+     * Frame a world-space sphere while preserving the current view direction.
+     * The tighter of the horizontal and vertical FOVs determines distance.
+     */
+    public function focusOn(center:h3d.Vector, radius:Float):Bool {
+        if (center == null || !Math.isFinite(center.x)
+                || !Math.isFinite(center.y) || !Math.isFinite(center.z)
+                || !Math.isFinite(radius)) return false;
+        stopMovement();
+        orbiting = false;
+        var safeRadius = Math.max(minimumFocusRadius, Math.abs(radius));
+        var halfHorizontal = EditorViewport.VIEW_FOV_DEG * 0.5 * DEG_TO_RAD;
+        var aspect = viewportWidth / Math.max(1, viewportHeight);
+        var halfVertical = Math.atan(Math.tan(halfHorizontal) / aspect);
+        var limitingHalfFov = Math.min(halfHorizontal, halfVertical);
+        var distance = safeRadius * focusPadding
+            / Math.max(0.000001, Math.sin(limitingHalfFov));
+        var forward = forwardVector();
+        position.set(
+            center.x - forward.x * distance,
+            center.y - forward.y * distance,
+            center.z - forward.z * distance);
+        clampPosition();
+        orbitPivot.set(center.x, center.y, center.z);
+        var dx = position.x - center.x;
+        var dy = position.y - center.y;
+        var dz = position.z - center.z;
+        orbitDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        applyCamera();
+        return true;
     }
 
     // ------------------------------------------------------------------
     // Pointer gestures (deltas are viewport pixels; y grows downward)
     // ------------------------------------------------------------------
 
-    public function beginLook():Void {}
+    public function beginLook():Void {
+        lookActive = true;
+    }
 
     public function addLookDelta(dx:Float, dy:Float):Void {
         yawRad += dx * lookSensitivity * DEG_TO_RAD;
         pitchRad = clampPitch(pitchRad - dy * lookSensitivity * DEG_TO_RAD);
     }
 
-    public function endLook():Void {}
+    public function endLook():Void {
+        lookActive = false;
+        stopMovement();
+    }
 
     public function beginPan():Void {
         // Anchor the pan depth like an orbit does: the current pivot is
@@ -211,11 +283,10 @@ class EditorCameraController {
 
     public function addOrbitDelta(dx:Float, dy:Float):Void {
         if (!orbiting) return;
-        // Orbit inverts the look signs so the "grab the object" feel holds:
-        // dragging right swings the camera screen-right around the pivot and
-        // dragging up raises it over the pivot.
-        yawRad -= dx * lookSensitivity * DEG_TO_RAD;
-        pitchRad = clampPitch(pitchRad + dy * lookSensitivity * DEG_TO_RAD);
+        // Match the pointer direction used by Unreal's Alt+LMB tumble instead
+        // of applying the previous doubly-inverted orbit response.
+        yawRad += dx * lookSensitivity * DEG_TO_RAD;
+        pitchRad = clampPitch(pitchRad - dy * lookSensitivity * DEG_TO_RAD);
         applyOrbitPlacement();
     }
 
@@ -225,7 +296,8 @@ class EditorCameraController {
 
     /** Window focus loss must never leave a stale velocity or stuck orbit. */
     public function onWindowFocusLost():Void {
-        velocity.set(0, 0, 0);
+        lookActive = false;
+        stopMovement();
     }
 
     // ------------------------------------------------------------------
@@ -235,31 +307,43 @@ class EditorCameraController {
     public function update(dt:Float):Void {
         if (dt <= 0) return;
         buildTargetVelocity();
-        var alpha = 1 - Math.exp(-moveSmoothing * dt);
-        velocity.x += (desiredVelocity.x - velocity.x) * alpha;
-        velocity.y += (desiredVelocity.y - velocity.y) * alpha;
-        velocity.z += (desiredVelocity.z - velocity.z) * alpha;
+        if (!navigationActive()) {
+            // Releasing RMB must stop flight immediately. Letting the smoothed
+            // velocity decay here would continue moving a camera that no
+            // longer owns a navigation gesture.
+            stopMovement();
+        } else {
+            var alpha = 1 - Math.exp(-moveSmoothing * dt);
+            velocity.x += (desiredVelocity.x - velocity.x) * alpha;
+            velocity.y += (desiredVelocity.y - velocity.y) * alpha;
+            velocity.z += (desiredVelocity.z - velocity.z) * alpha;
+        }
         if (!orbiting) {
             position.x += velocity.x * dt;
             position.y += velocity.y * dt;
             position.z += velocity.z * dt;
             clampPosition();
         }
-        var forward = forwardVector();
-        camera.pos.set(position.x, position.y, position.z);
-        camera.target.set(
-            position.x + forward.x,
-            position.y + forward.y,
-            position.z + forward.z);
+        applyCamera();
     }
 
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------
 
-    /** Movement keys only apply while the viewport owns keyboard input. */
+    /** Exposed for input routing and the headless activation regression. */
+    public function isFlyNavigationActive():Bool {
+        return navigationActive();
+    }
+
+    /** Movement keys require viewport ownership and an active RMB look. */
     function navigationActive():Bool {
-        return keyboardEnabled && viewportFocused;
+        return keyboardEnabled && viewportFocused && lookActive;
+    }
+
+    function stopMovement():Void {
+        desiredVelocity.set(0, 0, 0);
+        velocity.set(0, 0, 0);
     }
 
     function buildTargetVelocity():Void {
@@ -377,6 +461,15 @@ class EditorCameraController {
             orbitPivot.y - forward.y * orbitDistance,
             orbitPivot.z - forward.z * orbitDistance);
         clampPosition();
+    }
+
+    function applyCamera():Void {
+        var forward = forwardVector();
+        camera.pos.set(position.x, position.y, position.z);
+        camera.target.set(
+            position.x + forward.x,
+            position.y + forward.y,
+            position.z + forward.z);
     }
 
     function clampPitch(value:Float):Float {

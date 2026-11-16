@@ -260,6 +260,7 @@ class Main extends hxd.App {
             cameraController.onWindowFocusLost();
         };
         boltUI.onToggleGrid = toggleEditorGrid;
+        boltUI.onFocusSelection = focusSelection;
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
@@ -293,10 +294,11 @@ class Main extends hxd.App {
         }
         // Editor camera navigation runs before everything that reads the
         // camera this frame (gizmo follow, outline, rendering). Movement keys
-        // are inert while a gizmo drag owns the pointer or the viewport is
-        // unfocused; the controller is told both each frame.
+        // are inert unless an RMB free-look gesture owns the viewport; gizmo
+        // drags remain an additional safety lockout.
         cameraController.keyboardEnabled = !gizmoDragging;
-        cameraController.setViewportWidth(boltUI.getViewportRect().width);
+        var viewport = boltUI.getViewportRect();
+        cameraController.setViewportSize(viewport.width, viewport.height);
         cameraController.update(dt);
         boltUI.update(dt);
         axisGizmo.update();
@@ -1046,17 +1048,15 @@ class Main extends hxd.App {
     // time); all motion math lives in EditorCameraController.
     // ------------------------------------------------------------------
 
-    /**
-     * Wheel over the viewport: adjust movement speed only while the RMB
-     * free-look gesture owns the camera (Unreal-style). Without a gesture
-     * the wheel does nothing here, leaving it free for panel scrolling and
-     * future viewport uses. The gesture capture passes wheel events through
-     * (propagate stays true), so they reach this handler mid-look.
-     */
+    /** Wheel hover dollies the camera; during RMB flight it adjusts speed. */
     function onViewportWheel(delta:Float):Void {
-        if (cameraGesture != EditorCameraController.GESTURE_LOOK) return;
-        cameraController.adjustSpeedForWheel(delta);
-        refreshCameraSpeedLabel();
+        if (gizmoDragging) return;
+        if (cameraGesture == EditorCameraController.GESTURE_LOOK) {
+            cameraController.adjustSpeedForWheel(delta);
+            refreshCameraSpeedLabel();
+            return;
+        }
+        if (cameraGesture < 0) cameraController.dollyForWheel(delta);
     }
 
     function onViewportCameraBegin(kind:Int, viewX:Float, viewY:Float):Bool {
@@ -1066,6 +1066,7 @@ class Main extends hxd.App {
         cameraGestureLastY = viewY;
         switch (kind) {
             case EditorCameraController.GESTURE_LOOK:
+                cameraController.beginLook();
                 lookRelative = false;
                 beginRelativeLook();
             case EditorCameraController.GESTURE_PAN:
@@ -1156,14 +1157,48 @@ class Main extends hxd.App {
         }
     }
 
-    /** Orbit pivot: the primary selection's position, or the world origin. */
+    /** Orbit pivot: the primary selection's world position, or world origin. */
     function currentOrbitPivot():h3d.Vector {
         var selected = getSelectedObject();
         if (selected != null) {
-            return new h3d.Vector(selected.mesh.x, selected.mesh.y,
-                selected.mesh.z);
+            var point = selected.mesh.localToGlobal(new h3d.col.Point());
+            return new h3d.Vector(point.x, point.y, point.z);
         }
         return new h3d.Vector(0, 0, 0);
+    }
+
+    /** F: frame the primary selection and preserve the current view rotation. */
+    function focusSelection():Void {
+        if (gizmoDragging || cameraGesture >= 0) return;
+        var selected = getSelectedObject();
+        if (selected == null) return;
+        var bounds = selected.mesh.getBounds();
+        var populated = bounds.xMax >= bounds.xMin
+            && bounds.yMax >= bounds.yMin && bounds.zMax >= bounds.zMin
+            && Math.isFinite(bounds.xMin) && Math.isFinite(bounds.xMax)
+            && Math.isFinite(bounds.yMin) && Math.isFinite(bounds.yMax)
+            && Math.isFinite(bounds.zMin) && Math.isFinite(bounds.zMax);
+        var center:h3d.Vector;
+        var radius:Float;
+        if (populated) {
+            var halfX = (bounds.xMax - bounds.xMin) * 0.5;
+            var halfY = (bounds.yMax - bounds.yMin) * 0.5;
+            var halfZ = (bounds.zMax - bounds.zMin) * 0.5;
+            center = new h3d.Vector(
+                (bounds.xMin + bounds.xMax) * 0.5,
+                (bounds.yMin + bounds.yMax) * 0.5,
+                (bounds.zMin + bounds.zMax) * 0.5);
+            radius = Math.sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+        } else {
+            // Empty GameObjects have no render bounds; focus their world pivot
+            // with the controller's minimum framing radius.
+            var pivot = selected.mesh.localToGlobal(new h3d.col.Point());
+            center = new h3d.Vector(pivot.x, pivot.y, pivot.z);
+            radius = 0;
+        }
+        if (cameraController.focusOn(center, radius)) {
+            logActivity('camera: focused ${selected.name}');
+        }
     }
 
     /** G key: toggle the independent grid pass, nothing else changes. */

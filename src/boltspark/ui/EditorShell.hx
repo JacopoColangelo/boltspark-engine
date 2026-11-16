@@ -175,12 +175,14 @@ class EditorShell {
     public var onViewportCameraMove:Null<Int->Float->Float->Void>;
     /** Camera gesture end: kind + viewport-local pointer (-1 when cancelled). */
     public var onViewportCameraEnd:Null<Int->Float->Float->Void>;
-    /** Viewport focus (hover or owned gesture) changed. */
+    /** Viewport contextual focus (hover or owned gesture) changed. */
     public var onViewportFocusChanged:Null<Bool->Void>;
     /** The native window lost keyboard focus. */
     public var onWindowFocusLost:Null<Void->Void>;
     /** G: toggle the independent editor grid. */
     public var onToggleGrid:Null<Void->Void>;
+    /** F: frame the primary selection in the active viewport. */
+    public var onFocusSelection:Null<Void->Void>;
     public var viewportRect(default, null):LayoutRect;
 
     var lastWidth:Int = -1;
@@ -204,9 +206,9 @@ class EditorShell {
     var scaleLinked:Bool = false;
     /** Whether a hold-to-disable press was actually forwarded past the text guard. */
     var snapHoldForwarded:Bool = false;
-    // Viewport focus and camera-gesture ownership. Focus is hover or an
-    // active pointer capture; a focused viewport owns camera navigation keys
-    // and the G grid toggle.
+    // Viewport focus and camera-gesture ownership. Contextual focus is hover
+    // or an active pointer capture (used by commands such as the G grid
+    // toggle); fly-camera keys separately require an RMB look capture.
     var viewportHovered:Bool = false;
     var cameraGesture:Int = -1;
     var gizmoCaptureActive:Bool = false;
@@ -706,6 +708,11 @@ class EditorShell {
             if (!isViewportFocused()) return;
             if (onToggleGrid != null) onToggleGrid();
         };
+        input.onFocusSelectionPressed = function() {
+            if (!isViewportFocused() || cameraGesture >= 0
+                    || selectedObjectId < 0) return;
+            if (onFocusSelection != null) onFocusSelection();
+        };
         input.onWindowFocusLost = function() {
             if (onWindowFocusLost != null) onWindowFocusLost();
         };
@@ -857,13 +864,19 @@ class EditorShell {
     }
 
     /**
-     * Keyboard-facing viewport focus: the pointer hovers the viewport or a
-     * pointer gesture owns it, and no text field captures typing (camera
-     * keys and the G toggle must not hijack text entry).
+     * Keyboard-facing contextual focus: the pointer hovers the viewport or a
+     * pointer gesture owns it, and no text field captures typing. This is for
+     * viewport commands such as G, not permission to fly the camera.
      */
     public function isViewportFocused():Bool {
         if (anyTextCaptureActive()) return false;
         return viewportHovered || cameraGesture >= 0 || gizmoCaptureActive;
+    }
+
+    /** Unreal-style fly navigation is active only for the RMB look capture. */
+    public function isViewportNavigationActive():Bool {
+        if (anyTextCaptureActive()) return false;
+        return cameraGesture == EditorCameraController.GESTURE_LOOK;
     }
 
     function fitText(target:h2d.Text, value:String, maxWidth:Float):Void {
