@@ -20,8 +20,10 @@ import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.GameObjectPalette;
 import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
+import boltspark.ui.widgets.AssetBrowser;
 import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
+import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.widgets.NumericDragField;
 import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
@@ -127,6 +129,10 @@ class EditorShell {
     static inline var FOV_MIN_DEG:Float = 30.0;
     static inline var FOV_MAX_DEG:Float = 140.0;
     final console:ConsolePanel;
+    final bottomTabs:h2d.Object;
+    final logTab:UiButton;
+    final assetsTab:UiButton;
+    var activeBottomTab:Int = 0;
     final statusDot:h2d.Graphics;
     final statusText:h2d.Text;
     final rendererStatus:h2d.Text;
@@ -139,6 +145,7 @@ class EditorShell {
     final layoutStore:DockLayoutStore;
     final palette:GameObjectPalette;
     final menuDropdown:MenuDropdown;
+    final assetBrowser:AssetBrowser;
 
     /** Create a primitive by mesh asset id (palette click). */
     public var onCreatePrimitive:Null<String->Void>;
@@ -182,6 +189,24 @@ class EditorShell {
     public var onSnapToGrid:Null<Void->Void>;
     /** Hold key (default V): true while held to suspend translation snapping. */
     public var onSnapHoldChanged:Null<Bool->Void>;
+    /** Project/scene file commands routed upward to Main; never direct I/O. */
+    public var onFileNewProject:Null<Void->Void>;
+    public var onFileOpenProject:Null<Void->Void>;
+    public var onFileSaveProject:Null<Void->Void>;
+    public var onFileSaveProjectAs:Null<Void->Void>;
+    public var onFileSaveScene:Null<Void->Void>;
+    public var onFileSaveAll:Null<Void->Void>;
+    /** Asset Browser data and actions, routed upward to ProjectSession. */
+    public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
+    public var onOpenAsset:Null<String->Void>;
+    public var onNewScene:Null<String->String->Void>;
+    public var onRenameAsset:Null<String->String->Void>;
+    public var onRenameFolder:Null<String->String->String>;
+    public var onDeleteAsset:Null<String->Void>;
+    public var onQueryFolders:Null<Void->Array<String>>;
+    public var onNewFolder:Null<String->String>;
+    public var onMoveAsset:Null<String->String->Void>;
+    public var onCopyAsset:Null<String->String->Void>;
     /** Application-level dialogs are routed upward and hosted in native windows. */
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Opportunistically initialize a hidden host before its menu command runs. */
@@ -215,6 +240,8 @@ class EditorShell {
 
     var lastWidth:Int = -1;
     var lastHeight:Int = -1;
+    /** Right edge available to the project title, captured by layout. */
+    var titleAnchorX:Float = 0;
     var selectedObjectIds:Array<Int> = [];
     var selectedObjectId:Int = -1;
     /** Stable object anchor; its visible row index can change as trees fold. */
@@ -338,8 +365,38 @@ class EditorShell {
                         onPrepareApplicationWindow(EditorKeybindings);
                     }
                     // Drop straight down from the button into the body area.
-                    menuDropdown.open(capturedButton.x, Theme.TITLE_BAR_HEIGHT,
-                        [{
+                    menuDropdown.open(capturedButton.x, Theme.TITLE_BAR_HEIGHT, [
+                        {
+                            label: "New Project…",
+                            onClick: function() {
+                                input.clearFocus();
+                                if (onFileNewProject != null) onFileNewProject();
+                            }
+                        }, {
+                            label: "Open Project…",
+                            onClick: function() {
+                                input.clearFocus();
+                                if (onFileOpenProject != null) onFileOpenProject();
+                            }
+                        }, {
+                            label: "Save Project",
+                            onClick: function() {
+                                input.clearFocus();
+                                if (onFileSaveProject != null) onFileSaveProject();
+                            }
+                        }, {
+                            label: "Save Project As…",
+                            onClick: function() {
+                                input.clearFocus();
+                                if (onFileSaveProjectAs != null) onFileSaveProjectAs();
+                            }
+                        }, {
+                            label: "Save Current Scene",
+                            onClick: function() {
+                                input.clearFocus();
+                                if (onFileSaveScene != null) onFileSaveScene();
+                            }
+                        }, {
                             label: "Editor Settings",
                             submenu: [{
                                 label: "Editor Keybindings…",
@@ -350,7 +407,8 @@ class EditorShell {
                                     }
                                 }
                             }]
-                        }]);
+                        }
+                    ]);
                 };
             } else if (menuName == "Edit") {
                 button.onClick = function() {
@@ -726,6 +784,15 @@ class EditorShell {
         console = new ConsolePanel(ctx, root);
         console.onBackgroundClick = closePaletteIfOpen;
 
+        // Bottom dock tabs: Asset Browser first, Output Log second.
+        bottomTabs = new h2d.Object(root);
+        assetsTab = new UiButton(ctx, "Asset Browser", 108, 22, bottomTabs);
+        assetsTab.setQuiet();
+        assetsTab.onClick = showAssetBrowser;
+        logTab = new UiButton(ctx, "Output Log", 92, 22, bottomTabs);
+        logTab.setQuiet();
+        logTab.onClick = function() setBottomTab(1);
+
         statusDot = new h2d.Graphics(root);
         UiIcons.draw(statusDot, StatusDot, 0, 0, 6, Theme.SUCCESS);
         statusText = new UiText(ctx.captionFont, root);
@@ -754,18 +821,33 @@ class EditorShell {
         };
         input.onCopyPressed = function() {
             if (anyTextCaptureActive()) return;
+            if (activeBottomTab == 0 && assetBrowser.hasSelection()) {
+                assetBrowser.copyToClipboard();
+                return;
+            }
             copySelection();
         };
         input.onPastePressed = function() {
             if (anyTextCaptureActive()) return;
+            if (activeBottomTab == 0 && assetBrowser.hasClipboard()) {
+                assetBrowser.pasteClipboard();
+                return;
+            }
             if (onPasteObjects != null) onPasteObjects(-2);
+        };
+        input.onCutPressed = function() {
+            if (anyTextCaptureActive() || activeBottomTab != 0) return;
+            assetBrowser.cutToClipboard();
         };
         input.onDuplicatePressed = function() {
             if (anyTextCaptureActive()) return;
             duplicateSelection();
         };
         input.onRenamePressed = function() {
-            if (anyTextCaptureActive() || selectedObjectId < 0) return;
+            if (anyTextCaptureActive()) return;
+            // F2 in the Asset Browser renames the selected asset or folder.
+            if (activeBottomTab == 0 && assetBrowser.beginRename()) return;
+            if (selectedObjectId < 0) return;
             beginRenameFor(selectedObjectId);
         };
         // Tool shortcuts (1 Move / E Rotate / R Scale by default) share the
@@ -815,6 +897,14 @@ class EditorShell {
                     || selectedObjectIds.length == 0) return;
             if (onFocusSelection != null) onFocusSelection();
         };
+        input.onSaveCurrentScenePressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onFileSaveScene != null) onFileSaveScene();
+        };
+        input.onSaveAllPressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onFileSaveAll != null) onFileSaveAll();
+        };
         input.onWindowFocusLost = function() {
             if (onWindowFocusLost != null) onWindowFocusLost();
         };
@@ -822,6 +912,8 @@ class EditorShell {
         dockLayout = new DockLayout();
         layoutStore = new DockLayoutStore();
         var layoutError = layoutStore.load(dockLayout);
+        activeBottomTab = dockLayout.bottomTab;
+        console.visible = activeBottomTab == 1;
 
         // Splitters are created late so their interactive hit zones remain on
         // top of panel content.
@@ -848,6 +940,38 @@ class EditorShell {
         // their surfaces and hit targets cannot end up behind the viewport or
         // panel interactives. Application windows are separate native HWNDs.
         menuDropdown = new MenuDropdown(ctx, root);
+        assetBrowser = new AssetBrowser(ctx, root, root);
+        assetBrowser.visible = activeBottomTab == 0;
+        assetBrowser.onQueryAssets = function() {
+            return onQueryAssets != null ? onQueryAssets() : [];
+        };
+        assetBrowser.onOpenAsset = function(source) {
+            if (onOpenAsset != null) onOpenAsset(source);
+        };
+        assetBrowser.onNewScene = function(folder, name) {
+            if (onNewScene != null) onNewScene(folder, name);
+        };
+        assetBrowser.onRenameAsset = function(source, name) {
+            if (onRenameAsset != null) onRenameAsset(source, name);
+        };
+        assetBrowser.onDeleteAsset = function(source) {
+            if (onDeleteAsset != null) onDeleteAsset(source);
+        };
+        assetBrowser.onRenameFolder = function(source, name) {
+            return onRenameFolder != null ? onRenameFolder(source, name) : null;
+        };
+        assetBrowser.onQueryFolders = function() {
+            return onQueryFolders != null ? onQueryFolders() : [];
+        };
+        assetBrowser.onNewFolder = function(parent) {
+            return onNewFolder != null ? onNewFolder(parent) : null;
+        };
+        assetBrowser.onMoveAsset = function(source, folder) {
+            if (onMoveAsset != null) onMoveAsset(source, folder);
+        };
+        assetBrowser.onCopyAsset = function(source, folder) {
+            if (onCopyAsset != null) onCopyAsset(source, folder);
+        };
         palette = new GameObjectPalette(ctx, root);
         palette.onCreatePrimitive = function(meshId) {
             if (onCreatePrimitive != null) onCreatePrimitive(meshId);
@@ -1082,6 +1206,26 @@ class EditorShell {
         cameraSpeedText.visible = viewportHud.visible;
     }
 
+    function setBottomTab(index:Int):Void {
+        activeBottomTab = index;
+        dockLayout.bottomTab = index;
+        console.visible = index == 1;
+        assetBrowser.visible = index == 0;
+        if (index == 0) assetBrowser.refresh();
+        saveLayout();
+    }
+
+    /** Refresh the docked Asset Browser after a project asset changes. */
+    public function refreshAssetBrowser():Void {
+        assetBrowser.refresh();
+    }
+
+    /** Show the Asset Browser bottom tab and rebuild its listing. */
+    function showAssetBrowser():Void {
+        setBottomTab(0);
+        assetBrowser.refresh();
+    }
+
     /** UI font for editor overlay text (viewport axis gizmo letters). */
     public function viewportFont():h2d.Font {
         return ctx.font;
@@ -1091,6 +1235,15 @@ class EditorShell {
             redoLabel:Null<String>):Void {
         historyUndoLabel = undoLabel;
         historyRedoLabel = redoLabel;
+    }
+
+    /** Title-strip project/scene label, including the unsaved marker. */
+    public function setProjectTitle(text:String):Void {
+        projectTitle.text = text;
+        if (titleAnchorX > 0) {
+            projectTitle.x = Math.max(titleAnchorX - projectTitle.textWidth,
+                titleAnchorX - 200);
+        }
     }
 
     public function update(dt:Float):Void {
@@ -1114,6 +1267,7 @@ class EditorShell {
     public function resize():Void {
         var width = ctx.width;
         var height = ctx.height;
+
         var bodyTop = Theme.TOP_BAR_HEIGHT;
         var geometry = dockLayout.calculate(width, height);
         lastGeometry = geometry;
@@ -1152,10 +1306,21 @@ class EditorShell {
         layoutHierarchy(leftWidth, bodyTop);
         layoutInspector(rightWidth, bodyTop);
 
+        // Tabs occupy the top of the bottom dock; content starts below them.
+        var tabHeight:Float = 24;
+        bottomTabs.x = geometry.console.x;
+        bottomTabs.y = geometry.console.y;
+        assetsTab.x = 0;
+        assetsTab.y = 0;
+        logTab.x = 110;
+        logTab.y = 0;
+        var contentY = geometry.console.y + tabHeight;
+        var contentHeight = Math.max(0, geometry.console.height - tabHeight);
         console.x = geometry.console.x;
-        console.y = geometry.console.y;
-        console.layout(Math.max(0, geometry.console.width),
-            Math.max(0, geometry.console.height));
+        console.y = contentY;
+        console.layout(Math.max(0, geometry.console.width), contentHeight);
+        assetBrowser.layout(geometry.console.x, contentY,
+            Math.max(0, geometry.console.width), contentHeight);
 
         viewportHud.visible = geometry.viewport.width >= 290 && geometry.viewport.height >= 80;
         viewportHud.x = geometry.viewport.x + 8;
@@ -1216,6 +1381,7 @@ class EditorShell {
                 default: 46;
             };
         }
+        titleAnchorX = Math.max(menuX + 10, width - 16);
         projectTitle.visible = width >= 860;
         projectTitle.x = Math.max(menuX + 10, width - projectTitle.textWidth - 16);
         projectTitle.y = 5;
@@ -2037,6 +2203,7 @@ class EditorShell {
 
     /** True while any text-entry control owns the keyboard. */
     function anyTextCaptureActive():Bool {
+        if (assetBrowser.isRenaming()) return true;
         if (fovInput.isEditing()) return true;
         if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
         for (row in hierarchyRows) if (row.isRenaming()) return true;
@@ -2049,6 +2216,7 @@ class EditorShell {
         snapBar.closePopup();
         menuDropdown.close();
         closeFovPopup();
+        assetBrowser.closeMenus();
     }
 
     /** Redraw the clickable viewport World/Local axis-space control. */

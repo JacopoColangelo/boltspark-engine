@@ -50,7 +50,7 @@ To rebuild everything first:
 Optional switches add real-window checks:
 
 ```powershell
-.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList
+.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
 ```
 
 | Switch | Coverage |
@@ -63,7 +63,9 @@ Optional switches add real-window checks:
 | `-DeviceReset` | Heaps DX12's public forced context-loss path, device/context recreation, resource restoration callback, and post-reset HWND responsiveness. |
 | `-FocusSelection` | Presses F while the pointer hovers the hierarchy panel instead of the viewport; verifies the selection-based focus command is not gated by viewport focus. |
 | `-FovInput` | Clicks the PERSPECTIVE strip, types an exact value into the transform-style FOV field, and verifies probe telemetry reports the committed field-of-view value. |
-| `-KeybindingsList` | Opens the native keybindings HWND, confirms all 14 actions are present, then shrinks the window and verifies the binding list switches to a scrollable mask. |
+| `-KeybindingsList` | Opens the native keybindings HWND, confirms all 17 actions are present, then shrinks the window and verifies the binding list switches to a scrollable mask. |
+| `-ProjectFiles` | Drives the real File menu: Save Project As writes the manifest/scene (including bare names without an extension), the title dirty marker tracks edits, both unsaved-close answers are honored, Open Project rebuilds the saved scene graph, and Save Current Scene on an untitled project routes to Save Project As. Scripted probe paths replace the modal OS picker. |
+| `-AssetBrowser` | Launches the editor with a `.boltproject` argument (the .uproject-style path), verifies the file scan, creates a scene with Add → Scene, renames it inline, and double-clicks a scene to open it. Also creates and F2-renames a folder, copies/pastes an asset with Ctrl+C/Ctrl+V, drag-drops a tile onto a folder with Copy Here, checks folder-name rows and collapse/expand, and fills the grid until scrolling is enabled. Checks on-disk files and refresh markers. |
 
 The probes send messages only to the Boltspark HWND. They do not inject global
 mouse or keyboard input. They use isolated `LOCALAPPDATA` directories where

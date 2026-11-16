@@ -43,9 +43,9 @@ class KeybindingsMigrationRepro {
 
         var migrated:Dynamic = Json.parse(File.getContent(path));
         var bindings:Array<Dynamic> = Reflect.field(migrated, "bindings");
-        assertTrue(Reflect.field(migrated, "version") == 4
+        assertTrue(Reflect.field(migrated, "version") == 6
             && bindings.length == EditorAction.ACTION_COUNT,
-            "migrated keybinding payload was not rewritten as version 4");
+            "migrated keybinding payload was not rewritten as version 6");
         assertTrue(keybindings.keyCode(EditorAction.DuplicateSelection) == hxd.Key.D
             && keybindings.requiresCtrl(EditorAction.DuplicateSelection),
             "hierarchy shortcut defaults were not appended");
@@ -55,8 +55,19 @@ class KeybindingsMigrationRepro {
         assertTrue(keybindings.keyCode(EditorAction.FocusSelection) == hxd.Key.F
                 && !keybindings.requiresCtrl(EditorAction.FocusSelection),
             "Focus Selection default was not appended");
+        assertTrue(keybindings.keyCode(EditorAction.SaveCurrentScene) == hxd.Key.S
+                && keybindings.requiresCtrl(EditorAction.SaveCurrentScene)
+                && !keybindings.requiresShift(EditorAction.SaveCurrentScene),
+            "Ctrl+S default was not appended");
+        assertTrue(keybindings.keyCode(EditorAction.SaveAll) == hxd.Key.S
+                && keybindings.requiresCtrl(EditorAction.SaveAll)
+                && keybindings.requiresShift(EditorAction.SaveAll),
+            "Ctrl+Shift+S default was not appended");
+        assertTrue(keybindings.keyCode(EditorAction.CutAsset) == hxd.Key.X
+                && keybindings.requiresCtrl(EditorAction.CutAsset),
+            "Ctrl+X default was not appended");
         Sys.println("[keybindings] version-1 map migrated with history, hierarchy,"
-            + " and focus actions preserved");
+            + " focus, and save actions preserved");
     }
 
     static function assertTrue(value:Bool, message:String):Void {

@@ -13,6 +13,8 @@ class CommandHistory {
     public var canRedo(get, never):Bool;
     public var undoLabel(get, never):Null<String>;
     public var redoLabel(get, never):Null<String>;
+    /** Monotonic edit counter; selection and view changes do not advance it. */
+    public var revision(default, null):Int = 0;
 
     public function new(capacity:Int = 256) {
         if (capacity < 1) throw "Command history capacity must be positive";
@@ -71,6 +73,7 @@ class CommandHistory {
     }
 
     function pushExecuted(command:EditorCommand):Void {
+        revision++;
         undoStack.push(command);
         if (undoStack.length > capacity) undoStack.shift();
         redoStack.resize(0);
@@ -82,6 +85,7 @@ class CommandHistory {
         var command = undoStack.pop();
         command.undo();
         redoStack.push(command);
+        revision++;
         return true;
     }
 
@@ -91,6 +95,7 @@ class CommandHistory {
         var command = redoStack.pop();
         command.execute();
         undoStack.push(command);
+        revision++;
         return true;
     }
 
@@ -98,6 +103,7 @@ class CommandHistory {
         cancelTransaction();
         undoStack.resize(0);
         redoStack.resize(0);
+        revision = 0;
     }
 
     inline function get_canUndo():Bool return undoStack.length > 0;

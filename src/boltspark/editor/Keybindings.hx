@@ -4,12 +4,18 @@ import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.File;
 
+typedef Binding = {
+    var keyCode:Int;
+    var ctrl:Bool;
+    var shift:Bool;
+};
+
 /**
  * Rebindable editor keybindings.
  *
  * Maps every keyboard-driven editor action (tool shortcuts, delete,
- * snap-to-grid, hold-to-disable snapping) to a key code plus an optional Ctrl
- * modifier. Defaults live in code; user rebinds persist to
+ * snap-to-grid, save, hold-to-disable snapping) to a key code plus optional Ctrl
+ * and Shift modifiers. Defaults live in code; user rebinds persist to
  * %LOCALAPPDATA%\Boltspark Engine\keybindings.json using the same store
  * conventions as DockLayoutStore.
  *
@@ -21,10 +27,12 @@ import sys.io.File;
  */
 class Keybindings {
     static inline var FILE_NAME:String = "keybindings.json";
-    static inline var SCHEMA_VERSION:Int = 4;
+    static inline var SCHEMA_VERSION:Int = 6;
     static inline var VERSION_ONE_ACTION_COUNT:Int = 6;
     static inline var VERSION_TWO_ACTION_COUNT:Int = 8;
     static inline var VERSION_THREE_ACTION_COUNT:Int = 13;
+    static inline var VERSION_FOUR_ACTION_COUNT:Int = 14;
+    static inline var VERSION_FIVE_ACTION_COUNT:Int = 16;
 
     final directory:Null<String>;
     final filePath:Null<String>;
@@ -34,10 +42,10 @@ class Keybindings {
     /** Last validation or persistence error, for settings window display. */
     public var lastError:String = "";
 
-    /** A binding: key code plus optional Ctrl modifier. */
+    /** A binding: key code plus optional Ctrl and Shift modifiers. */
     public var capturePending(default, null):Bool = false;
     var captureAction:Int = -1;
-    final bindings:Array<{keyCode:Int, ctrl:Bool}> = [];
+    final bindings:Array<Binding> = [];
     /** Exact last successfully loaded/saved payload for cross-window sync. */
     var persistedContents:Null<String>;
     var nextExternalPollAt:Float = 0;
@@ -55,7 +63,7 @@ class Keybindings {
         // malformed or partially written settings file must never leave null
         // slots that later crash shortcut matching.
         for (_ in 0...EditorAction.ACTION_COUNT) {
-            bindings.push({keyCode: 0, ctrl: false});
+            bindings.push({keyCode: 0, ctrl: false, shift: false});
         }
         resetDefaults(true);
         load();
@@ -73,18 +81,25 @@ class Keybindings {
         return bindings[action].ctrl;
     }
 
-    /** Does this key event match the action's binding? */
-    public function matches(action:EditorAction, keyCode:Int, ctrlDown:Bool):Bool {
-        var binding = bindings[action];
-        return binding.keyCode == keyCode && binding.ctrl == ctrlDown;
+    public function requiresShift(action:EditorAction):Bool {
+        return bindings[action].shift;
     }
 
-    /** Human-readable label for the settings window, e.g. "Ctrl+End". */
+    /** Does this key event match the action's binding? */
+    public function matches(action:EditorAction, keyCode:Int, ctrlDown:Bool,
+            shiftDown:Bool = false):Bool {
+        var binding = bindings[action];
+        return binding.keyCode == keyCode && binding.ctrl == ctrlDown
+            && binding.shift == shiftDown;
+    }
+
+    /** Human-readable label for the settings window, e.g. "Ctrl+Shift+S". */
     public function bindingLabel(action:EditorAction):String {
         var binding = bindings[action];
         if (binding == null) return "—";
         var name = hxd.Key.getKeyName(binding.keyCode);
-        return (binding.ctrl ? "Ctrl+" : "") + name;
+        return (binding.ctrl ? "Ctrl+" : "")
+            + (binding.shift ? "Shift+" : "") + name;
     }
 
     public static function actionName(action:EditorAction):String {
@@ -103,6 +118,9 @@ class Keybindings {
             case EditorAction.RenameSelection: "Rename Selection";
             case EditorAction.ToggleGrid: "Toggle Editor Grid";
             case EditorAction.FocusSelection: "Focus Selection";
+            case EditorAction.SaveCurrentScene: "Save Current Scene";
+            case EditorAction.SaveAll: "Save All";
+            case EditorAction.CutAsset: "Cut Asset";
             default: "Unknown Action";
         };
     }
@@ -111,22 +129,25 @@ class Keybindings {
      * Rebind an action. Rejects bindings already used by a different action;
      * returns a human-readable error or null on success.
      */
-    public function rebind(action:EditorAction, keyCode:Int, ctrl:Bool):Null<String> {
+    public function rebind(action:EditorAction, keyCode:Int, ctrl:Bool,
+            shift:Bool = false):Null<String> {
         if (keyCode == hxd.Key.ESCAPE) {
             return "Escape is reserved for cancelling menus and captures.";
         }
         if (!isBindableKey(keyCode)) {
-            return "Press a non-modifier keyboard key; Ctrl may be used as a modifier.";
+            return "Press a non-modifier keyboard key; Ctrl/Shift may be modifiers.";
         }
-        var requested = (ctrl ? "Ctrl+" : "") + hxd.Key.getKeyName(keyCode);
+        var requested = (ctrl ? "Ctrl+" : "") + (shift ? "Shift+" : "")
+            + hxd.Key.getKeyName(keyCode);
         for (other in 0...EditorAction.ACTION_COUNT) {
             var binding = bindings[other];
             if (other != action && binding != null
-                    && binding.keyCode == keyCode && binding.ctrl == ctrl) {
+                    && binding.keyCode == keyCode && binding.ctrl == ctrl
+                    && binding.shift == shift) {
                 return '$requested is already bound to ' + actionName(other);
             }
         }
-        bindings[action] = {keyCode: keyCode, ctrl: ctrl};
+        bindings[action] = {keyCode: keyCode, ctrl: ctrl, shift: shift};
         lastError = "";
         var saveError = save();
         if (saveError != null) lastError = saveError;
@@ -135,23 +156,26 @@ class Keybindings {
     }
 
     public function resetDefaults(quiet:Bool = false):Void {
-        bindings[EditorAction.ToolMove] = {keyCode: hxd.Key.NUMBER_1, ctrl: false};
+        bindings[EditorAction.ToolMove] = {keyCode: hxd.Key.NUMBER_1, ctrl: false, shift: false};
         // Requested tool mapping: 1 Move, E Rotate, R Scale.
-        bindings[EditorAction.ToolRotate] = {keyCode: hxd.Key.E, ctrl: false};
-        bindings[EditorAction.ToolScale] = {keyCode: hxd.Key.R, ctrl: false};
-        bindings[EditorAction.DeleteSelection] = {keyCode: hxd.Key.DELETE, ctrl: false};
-        bindings[EditorAction.SnapToGrid] = {keyCode: hxd.Key.END, ctrl: true};
-        bindings[EditorAction.HoldSnapOff] = {keyCode: hxd.Key.V, ctrl: false};
-        bindings[EditorAction.Undo] = {keyCode: hxd.Key.Z, ctrl: true};
-        bindings[EditorAction.Redo] = {keyCode: hxd.Key.Y, ctrl: true};
-        bindings[EditorAction.CopySelection] = {keyCode: hxd.Key.C, ctrl: true};
-        bindings[EditorAction.Paste] = {keyCode: hxd.Key.V, ctrl: true};
-        bindings[EditorAction.DuplicateSelection] = {keyCode: hxd.Key.D, ctrl: true};
-        bindings[EditorAction.RenameSelection] = {keyCode: hxd.Key.F2, ctrl: false};
+        bindings[EditorAction.ToolRotate] = {keyCode: hxd.Key.E, ctrl: false, shift: false};
+        bindings[EditorAction.ToolScale] = {keyCode: hxd.Key.R, ctrl: false, shift: false};
+        bindings[EditorAction.DeleteSelection] = {keyCode: hxd.Key.DELETE, ctrl: false, shift: false};
+        bindings[EditorAction.SnapToGrid] = {keyCode: hxd.Key.END, ctrl: true, shift: false};
+        bindings[EditorAction.HoldSnapOff] = {keyCode: hxd.Key.V, ctrl: false, shift: false};
+        bindings[EditorAction.Undo] = {keyCode: hxd.Key.Z, ctrl: true, shift: false};
+        bindings[EditorAction.Redo] = {keyCode: hxd.Key.Y, ctrl: true, shift: false};
+        bindings[EditorAction.CopySelection] = {keyCode: hxd.Key.C, ctrl: true, shift: false};
+        bindings[EditorAction.Paste] = {keyCode: hxd.Key.V, ctrl: true, shift: false};
+        bindings[EditorAction.DuplicateSelection] = {keyCode: hxd.Key.D, ctrl: true, shift: false};
+        bindings[EditorAction.RenameSelection] = {keyCode: hxd.Key.F2, ctrl: false, shift: false};
         // G toggles the independent editor grid (Game View); registered like
         // every other action so it is rebindable and persisted.
-        bindings[EditorAction.ToggleGrid] = {keyCode: hxd.Key.G, ctrl: false};
-        bindings[EditorAction.FocusSelection] = {keyCode: hxd.Key.F, ctrl: false};
+        bindings[EditorAction.ToggleGrid] = {keyCode: hxd.Key.G, ctrl: false, shift: false};
+        bindings[EditorAction.FocusSelection] = {keyCode: hxd.Key.F, ctrl: false, shift: false};
+        bindings[EditorAction.SaveCurrentScene] = {keyCode: hxd.Key.S, ctrl: true, shift: false};
+        bindings[EditorAction.SaveAll] = {keyCode: hxd.Key.S, ctrl: true, shift: true};
+        bindings[EditorAction.CutAsset] = {keyCode: hxd.Key.X, ctrl: true, shift: false};
         lastError = "";
         if (!quiet) {
             var saveError = save();
@@ -197,13 +221,12 @@ class Keybindings {
      * anything else becomes the new binding (with the Ctrl state held at the
      * time of the press). Returns true when the event is consumed.
      */
-    public function handleCaptureKey(keyCode:Int, ctrlDown:Bool):Bool {
+    public function handleCaptureKey(keyCode:Int, ctrlDown:Bool,
+            shiftDown:Bool = false):Bool {
         if (!capturePending) return false;
-        // Ctrl is represented as a modifier in the persisted binding rather
-        // than as the action key. Ignore modifier-only down events so the
-        // normal Ctrl-then-key gesture captures (for example) Ctrl+End instead
-        // of prematurely binding the row to Ctrl itself. Shift/Alt are not yet
-        // part of the schema and are ignored for the same reason.
+        // Ctrl/Shift are modifiers in the persisted binding, not the action
+        // key. Ignore modifier-only down events so Ctrl+End or Ctrl+Shift+S is
+        // captured only when the real key arrives.
         if (isModifierKey(keyCode)) return true;
         capturePending = false;
         var action:Int = captureAction;
@@ -213,7 +236,7 @@ class Keybindings {
             if (onChanged != null) onChanged();
             return true;
         }
-        var error = rebind(action, keyCode, ctrlDown);
+        var error = rebind(action, keyCode, ctrlDown, shiftDown);
         if (error != null) {
             // Rejected rebinds skip rebind()'s own onChanged notification.
             lastError = error;
@@ -256,6 +279,7 @@ class Keybindings {
         }
         var storedVersion = Reflect.field(data, "version");
         if ((storedVersion != 1 && storedVersion != 2 && storedVersion != 3
+                && storedVersion != 4 && storedVersion != 5
                 && storedVersion != SCHEMA_VERSION)
                 || !Std.isOfType(Reflect.field(data, "bindings"), Array)) {
             lastError = 'Keybindings at ${filePath} have an unsupported format; using defaults.';
@@ -266,7 +290,7 @@ class Keybindings {
         // Parse atomically into a temporary map. Only replace the live,
         // complete defaults if every action appears exactly once and no two
         // actions claim the same chord.
-        var loaded:Array<Null<{keyCode:Int, ctrl:Bool}>> = [];
+        var loaded:Array<Null<Binding>> = [];
         for (_ in 0...EditorAction.ACTION_COUNT) loaded.push(null);
         var chords:Map<String, Bool> = [];
         var expectedActions = storedVersion == 1
@@ -275,21 +299,26 @@ class Keybindings {
                 ? VERSION_TWO_ACTION_COUNT
                 : (storedVersion == 3
                     ? VERSION_THREE_ACTION_COUNT
-                    : (EditorAction.ACTION_COUNT : Int)));
+                    : (storedVersion == 4
+                        ? VERSION_FOUR_ACTION_COUNT
+                        : (storedVersion == 5
+                            ? VERSION_FIVE_ACTION_COUNT
+                            : (EditorAction.ACTION_COUNT : Int)))));
         for (entry in stored) {
             if (!Reflect.isObject(entry)) return invalidStoredBindings();
             var action = Reflect.field(entry, "action");
             var keyCode = Reflect.field(entry, "key");
             var ctrl = Reflect.field(entry, "ctrl") == true;
+            var shift = Reflect.field(entry, "shift") == true;
             if (!isActionIndex(action) || !isBindableKey(keyCode)
                     || action >= expectedActions || keyCode == hxd.Key.ESCAPE
                     || loaded[action] != null) {
                 return invalidStoredBindings();
             }
-            var chord = (ctrl ? "1:" : "0:") + keyCode;
+            var chord = (ctrl ? "1:" : "0:") + (shift ? "1:" : "0:") + keyCode;
             if (chords.exists(chord)) return invalidStoredBindings();
             chords.set(chord, true);
-            loaded[action] = {keyCode: keyCode, ctrl: ctrl};
+            loaded[action] = {keyCode: keyCode, ctrl: ctrl, shift: shift};
         }
         for (action in 0...expectedActions) {
             if (loaded[action] == null) return invalidStoredBindings();
@@ -301,13 +330,17 @@ class Keybindings {
         // binding instead of rejecting the complete historical map.
         for (action in expectedActions...(EditorAction.ACTION_COUNT : Int)) {
             var fallback = bindings[action];
-            var chord = (fallback.ctrl ? "1:" : "0:") + fallback.keyCode;
+            var chord = (fallback.ctrl ? "1:" : "0:")
+                + (fallback.shift ? "1:" : "0:") + fallback.keyCode;
             if (chords.exists(chord)) {
                 fallback = spareMigrationBinding(chords);
-                chord = (fallback.ctrl ? "1:" : "0:") + fallback.keyCode;
+                chord = (fallback.ctrl ? "1:" : "0:")
+                    + (fallback.shift ? "1:" : "0:") + fallback.keyCode;
             }
             chords.set(chord, true);
-            loaded[action] = {keyCode: fallback.keyCode, ctrl: fallback.ctrl};
+            loaded[action] = {
+                keyCode: fallback.keyCode, ctrl: fallback.ctrl, shift: fallback.shift
+            };
         }
         for (action in 0...EditorAction.ACTION_COUNT) {
             bindings[action] = loaded[action];
@@ -331,13 +364,14 @@ class Keybindings {
         return false;
     }
 
-    function spareMigrationBinding(chords:Map<String, Bool>):
-            {keyCode:Int, ctrl:Bool} {
+    function spareMigrationBinding(chords:Map<String, Bool>):Binding {
         // F13-F24 are valid Windows virtual keys and remain reachable from the
         // keybindings UI, while being unlikely to displace a common shortcut.
         for (keyCode in hxd.Key.F13...(hxd.Key.F24 + 1)) {
-            var chord = "1:" + keyCode;
-            if (!chords.exists(chord)) return {keyCode: keyCode, ctrl: true};
+            var chord = "1:0:" + keyCode;
+            if (!chords.exists(chord)) {
+                return {keyCode: keyCode, ctrl: true, shift: false};
+            }
         }
         throw "No collision-free keybinding remained during migration";
     }
@@ -348,7 +382,10 @@ class Keybindings {
         for (action in 0...EditorAction.ACTION_COUNT) {
             var binding = bindings[action];
             if (binding == null) continue;
-            stored.push({action: action, key: binding.keyCode, ctrl: binding.ctrl});
+            stored.push({
+                action: action, key: binding.keyCode,
+                ctrl: binding.ctrl, shift: binding.shift
+            });
         }
         var contents = haxe.Json.stringify({
             version: SCHEMA_VERSION,

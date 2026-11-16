@@ -81,11 +81,12 @@ try {
     if ($editor -eq [IntPtr]::Zero) { throw 'Editor HWND missing.' }
     Start-Sleep -Seconds 2
 
+    # File -> Editor Settings (row 5) -> Editor Keybindings (submenu row 0).
     Send-Click $editor 60 15
     Start-Sleep -Milliseconds 400
-    Send-Click $editor 110 46
+    Send-Click $editor 110 154
     Start-Sleep -Milliseconds 400
-    Send-Click $editor 280 46
+    Send-Click $editor 280 157
 
     $keybindings = [IntPtr]::Zero
     $childDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -104,14 +105,14 @@ try {
         throw 'Keybindings window did not emit probe state.'
     }
     $state = Get-Content $probeLog -Raw
-    if ($state -notmatch '\[keybindings\] rows=14') {
-        throw 'Keybindings list did not report all 14 actions.'
+    if ($state -notmatch '\[keybindings\] rows=17') {
+        throw 'Keybindings list did not report all 17 actions.'
     }
     if ($state -notmatch 'scrollable=(?i:false)') {
         throw 'Default keybindings window was unexpectedly scrollable.'
     }
 
-    # SWP_NOZORDER | SWP_NOACTIVATE; shrink below the full 14-row list height.
+    # SWP_NOZORDER | SWP_NOACTIVATE; shrink below the full 17-row list height.
     [void][KeybindingsListNative]::SetWindowPos($keybindings, [IntPtr]::Zero,
         0, 0, 420, 360, 0x0004 -bor 0x0010)
     Start-Sleep -Seconds 1
@@ -128,7 +129,7 @@ try {
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         throw 'Boltspark did not close after the keybindings list probe.'
     }
-    Write-Host '[keybindings] 14-action list is scrollable when the window shrinks.' -ForegroundColor Green
+    Write-Host '[keybindings] 17-action list is scrollable when the window shrinks.' -ForegroundColor Green
 }
 finally {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }

@@ -12,7 +12,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and scale-invariant two-pixel selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - Viewport camera controls follow Unreal-style activation: RMB captures free-look and enables WASD/QE flight, Shift/Ctrl speed modifiers, and wheel speed changes; an idle wheel over the viewport dollies in/out, MMB pans, Alt+LMB orbits in the expected tumble direction, and **F** smoothly frames the entire selection using the complete world-space bounds of every selected object. Focus is a selection command rather than a navigation command: it works with any active selection even when the pointer is over a panel, while text entry and active viewport gestures still suppress it. Focus flights use a fixed-duration ease so objects remain responsive even across the full editor world, and direct camera input interrupts them immediately. Clicking the **PERSPECTIVE · LIT** strip opens camera settings with a transform-style numeric FOV field (30°–140°): click to type an exact value, drag to scrub, or use the arrow buttons to step; the grid toggle remains in the same popup.
 - All three transform tools drive viewport gizmos: Move offers axis, two-axis plane, and center free-view-plane drags; Rotate offers axis rings plus a true virtual-sphere omni arc-ball; Scale offers axis/plane/uniform scaling. Arc-ball motion keeps the same response and rotation axis when the pointer enters or exits its virtual sphere, while large coalesced pointer deltas are subdivided so fast rim crossings cannot collapse. Successive Bell-surface points preserve off-center view-axis roll, while a linear pointer-travel angle keeps long relative-mode drags unbounded. Its accumulated quaternion remains untouched and normalized during long drags; an internal per-object Euler hint selects a stable equivalent branch, while the Inspector presents Unreal-style Rotator values in `(-180°, 180°]`. A clickable WORLD/LOCAL viewport control changes the shared axis frame (WORLD is the default), all changes flow through the editor command path with live inspector updates, and the default shortcuts are **1** (Move), **E** (Rotate), and **R** (Scale).
-- Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Rotation rings snap their captured axis angle directly, so they remain stable and single-axis after an arbitrary omni arc-ball tumble; the arc-ball itself stays freeform. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions—including **Ctrl+Z/Ctrl+Y** Undo/Redo—can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
+- Viewport translation, rotation, and scale snapping have independent toolbar toggles and step presets. Rotation rings snap their captured axis angle directly, so they remain stable and single-axis after an arbitrary omni arc-ball tumble; the arc-ball itself stays freeform. Holding **V** temporarily suspends translation snapping, while **Ctrl+End** snaps the selection to the translation grid. Keyboard actions—including **Ctrl+Z/Ctrl+Y** Undo/Redo, **Ctrl+S** Save Current Scene, **Ctrl+Shift+S** Save All, and **Ctrl+X** Cut Asset—can be rebound from **File → Editor Settings → Editor Keybindings**, which opens as a separate native application window; bindings persist in `%LOCALAPPDATA%\Boltspark Engine\keybindings.json` and synchronize back to the live editor.
 - The release executable, taskbar, native windows, and main editor title strip share the embedded multi-resolution Boltspark icon. The main editor and auxiliary application windows use native Windows dark title bars. Opening the File menu prepares the small keybindings host in the background; closing its window hides it while retaining the HWND, DX12 device, and font cache, so subsequent opens do not launch or initialize another process.
 - The hierarchy, inspector, and console regions can be resized with draggable splitters; panel sizes stay within usable bounds, adapt to window resizing, and persist in `%LOCALAPPDATA%\Boltspark Engine\layout.json`.
 - Scene objects form an ordered, deeply nested hierarchy. Rows expand and collapse, retain ancestor paths while searching, support inline rename and multi-row drag/drop reparenting, and expose create-child, empty-parent grouping, duplicate, copy/paste, unparent, subtree-selection, and recursive delete actions. Structural edits preserve world transforms by default, can explicitly preserve local transforms with **Alt**, and undo/redo restores exact parent, sibling, transform, identity, and selection state.
@@ -32,8 +32,27 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
   bounded undo/redo command history. A renderer-independent `EditorSession` now
   owns the ordered scene graph, local affine transforms, selection, clipboard,
   and history. Parent references, sibling order, exact quaternion/shear state,
-  and attached components map to and from `SceneDocument`; project open/save UI
-  and the asset browser are still later integration work.
+  and attached components map to and from `SceneDocument`.
+- Integrated project/scene open/save is wired to the File menu: native Windows
+  file dialogs (from the bundled `ui.hdll`) drive `ProjectSession`, which owns
+  the current `*.boltproject`/`*.boltscene` documents, resolves relative scene
+  paths, tracks dirty state, rebuilds the editor session on load, and routes all
+  writes through atomic save + backup. The File menu is limited to project
+  operations plus saving the current scene; scene creation and loading live in
+  the docked **Asset Browser** (Unreal-style Levels workflow). It is the first
+  bottom-dock tab and shows a grid of tiles: it scans real files under the
+  project root into a collapsible folder tree (rows show folder names, not
+  paths) with Tabler folder/scene glyphs, and
+  supports Add → Scene/Folder, double-click to open, F2/inline Rename (folders
+  too), drag an asset onto a folder for a Move/Copy choice, Move To / Copy To
+  submenus, Ctrl+C/Ctrl+V/Ctrl+X clipboard, and Delete. Empty folders appear in
+  the folder column, and the grid scrolls when assets exceed the dock height. Each scene gets a unique name/path so creating
+  one never overwrites another, and rename/delete keep the manifest and files
+  consistent. The title strip shows
+  the project and scene with an unsaved marker, and closing confirms discarding
+  unsaved work. The editor also accepts a `*.boltproject` path on the command
+  line (or `--project=…`) and opens it at startup; an opt-in user-level Windows
+  association script makes double-clicking the file launch the packaged editor.
 - A Unity-style component runtime now provides generic GameObjects, mandatory
   Transform components, typed add/get/remove APIs, lifecycle dispatch,
   component-preserving history/serialization, generic MeshRenderer components,
@@ -72,12 +91,26 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -Check              # validate the Windows build environment
 .\tools\build.ps1 -Run                # run the development HashLink build
 .\tools\test.ps1 -Portable            # clean-worker compile + headless tests
-.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff  # full tests + DX12 interaction probes
+.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -ProjectFiles -AssetBrowser  # full tests + DX12 interaction probes
 ```
 
 The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library, PIX runtime, and verified FreeType source only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable, `freetype.hdll`, one consolidated `THIRD-PARTY-LICENSES.txt`, and its other required runtime files. Canonical upstream license files remain separate in the source tree.
 
 The development build runs through `hl.exe` and retains its command window for logs and crash diagnostics. The packaged `release\Boltspark.exe` uses the Windows GUI subsystem and starts without a command window.
+
+To open a project from the command line or a file association, pass the manifest path:
+
+```powershell
+.\release\Boltspark.exe "D:\Projects\Demo.boltproject"
+```
+
+Double-clicking `*.boltproject` requires an explicit, user-level association (no admin, no system-wide install):
+
+```powershell
+.\tools\register-project-association.ps1          # register (opt-in)
+.\tools\register-project-association.ps1 -Check   # inspect current state
+.\tools\register-project-association.ps1 -Unregister
+```
 
 ## Documentation
 
@@ -112,6 +145,7 @@ src/
     InputAdapter.hx           — central keyboard/focus/pointer reporting
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
+    widgets/AssetBrowser.hx    — docked project asset list with scan/Add/Open/Rename/Delete
     windows/                  — native top-level editor-window routing and H2D content
   boltspark/project/          — versioned project/scene data, validation, atomic storage
   boltspark/engine/           — GameObject, Component, Transform, rendering components/assets
@@ -127,6 +161,7 @@ tools/
   build.ps1                   — install dependencies, check, build, and run
   test.ps1                    — portable CI and full native regression entry point
   check-policy.ps1            — native-only backend/dependency policy guard
+  register-project-association.ps1 — opt-in user-level .boltproject association
   generate-fonts.ps1          — sync the pinned JetBrains Mono runtime TTF resource
   font-source/                — JetBrains Mono source + OFL font license texts
 third_party/hlfreetype/       — pinned runtime TTF/OTF rasterizer and Heaps glyph cache

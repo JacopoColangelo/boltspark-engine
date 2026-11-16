@@ -8,7 +8,7 @@ $version = '3.52.0'
 $cellSize = 16
 $minimumSize = 6
 $maximumSize = 16
-$expectedAtlasSha256 = '3DA74D36191E94DDD92996983D4C611AB3A8B31AA218617257116753C9CDF87F'
+$expectedAtlasSha256 = '775B63C2E56AC7693A1C7EBD5FBA54F5D485E702169BB8B9631A7BA1B11AAA52'
 $sourceRoot = Join-Path $repoRoot "src\res\.tmp\tabler-icons\$version"
 $outputPath = Join-Path $repoRoot 'src\res\icons\tabler_ui.png'
 
@@ -38,14 +38,16 @@ $icons = @(
     @{ Column = 20; Variant = 'filled';  Name = 'point' },
     @{ Column = 21; Variant = 'outline'; Name = 'link' },
     @{ Column = 22; Variant = 'outline'; Name = 'unlink' },
-    @{ Column = 23; Variant = 'outline'; Name = 'restore' }
+    @{ Column = 23; Variant = 'outline'; Name = 'restore' },
+    @{ Column = 24; Variant = 'outline'; Name = 'folder' },
+    @{ Column = 25; Variant = 'outline'; Name = 'file-description' }
 )
 
 Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Force $sourceRoot | Out-Null
 New-Item -ItemType Directory -Force (Split-Path -Parent $outputPath) | Out-Null
 
-$width = 24 * $cellSize
+$width = 26 * $cellSize
 $height = ($maximumSize - $minimumSize + 1) * $cellSize
 $pixelFormat = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
 $atlas = New-Object System.Drawing.Bitmap($width, $height, $pixelFormat)
@@ -63,9 +65,25 @@ try {
         $fileName = "$($icon.Variant)-$($icon.Name).png"
         $sourcePath = Join-Path $sourceRoot $fileName
         if ($Refresh -or -not (Test-Path $sourcePath)) {
-            $uri = "https://cdn.jsdelivr.net/npm/@tabler/icons-png@$version/icons/$($icon.Variant)/$($icon.Name).png"
+            $mirrors = @(
+                "https://cdn.jsdelivr.net/npm/@tabler/icons-png@$version/icons/$($icon.Variant)/$($icon.Name).png",
+                "https://unpkg.com/@tabler/icons-png@$version/icons/$($icon.Variant)/$($icon.Name).png"
+            )
             Write-Host "[tabler] Downloading $($icon.Variant)/$($icon.Name)" -ForegroundColor Cyan
-            Invoke-WebRequest -Uri $uri -OutFile $sourcePath
+            $downloaded = $false
+            foreach ($uri in $mirrors) {
+                try {
+                    Invoke-WebRequest -Uri $uri -OutFile $sourcePath -TimeoutSec 30
+                    $downloaded = $true
+                    break
+                } catch {
+                    Write-Host "[tabler] Mirror failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                    if (Test-Path $sourcePath) { Remove-Item -LiteralPath $sourcePath -Force }
+                }
+            }
+            if (-not $downloaded) {
+                throw "Could not download Tabler source $($icon.Variant)/$($icon.Name)."
+            }
         }
 
         $source = [System.Drawing.Image]::FromFile($sourcePath)

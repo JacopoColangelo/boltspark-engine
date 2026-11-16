@@ -12,7 +12,7 @@ import boltspark.ui.widgets.UiButton;
 /** Retained-H2D content rendered inside the native Editor Keybindings HWND. */
 class KeybindingsWindowContent extends h2d.Object {
     public static inline var DEFAULT_WIDTH:Int = 460;
-    public static inline var DEFAULT_HEIGHT:Int = 580;
+    public static inline var DEFAULT_HEIGHT:Int = 640;
     public static inline var MIN_WIDTH:Int = 420;
     public static inline var MIN_HEIGHT:Int = 360;
 

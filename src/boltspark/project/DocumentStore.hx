@@ -49,7 +49,13 @@ class DocumentStore {
     static function read(path:String):String {
         if (!FileSystem.exists(path)) throw 'Document does not exist: ${path}';
         try {
-            return File.getContent(path);
+            var contents = File.getContent(path);
+            // Windows editors commonly save JSON with a UTF-8 BOM; the strict
+            // codecs reject it at position 0, so strip it before decoding.
+            if (contents.length > 0 && contents.charCodeAt(0) == 0xFEFF) {
+                contents = contents.substr(1);
+            }
+            return contents;
         } catch (error:Dynamic) {
             throw 'Could not read ${path}: ${Std.string(error)}';
         }

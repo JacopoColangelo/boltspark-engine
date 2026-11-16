@@ -175,11 +175,25 @@ try {
     if ($redo.Groups[1].Value -eq '0, 0, 0') {
         throw 'Redo did not restore the moved transform.'
     }
-    if ($log -notmatch '\[history\] undo label=Edit sampleCube Position X object=sampleCube position=\(-1, 0, 0\)') {
-        throw 'Inspector Position X undo did not restore its exact pre-step value.'
+    # The Move center drag resolves in the camera plane, so its Z depends on
+    # the current camera/gizmo math. Derive the untouched Y/Z from the live
+    # Move redo instead of hard-coding a stale literal, and assert only that
+    # the Inspector X undo/redo changes X while preserving the other axes.
+    $movedPosition = $redo.Groups[1].Value
+    $inspectorUndo = [regex]::Match($log,
+        '\[history\] undo label=Edit sampleCube Position X object=sampleCube position=\(([^)]*)\)')
+    $inspectorRedo = [regex]::Match($log,
+        '\[history\] redo label=Edit sampleCube Position X object=sampleCube position=\(([^)]*)\)')
+    if (-not $inspectorUndo.Success) { throw 'Inspector Position X undo did not run.' }
+    if (-not $inspectorRedo.Success) { throw 'Inspector Position X redo did not run.' }
+    if ($inspectorUndo.Groups[1].Value -ne $movedPosition) {
+        throw "Inspector undo did not restore the pre-step transform: $($inspectorUndo.Groups[1].Value) != $movedPosition."
     }
-    if ($log -notmatch '\[history\] redo label=Edit sampleCube Position X object=sampleCube position=\(-0\.9, 0, 0\)') {
-        throw 'Inspector Position X redo did not restore its stepped value.'
+    $axes = $movedPosition -split ', '
+    if ($axes.Count -ne 3) { throw "Unexpected Move position format: $movedPosition." }
+    $expectedStep = @('-0.9', $axes[1], $axes[2]) -join ', '
+    if ($inspectorRedo.Groups[1].Value -ne $expectedStep) {
+        throw "Inspector redo did not restore its stepped value: $($inspectorRedo.Groups[1].Value) != $expectedStep."
     }
     if ($log -notmatch '\[history\] undo label=Create Cube2 object=sampleCube') {
         throw 'Create undo did not remove Cube2 and restore the prior selection.'

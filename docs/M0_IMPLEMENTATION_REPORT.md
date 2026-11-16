@@ -170,7 +170,8 @@ now the next product-facing boundary. Current priorities are:
   durable IDs, safe relative paths, unknown-field preservation, reference and
   cycle validation, atomic saves with backup, fixtures, and command history.
   A pure editor session now integrates concrete create/delete/rename/transform
-  commands with Undo/Redo. User-facing project open/save is not yet claimed.
+  commands with Undo/Redo. User-facing project open/save was not yet claimed at
+  this date; see section 11 for the later integrated implementation.
 - The editor's former hand-drawn analytic glyphs were superseded on 2026-11-16
   by a pinned Tabler Icons 3.52.0 exact-size atlas. The MIT text and mapping are
   tracked under `third_party/tabler-icons/` and staged into native releases.
@@ -179,3 +180,26 @@ now the next product-facing boundary. Current priorities are:
   coupled Euler-branch jumps that occurred when a ring followed an arbitrary
   arcball tumble; portable and native handoff regressions cover world/local
   axes, snap-bin boundaries, and the freeform no-snap path.
+
+## 11. Integrated project open/save — 2026-11-16
+
+- `src/boltspark/project/ProjectSession.hx` supplies the missing editor-facing
+  layer: current project/scene documents and paths, project-relative scene
+  resolution, default-scene asset binding, dirty state, graph capture through
+  `SceneSerializer`, and fresh `EditorSession` rebuild on load.
+- The File menu now exposes New/Open/Save Project, Save Project As, and
+  New/Open/Save Scene. Native Windows file dialogs use `hl.UI.loadFile`/
+  `saveFile` from the already-bundled `ui.hdll`; writes still go through
+  `DocumentStore` atomic save + backup. Closing with unsaved work prompts for
+  confirmation, and the title strip shows project/scene names plus a dirty
+  marker.
+- `tests/repro/ProjectSessionRepro.hx` covers create/save-as/open round-trips,
+  scene registration, dirty/title state, session rebuild with stable IDs and
+  components, and rejection of missing/unsafe/unsupported-version inputs.
+  `tools/test.ps1 -Portable` and `-NativeSmoke` pass; the full build (including
+  the HashLink/C packaged release) succeeds with `ui.hdll` staged beside it.
+- `tests/native/Test-ProjectFiles.ps1` drives the real File menu in a native
+  DX12 window: scripted probe paths replace the modal picker so Save As, dirty
+  markers, both unsaved-close answers, and Open Project are verified end-to-end.
+  Visual click-through of the OS file-picker chrome itself remains open and is
+  tracked in `tests/native-foundation-acceptance.md`.

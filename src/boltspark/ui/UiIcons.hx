@@ -25,6 +25,8 @@ enum abstract UiIconKind(Int) from Int to Int {
     var Link = 21;
     var Unlink = 22;
     var Reset = 23;
+    var Folder = 24;
+    var Scene = 25;
 }
 
 /**
@@ -38,7 +40,7 @@ enum abstract UiIconKind(Int) from Int to Int {
  */
 class UiIcons {
     static inline var CELL_SIZE:Int = 16;
-    static inline var ICON_COLUMNS:Int = 24;
+    static inline var ICON_COLUMNS:Int = 26;
     static inline var MIN_SIZE:Int = 6;
     static inline var MAX_SIZE:Int = 16;
 

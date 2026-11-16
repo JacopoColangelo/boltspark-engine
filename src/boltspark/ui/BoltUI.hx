@@ -6,6 +6,7 @@ import boltspark.engine.ComponentTypeInfo;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.HierarchyEntry;
+import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.windows.ApplicationWindowKind;
 
 /**
@@ -69,6 +70,24 @@ class BoltUI {
     public var onSnapToGrid:Null<Void->Void>;
     /** Hold key (default V): true while held to suspend translation snapping. */
     public var onSnapHoldChanged:Null<Bool->Void>;
+    /** Project/scene file commands from the File menu. */
+    public var onFileNewProject:Null<Void->Void>;
+    public var onFileOpenProject:Null<Void->Void>;
+    public var onFileSaveProject:Null<Void->Void>;
+    public var onFileSaveProjectAs:Null<Void->Void>;
+    public var onFileSaveScene:Null<Void->Void>;
+    public var onFileSaveAll:Null<Void->Void>;
+    /** Asset Browser data and actions. */
+    public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
+    public var onOpenAsset:Null<String->Void>;
+    public var onNewScene:Null<String->String->Void>;
+    public var onRenameAsset:Null<String->String->Void>;
+    public var onRenameFolder:Null<String->String->String>;
+    public var onDeleteAsset:Null<String->Void>;
+    public var onQueryFolders:Null<Void->Array<String>>;
+    public var onNewFolder:Null<String->String>;
+    public var onMoveAsset:Null<String->String->Void>;
+    public var onCopyAsset:Null<String->String->Void>;
     /** Open an editor dialog as its own native top-level application window. */
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Start an editor-window host before the user reaches its menu leaf. */
@@ -202,6 +221,44 @@ class BoltUI {
         shell.onSnapHoldChanged = function(active) {
             if (onSnapHoldChanged != null) onSnapHoldChanged(active);
         };
+        shell.onFileNewProject = function() if (onFileNewProject != null) onFileNewProject();
+        shell.onFileOpenProject = function() if (onFileOpenProject != null) onFileOpenProject();
+        shell.onFileSaveProject = function() if (onFileSaveProject != null) onFileSaveProject();
+        shell.onFileSaveProjectAs = function() {
+            if (onFileSaveProjectAs != null) onFileSaveProjectAs();
+        };
+        shell.onFileSaveScene = function() if (onFileSaveScene != null) onFileSaveScene();
+        shell.onFileSaveAll = function() if (onFileSaveAll != null) onFileSaveAll();
+        shell.onQueryAssets = function() {
+            return onQueryAssets != null ? onQueryAssets() : [];
+        };
+        shell.onOpenAsset = function(source) {
+            if (onOpenAsset != null) onOpenAsset(source);
+        };
+        shell.onNewScene = function(folder, name) {
+            if (onNewScene != null) onNewScene(folder, name);
+        };
+        shell.onRenameAsset = function(source, name) {
+            if (onRenameAsset != null) onRenameAsset(source, name);
+        };
+        shell.onDeleteAsset = function(source) {
+            if (onDeleteAsset != null) onDeleteAsset(source);
+        };
+        shell.onRenameFolder = function(source, name) {
+            return onRenameFolder != null ? onRenameFolder(source, name) : null;
+        };
+        shell.onQueryFolders = function() {
+            return onQueryFolders != null ? onQueryFolders() : [];
+        };
+        shell.onNewFolder = function(parent) {
+            return onNewFolder != null ? onNewFolder(parent) : null;
+        };
+        shell.onMoveAsset = function(source, folder) {
+            if (onMoveAsset != null) onMoveAsset(source, folder);
+        };
+        shell.onCopyAsset = function(source, folder) {
+            if (onCopyAsset != null) onCopyAsset(source, folder);
+        };
         shell.onOpenApplicationWindow = function(kind) {
             if (onOpenApplicationWindow != null) onOpenApplicationWindow(kind);
         };
@@ -305,6 +362,16 @@ class BoltUI {
     public function setHistoryState(undoLabel:Null<String>,
             redoLabel:Null<String>):Void {
         shell.setHistoryState(undoLabel, redoLabel);
+    }
+
+    /** Title-strip project/scene label, including the unsaved marker. */
+    public function setProjectTitle(text:String):Void {
+        shell.setProjectTitle(text);
+    }
+
+    /** Rebuild the Asset Browser after a project asset changes. */
+    public function refreshAssetBrowser():Void {
+        shell.refreshAssetBrowser();
     }
 
     /** Live component-vector update during viewport gizmo drags. */

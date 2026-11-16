@@ -129,8 +129,9 @@ three transform gizmos, native application windows, and reusable BoltUI/data
 foundations. A renderer-independent editor session now makes create, delete,
 rename, and transform operations undoable while preserving stable IDs and
 selection. It is still not a complete editor or the final immediate-mode API.
-Integrated project open/save, asset import, plugins, custom render passes, PBR,
-and HIDE migration remain outside the current implementation boundary.
+Integrated project/scene open/save is now wired to the File menu. Asset import,
+plugins, custom render passes, PBR, and HIDE migration remain outside the current
+implementation boundary.
 
 The current BoltUI hybrid keeps retained H2D controls while using explicit frame
 boundaries, scoped stable IDs, persistent state, deterministic layout, and a

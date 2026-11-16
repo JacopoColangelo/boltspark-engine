@@ -69,6 +69,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | `EditorShell.hx` | Owns chrome geometry and hierarchy interaction: nested filtering/folding, range selection, inline rename, context actions, and validated drag/drop targets; exposes editor command callbacks upward. Rebuilds static geometry only on resize. |
 | `windows/ApplicationWindowManager.hx` | Starts and owns one reusable native host process per application-level editor window. This is the safe multi-window boundary for the locked Heaps 2.1 DX12 driver, whose swap chain is process-window scoped. Opening the relevant parent menu prepares a hidden host; parent/host show/quit commands travel over a private stdin pipe. |
 | `windows/KeybindingsWindowApp.hx` / `KeybindingsWindowContent.hx` | Native top-level Editor Keybindings window and its retained-H2D content. Close/Escape hides the hosted HWND; reopening reuses its existing DX12 device and font cache. Persisted changes synchronize to the running editor through the validated keybinding store. |
+| `widgets/AssetBrowser.hx` | Docked Unreal-style asset browser (first bottom tab): scans real project files and empty folders into a collapsible folder tree with per-row names, shows a scrollable grid of tiles with Tabler folder/scene glyphs, and supports Add → Scene/Folder, double-click Open, F2/inline Rename, drag-to-folder with Move/Copy choice, Move To / Copy To, Ctrl+C/Ctrl+V/Ctrl+X clipboard, and Delete via callbacks to `Main`. Shares the bottom dock with the Output Log through tab buttons persisted in `layout.json` v2. |
 | `widgets/UiButton.hx` | `h2d.Interactive` hit region + centered label; hover/push/release-outside color states; click callback. |
 | `widgets/NumericDragField.hx` / `AxisValue.hx` | DCC-style numeric transform editing through text, arrow steps, and raw-input horizontal scrubbing that remains active beyond window and desktop edges. Fractional stabilization rounds only the remainder, avoiding 32-bit overflow for large transform values. |
 | `editor/ScalePolicy.hx` | Shared signed-scale finite-number safety and zero dead-zone policy used by Inspector commits, grid snapping, and scale gizmos. |
@@ -86,7 +87,7 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 | `editor/EditorSession.hx` / `SceneHierarchy.hx` | Renderer-independent owner of generic component-based scene objects, the ordered scene graph, durable/runtime IDs, selection, clipboard, and bounded history. Hierarchy mutation is centralized; iterative traversal and revision-stamped world matrices avoid recursion and eager subtree invalidation. `Main` mirrors this model into nested Heaps nodes. |
 | `editor/EditorTransform.hx` / `TransformMatrix.hx` | Exact local affine state: position, normalized quaternion interpretation, signed non-zero scale, and shear. Matrix decomposition retains the shear required by world-preserving reparenting between rotated, non-uniform ancestors. |
 | `editor/commands/` | Concrete create/delete/duplicate/reparent/rename/transform commands plus bounded execute/undo/redo history and failure-safe composites. Structural commands restore parent, sibling order, transform, identity, and selection. |
-| `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, atomic storage with backup, and `SceneSerializer` mapping for hierarchy/component/exact-transform state. |
+| `project/` | Stable IDs, safe project-relative paths, versioned project/scene models, strict validation, unknown-field preservation, atomic storage with backup, and `SceneSerializer` mapping for hierarchy/component/exact-transform state. `ProjectSession.hx` adds the editor-facing layer: current documents/paths, project-relative resolution, dirty state, unique multi-scene allocation, rename/delete, and session rebuild on open/save. |
 | `tests/repro/` | Portable math/UI/data/command tests plus native-module regressions. |
 | `tests/native/` | Tracked HWND lifecycle, command-history, DPI, forced DX12 reset, smoke, and performance probes; outputs go to ignored `bin/test-results/`. |
 
@@ -124,9 +125,9 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 
 ## Current scope boundary
 
-Splitters, retained text input, menus, bounded picking, native packaging, and
-current-monitor DPI awareness now exist. Still out of scope are a complete
-immediate-mode public BoltUI API, physical mixed-DPI monitor validation, a
-general dock tree/detached panels, integrated project open/save, asset import,
+Splitters, retained text input, menus, bounded picking, native packaging,
+current-monitor DPI awareness, and integrated project/scene open/save now exist.
+Still out of scope are a complete immediate-mode public BoltUI API, physical
+mixed-DPI monitor validation, a general dock tree/detached panels, asset import,
 production materials/PBR, and Play mode. See `docs/PROJECT_FORMAT.md` for the
 implemented data boundary.

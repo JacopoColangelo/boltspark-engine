@@ -8,7 +8,7 @@ BoltUI uses selected icons from **Tabler Icons v3.52.0**, released on
 - Raster source package: `@tabler/icons-png@3.52.0`
 - License: MIT; see [`LICENSE`](LICENSE)
 - Runtime atlas: `src/res/icons/tabler_ui.png`
-- Atlas SHA-256: `3DA74D36191E94DDD92996983D4C611AB3A8B31AA218617257116753C9CDF87F`
+- Atlas SHA-256: `775B63C2E56AC7693A1C7EBD5FBA54F5D485E702169BB8B9631A7BA1B11AAA52`
 - Regeneration: `tools/generate-tabler-icons.ps1`
 
 The generator downloads the official 240px PNG render of each pinned SVG and
@@ -43,3 +43,5 @@ network, browser, or loose icon-file dependency at runtime.
 | `Link` | `outline/link` |
 | `Unlink` | `outline/unlink` |
 | `Reset` | `outline/restore` |
+| `Folder` | `outline/folder` |
+| `Scene` | `outline/file-description` |

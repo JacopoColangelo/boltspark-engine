@@ -6,7 +6,7 @@ import sys.io.File;
 
 class DockLayoutStore {
     static inline var FILE_NAME:String = "layout.json";
-    static inline var SCHEMA_VERSION:Int = 1;
+    static inline var SCHEMA_VERSION:Int = 2;
 
     final directory:Null<String>;
     final filePath:Null<String>;
@@ -40,9 +40,12 @@ class DockLayoutStore {
             return 'Could not parse panel layout at ${filePath}: ${Std.string(error)}';
         }
 
+        var version:Float = Reflect.isObject(data) && isNumber(Reflect.field(data, "version"))
+            ? Reflect.field(data, "version") : -1;
+        // Version 1 predates the bottom tab field; accept it with defaults.
+        var supported = version == 1 || version == SCHEMA_VERSION;
         if (!Reflect.isObject(data)
-            || !isNumber(Reflect.field(data, "version"))
-            || Reflect.field(data, "version") != SCHEMA_VERSION
+            || !supported
             || !isNumber(Reflect.field(data, "leftPanelWidth"))
             || !isNumber(Reflect.field(data, "rightPanelWidth"))
             || !isNumber(Reflect.field(data, "consoleHeight"))) {
@@ -59,6 +62,10 @@ class DockLayoutStore {
         layout.leftPanelWidth = leftWidth;
         layout.rightPanelWidth = rightWidth;
         layout.consoleHeight = consoleHeight;
+        if (version == SCHEMA_VERSION && isNumber(Reflect.field(data, "bottomTab"))) {
+            var tab:Int = Std.int(Reflect.field(data, "bottomTab"));
+            layout.bottomTab = tab == 1 ? 1 : 0;
+        }
         return null;
     }
 
@@ -71,7 +78,8 @@ class DockLayoutStore {
                 version: SCHEMA_VERSION,
                 leftPanelWidth: layout.leftPanelWidth,
                 rightPanelWidth: layout.rightPanelWidth,
-                consoleHeight: layout.consoleHeight
+                consoleHeight: layout.consoleHeight,
+                bottomTab: layout.bottomTab
             }));
         } catch (error:Dynamic) {
             return 'Could not save panel layout at ${filePath}: ${Std.string(error)}';

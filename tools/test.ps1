@@ -9,7 +9,9 @@ param(
     [switch]$DeviceReset,
     [switch]$FocusSelection,
     [switch]$FovInput,
-    [switch]$KeybindingsList
+    [switch]$KeybindingsList,
+    [switch]$ProjectFiles,
+    [switch]$AssetBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,7 +124,8 @@ try {
             'ComponentSystemRepro',
             'SceneHierarchyRepro',
             'KeybindingsMigrationRepro',
-            'ProjectSerializationRepro'
+            'ProjectSerializationRepro',
+            'ProjectSessionRepro'
         )) {
             Invoke-Haxe ($directClassPaths + @('--interp', '-main', $test)) `
                 "Portable $test"
@@ -160,7 +163,8 @@ try {
         @{ Name = 'SceneHierarchyRepro'; Output = 'scene-hierarchy-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'SceneObjectAffineRepro'; Output = 'scene-object-affine-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'KeybindingsMigrationRepro'; Output = 'keybindings-migration-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
-        @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') }
+        @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
+        @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') }
     )
     foreach ($test in $hlTests) {
         $output = Join-Path $testOutput $test.Output
@@ -223,6 +227,14 @@ try {
     if ($KeybindingsList) {
         & (Join-Path $repoRoot 'tests\native\Test-KeybindingsList.ps1')
         Assert-LastExitCode 'Keybindings list probe'
+    }
+    if ($ProjectFiles) {
+        & (Join-Path $repoRoot 'tests\native\Test-ProjectFiles.ps1')
+        Assert-LastExitCode 'Project file dialog probe'
+    }
+    if ($AssetBrowser) {
+        & (Join-Path $repoRoot 'tests\native\Test-AssetBrowser.ps1')
+        Assert-LastExitCode 'Asset Browser probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

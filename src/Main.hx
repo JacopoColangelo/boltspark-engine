@@ -26,6 +26,7 @@ import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.PrimitiveSettings;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
+import boltspark.project.ProjectSession;
 import boltspark.ui.AppIcon;
 import boltspark.ui.BoltUI;
 import boltspark.ui.HierarchyEntry;
@@ -44,6 +45,9 @@ import boltspark.ui.windows.KeybindingsWindowApp;
  * is part of this Windows-first application target.
  */
 class Main extends hxd.App {
+    /** Set by main() when a .boltproject path arrives from the command line. */
+    static var startupProjectPath:Null<String> = null;
+
     var boltUI:BoltUI;
     var editorViewport:EditorViewport;
     var nativeWindow:hxd.Window;
@@ -58,6 +62,10 @@ class Main extends hxd.App {
     final sceneObjects:Array<SceneObject> = [];
     final sceneObjectsById:Map<Int, SceneObject> = [];
     var editorSession:EditorSession;
+    /** Owns project/scene documents, paths, and dirty state. */
+    var projectSession:ProjectSession;
+    /** Loading replaces the whole session; its change notifications are not edits. */
+    var suppressProjectDirty:Bool = false;
     var gizmo:TransformGizmo;
     /** Root-space proxy lets the gizmo edit nested objects in world space. */
     var gizmoProxy:h3d.scene.Object;
@@ -151,6 +159,7 @@ class Main extends hxd.App {
         #end
         applicationWindows = new ApplicationWindowManager();
         nativeWindow.onClose = function() {
+            if (!confirmDiscardChanges()) return false;
             runtimeProbes.shutdown();
             if (editorSession != null) editorSession.destroy();
             applicationWindows.shutdown();
@@ -169,9 +178,13 @@ class Main extends hxd.App {
         gizmoProxy = new h3d.scene.Object(s3d);
         gizmoProxy.name = "TransformGizmoProxy";
         gizmo = new TransformGizmo(s3d);
+        projectSession = new ProjectSession();
         editorSession = new EditorSession();
         var initialEditorObject = editorSession.addInitialObject("sampleCube",
             null, null, PrimitiveGameObjects.cubeComponents());
+        // The starter cube is captured as the first untitled scene so Save
+        // Project can persist exactly what the user sees.
+        projectSession.captureScene(editorSession);
         synchronizeSceneObjects();
 
         s3d.camera.pos.set(5.8, 4.2, 6.4);
@@ -289,14 +302,38 @@ class Main extends hxd.App {
             printActivity('[viewport] fov=${Math.round(value)}°');
         };
         boltUI.onFocusSelection = focusSelection;
+        boltUI.onFileNewProject = fileNewProject;
+        boltUI.onFileOpenProject = fileOpenProject;
+        boltUI.onFileSaveProject = fileSaveProject;
+        boltUI.onFileSaveProjectAs = fileSaveProjectAs;
+        boltUI.onFileSaveScene = fileSaveScene;
+        boltUI.onFileSaveAll = fileSaveAll;
+        boltUI.onQueryAssets = function() return projectSession.scanAssets();
+        boltUI.onOpenAsset = openAsset;
+        boltUI.onNewScene = createAssetScene;
+        boltUI.onRenameAsset = renameAsset;
+        boltUI.onDeleteAsset = deleteAsset;
+        boltUI.onQueryFolders = function() return projectSession.scanFolders();
+        boltUI.onRenameFolder = renameAssetFolder;
+        boltUI.onNewFolder = createAssetFolder;
+        boltUI.onMoveAsset = moveAsset;
+        boltUI.onCopyAsset = copyAsset;
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
             boltUI.log("keybindings: " + keybindings.lastError);
         }
-        editorSession.onChanged = synchronizeEditorSession;
+        editorSession.onChanged = onEditorSessionChanged;
+        projectSession.onStateChanged = function() {
+            var title = projectSession.title();
+            boltUI.setProjectTitle(title);
+            printActivity('[project] title=${title}');
+        };
+        boltUI.setProjectTitle(projectSession.title());
         refreshHierarchy();
+        suppressProjectDirty = true;
         editorSession.selectObject(initialEditorObject.id);
+        suppressProjectDirty = false;
 
         boltUI.onObjectNameChanged = function(name:String) {
             // A multi-selection has no single name to rename.
@@ -316,6 +353,20 @@ class Main extends hxd.App {
                 logActivity("command: object name = " + trimmedName);
             }
         };
+
+        // A .boltproject passed on the command line (double-click / file
+        // association) replaces the untitled starter scene at startup.
+        if (startupProjectPath != null) {
+            var path = startupProjectPath;
+            startupProjectPath = null;
+            try {
+                projectSession.openProject(path);
+                reloadEditorSession();
+                boltUI.log('project: opened ${projectSession.projectPath}');
+            } catch (e:Dynamic) {
+                boltUI.log('startup project failed: ${Std.string(e)}');
+            }
+        }
     }
 
     override function update(dt:Float):Void {
@@ -2326,6 +2377,257 @@ class Main extends hxd.App {
         printHistoryTransform("redo", label);
     }
 
+    /** Session edits mark the project dirty; loads and saves do not. */
+    function onEditorSessionChanged():Void {
+        synchronizeEditorSession();
+        if (!suppressProjectDirty) projectSession.syncDirty(editorSession);
+    }
+
+    function confirmDiscardChanges():Bool {
+        if (projectSession == null || !projectSession.dirty) return true;
+        // Automated probes drive WM_CLOSE and cannot answer a modal OS dialog.
+        // They supply a scratch answer file so cancel and confirm are both
+        // exercised; a missing answer defaults to discarding the scratch state.
+        if (inputProbeMode) {
+            var answerFile = Sys.getEnv("BOLTSPARK_PROBE_CLOSE_ANSWER");
+            var answer = "";
+            if (answerFile != null && sys.FileSystem.exists(answerFile)) {
+                answer = StringTools.trim(sys.io.File.getContent(answerFile))
+                    .toLowerCase();
+            }
+            printActivity('[probe] close prompt answer=${answer == "" ? "yes" : answer}');
+            return answer != "no";
+        }
+        #if hl
+        // DialogFlags.YesNo is flag bit 1 << 0.
+        return hl.UI.dialog("Unsaved changes",
+            "The current project has unsaved changes. Discard them and continue?",
+            haxe.EnumFlags.ofInt(1));
+        #else
+        return true;
+        #end
+    }
+
+    function withNativeDialogTimeout<T>(open:Void->Null<T>):Null<T> {
+        #if hl
+        var previous = hxd.System.allowTimeout;
+        hxd.System.allowTimeout = false;
+        var result = open();
+        hxd.System.allowTimeout = previous;
+        return result;
+        #else
+        return null;
+        #end
+    }
+
+    /**
+     * Probe replacement for the modal OS picker. The path is supplied through
+     * the environment so a native probe can exercise the full menu -> command
+     * -> DocumentStore path without a dialog it cannot drive. An unset or empty
+     * value means Cancel; "cancel" is also accepted for explicit test cases.
+     */
+    function probeFileChoice(kind:String, title:String):Null<String> {
+        var variable = kind == "save"
+            ? "BOLTSPARK_PROBE_SAVE_FILE"
+            : "BOLTSPARK_PROBE_OPEN_FILE";
+        var path = Sys.getEnv(variable);
+        if (path == null || path == "") path = Sys.getEnv("BOLTSPARK_PROBE_FILE");
+        if (path == "cancel") path = null;
+        printActivity('[probe] file dialog ${kind} title="${title}"'
+            + ' choice=${path == null ? "cancel" : path}');
+        return path;
+    }
+
+    function pickOpenFile(title:String, extension:String, label:String):Null<String> {
+        if (inputProbeMode) return probeFileChoice("open", title);
+        return withNativeDialogTimeout(function() {
+            return hl.UI.loadFile({
+                title: title,
+                filters: [{ name: label, exts: [extension] }]
+            });
+        });
+    }
+
+    function pickSaveFile(title:String, defaultName:String, extension:String,
+            label:String):Null<String> {
+        if (inputProbeMode) return probeFileChoice("save", title);
+        return withNativeDialogTimeout(function() {
+            return hl.UI.saveFile({
+                title: title,
+                fileName: defaultName,
+                filters: [{ name: label, exts: [extension] }]
+            });
+        });
+    }
+
+    /** Replace the Heaps views and editor session with the loaded scene. */
+    function reloadEditorSession():Void {
+        suppressProjectDirty = true;
+        if (editorSession != null) editorSession.destroy();
+        editorSession = projectSession.createSession();
+        editorSession.onChanged = onEditorSessionChanged;
+        synchronizeEditorSession();
+        // The browser is docked and visible by default; refresh it here so a
+        // project opened at startup is listed without waiting for a tab click.
+        boltUI.refreshAssetBrowser();
+        printActivity('[probe] scene loaded entities=${editorSession.objects.length}');
+        suppressProjectDirty = false;
+    }
+
+    function reportProjectError(action:String, error:Dynamic):Void {
+        var message = Std.string(error);
+        boltUI.log('${action} failed: ${message}');
+        Sys.println('[project] ${action} failed: ${message}');
+    }
+
+    function openAsset(source:String):Void {
+        if (!confirmDiscardChanges()) return;
+        try {
+            projectSession.openSceneSource(source);
+            reloadEditorSession();
+            boltUI.log('asset: opened ${projectSession.scenePath}');
+        } catch (e:Dynamic) reportProjectError('open asset', e);
+    }
+
+    function createAssetScene(folder:String, name:String):Void {
+        if (!confirmDiscardChanges()) return;
+        try {
+            projectSession.newScene(name.length == 0 ? "New Scene" : name, folder);
+            projectSession.persistSceneDocument();
+            reloadEditorSession();
+            boltUI.log('asset: created ${projectSession.sceneSource}');
+        } catch (e:Dynamic) reportProjectError('create asset', e);
+    }
+
+    function renameAsset(source:String, name:String):Void {
+        try {
+            projectSession.renameScene(source, name);
+            reloadEditorSession();
+            boltUI.log('asset: renamed ${source} to ${name}');
+        } catch (e:Dynamic) reportProjectError('rename asset', e);
+    }
+
+    function deleteAsset(source:String):Void {
+        try {
+            projectSession.deleteScene(source);
+            reloadEditorSession();
+            boltUI.log('asset: deleted ${source}');
+        } catch (e:Dynamic) reportProjectError('delete asset', e);
+    }
+
+    function createAssetFolder(parent:String):String {
+        try {
+            var folder = projectSession.createFolder(parent, "New Folder");
+            boltUI.refreshAssetBrowser();
+            boltUI.log('folder: created ${folder}');
+            return folder;
+        } catch (e:Dynamic) {
+            reportProjectError('create folder', e);
+            return null;
+        }
+    }
+
+    function renameAssetFolder(source:String, name:String):String {
+        try {
+            var target = projectSession.renameFolder(source, name);
+            boltUI.refreshAssetBrowser();
+            boltUI.log('folder: renamed ${source} to ${target}');
+            return target;
+        } catch (e:Dynamic) {
+            reportProjectError('rename folder', e);
+            return null;
+        }
+    }
+
+    function moveAsset(source:String, folder:String):Void {
+        try {
+            projectSession.moveScene(source, folder);
+            reloadEditorSession();
+            boltUI.log('asset: moved ${source} to ${folder}');
+        } catch (e:Dynamic) reportProjectError('move asset', e);
+    }
+
+    function copyAsset(source:String, folder:String):Void {
+        try {
+            var destination = projectSession.copyScene(source, folder);
+            boltUI.refreshAssetBrowser();
+            boltUI.log('asset: copied ${source} to ${destination}');
+        } catch (e:Dynamic) reportProjectError('copy asset', e);
+    }
+
+    function fileNewProject():Void {
+        var path = pickSaveFile("Create Project", "Untitled Project.boltproject",
+            ProjectSession.PROJECT_EXT, "Boltspark Project");
+        if (path == null) return;
+        if (!confirmDiscardChanges()) return;
+        try {
+            var info = new haxe.io.Path(path);
+            projectSession.createProject(path, info.file);
+            reloadEditorSession();
+            boltUI.log('project: created ${projectSession.projectPath}');
+        } catch (e:Dynamic) reportProjectError('create project', e);
+    }
+
+    function fileOpenProject():Void {
+        var path = pickOpenFile("Open Project", ProjectSession.PROJECT_EXT,
+            "Boltspark Project");
+        if (path == null) return;
+        if (!confirmDiscardChanges()) return;
+        try {
+            projectSession.openProject(path);
+            reloadEditorSession();
+            boltUI.log('project: opened ${projectSession.projectPath}');
+        } catch (e:Dynamic) reportProjectError('open project', e);
+    }
+
+    function fileSaveProject():Void {
+        if (projectSession.projectPath == "") {
+            fileSaveProjectAs();
+            return;
+        }
+        try {
+            projectSession.save(editorSession);
+            boltUI.log('project: saved ${projectSession.projectPath}');
+        } catch (e:Dynamic) reportProjectError('save project', e);
+    }
+
+    function fileSaveProjectAs():Void {
+        var path = pickSaveFile("Save Project As",
+            projectSession.project.name + "." + ProjectSession.PROJECT_EXT,
+            ProjectSession.PROJECT_EXT, "Boltspark Project");
+        if (path == null) return;
+        try {
+            projectSession.saveAs(path, editorSession);
+            boltUI.log('project: saved ${projectSession.projectPath}');
+        } catch (e:Dynamic) reportProjectError('save project as', e);
+    }
+
+    function fileSaveScene():Void {
+        // A scene only exists on disk inside a project; on an untitled project
+        // route the Save Scene command to the project save path instead of
+        // dead-ending with a "no scene path" error.
+        if (projectSession.scenePath == "") {
+            fileSaveProjectAs();
+            return;
+        }
+        try {
+            projectSession.saveScene(editorSession);
+            boltUI.log('scene: saved ${projectSession.scenePath}');
+        } catch (e:Dynamic) reportProjectError('save scene', e);
+    }
+
+    function fileSaveAll():Void {
+        if (projectSession.projectPath == "") {
+            fileSaveProjectAs();
+            return;
+        }
+        try {
+            projectSession.save(editorSession);
+            boltUI.refreshAssetBrowser();
+            boltUI.log('saved all: ${projectSession.projectPath}');
+        } catch (e:Dynamic) reportProjectError('save all', e);
+    }
+
     function printHistoryTransform(action:String, label:Null<String>):Void {
         if (!verboseLogging) return;
         var selected = getSelectedObject();
@@ -2485,7 +2787,8 @@ class Main extends hxd.App {
     }
 
     static function main():Void {
-        var requestedWindow = ApplicationWindowKind.fromArguments(Sys.args());
+        var args = Sys.args();
+        var requestedWindow = ApplicationWindowKind.fromArguments(args);
         if (requestedWindow != null) {
             // HashLink's detached Windows process path allocates a console.
             // Auxiliary editor windows are GUI-only, so release it before the
@@ -2499,6 +2802,16 @@ class Main extends hxd.App {
                     new KeybindingsWindowApp();
             }
             return;
+        }
+        for (arg in args) {
+            if (StringTools.startsWith(arg, "--project=")) {
+                startupProjectPath = arg.substr("--project=".length);
+                break;
+            }
+            if (StringTools.endsWith(arg.toLowerCase(), ".boltproject")) {
+                startupProjectPath = arg;
+                break;
+            }
         }
         new Main();
     }

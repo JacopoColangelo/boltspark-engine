@@ -16,5 +16,8 @@ enum abstract EditorAction(Int) from Int to Int {
     var RenameSelection = 11;
     var ToggleGrid = 12;
     var FocusSelection = 13;
-    var ACTION_COUNT = 14;
+    var SaveCurrentScene = 14;
+    var SaveAll = 15;
+    var CutAsset = 16;
+    var ACTION_COUNT = 17;
 }

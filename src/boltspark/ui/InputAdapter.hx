@@ -43,6 +43,12 @@ class InputAdapter {
     public var onToggleGridPressed:Null<Void->Void>;
     /** F (rebindable): frame the primary selection in the viewport. */
     public var onFocusSelectionPressed:Null<Void->Void>;
+    /** Ctrl+S (rebindable): save the current scene. */
+    public var onSaveCurrentScenePressed:Null<Void->Void>;
+    /** Ctrl+Shift+S (rebindable): save the scene and project. */
+    public var onSaveAllPressed:Null<Void->Void>;
+    /** Ctrl+X (rebindable): cut the selected Asset Browser asset. */
+    public var onCutPressed:Null<Void->Void>;
     /** The native window lost keyboard focus; release held navigation state. */
     public var onWindowFocusLost:Null<Void->Void>;
     /** Returns true only while RMB fly navigation owns the viewport. */
@@ -67,6 +73,9 @@ class InputAdapter {
     var renameKeyDown:Int = -1;
     var toggleGridKeyDown:Int = -1;
     var focusSelectionKeyDown:Int = -1;
+    var saveCurrentSceneKeyDown:Int = -1;
+    var saveAllKeyDown:Int = -1;
+    var cutKeyDown:Int = -1;
 
     public function new(scene:h2d.Scene, keybindings:Keybindings,
             ?state:UiInputState) {
@@ -107,7 +116,7 @@ class InputAdapter {
                 // also fire the shortcut it is replacing.
                 if (keybindings.capturePending) {
                     keybindings.handleCaptureKey(event.keyCode,
-                        hxd.Key.isDown(hxd.Key.CTRL));
+                        hxd.Key.isDown(hxd.Key.CTRL), shiftHeld());
                     // SceneEvents queues this same event object. Mark it
                     // cancelled so a text field that happened to own focus
                     // in this application window cannot also consume the key.
@@ -117,8 +126,9 @@ class InputAdapter {
                     return;
                 }
                 var ctrlDown = hxd.Key.isDown(hxd.Key.CTRL);
+                var shiftDown = shiftHeld();
                 if (keybindings.matches(EditorAction.DeleteSelection,
-                        event.keyCode, ctrlDown)) {
+                        event.keyCode, ctrlDown, shiftDown)) {
                     if (deleteKeyDown < 0) {
                         if (onDeletePressed != null) onDeletePressed();
                         deleteKeyDown = event.keyCode;
@@ -131,11 +141,11 @@ class InputAdapter {
                 var shortcut = -1;
                 if (!(viewportNavigationActive()
                         && isCameraNavigationKey(event.keyCode))) {
-                    if (keybindings.matches(EditorAction.ToolMove, event.keyCode, ctrlDown)) {
+                    if (keybindings.matches(EditorAction.ToolMove, event.keyCode, ctrlDown, shiftDown)) {
                         shortcut = 0;
-                    } else if (keybindings.matches(EditorAction.ToolRotate, event.keyCode, ctrlDown)) {
+                    } else if (keybindings.matches(EditorAction.ToolRotate, event.keyCode, ctrlDown, shiftDown)) {
                         shortcut = 1;
-                    } else if (keybindings.matches(EditorAction.ToolScale, event.keyCode, ctrlDown)) {
+                    } else if (keybindings.matches(EditorAction.ToolScale, event.keyCode, ctrlDown, shiftDown)) {
                         shortcut = 2;
                     }
                 }
@@ -145,70 +155,93 @@ class InputAdapter {
                         shortcutKeyDown = event.keyCode;
                     }
                 }
-                if (keybindings.matches(EditorAction.SnapToGrid, event.keyCode, ctrlDown)) {
+                if (keybindings.matches(EditorAction.SnapToGrid, event.keyCode, ctrlDown, shiftDown)) {
                     if (snapToGridKeyDown < 0) {
                         if (onSnapToGridPressed != null) onSnapToGridPressed();
                         snapToGridKeyDown = event.keyCode;
                     }
                 }
-                if (keybindings.matches(EditorAction.HoldSnapOff, event.keyCode, ctrlDown)) {
+                if (keybindings.matches(EditorAction.HoldSnapOff, event.keyCode, ctrlDown, shiftDown)) {
                     if (snapHoldKeyDown < 0) {
                         if (onSnapHoldChanged != null) onSnapHoldChanged(true);
                         snapHoldKeyDown = event.keyCode;
                     }
                 }
-                if (keybindings.matches(EditorAction.Undo, event.keyCode, ctrlDown)) {
+                if (keybindings.matches(EditorAction.Undo, event.keyCode, ctrlDown, shiftDown)) {
                     if (undoKeyDown < 0) {
                         if (onUndoPressed != null) onUndoPressed();
                         undoKeyDown = event.keyCode;
                     }
                 }
-                if (keybindings.matches(EditorAction.Redo, event.keyCode, ctrlDown)) {
+                if (keybindings.matches(EditorAction.Redo, event.keyCode, ctrlDown, shiftDown)) {
                     if (redoKeyDown < 0) {
                         if (onRedoPressed != null) onRedoPressed();
                         redoKeyDown = event.keyCode;
                     }
                 }
-                if (keybindings.matches(EditorAction.CopySelection, event.keyCode, ctrlDown)) {
+                if (keybindings.matches(EditorAction.CopySelection, event.keyCode, ctrlDown, shiftDown)) {
                     if (copyKeyDown < 0) {
                         if (onCopyPressed != null) onCopyPressed();
                         copyKeyDown = event.keyCode;
                     }
                 }
-                if (keybindings.matches(EditorAction.Paste, event.keyCode, ctrlDown)) {
+                if (keybindings.matches(EditorAction.Paste, event.keyCode, ctrlDown, shiftDown)) {
                     if (pasteKeyDown < 0) {
                         if (onPastePressed != null) onPastePressed();
                         pasteKeyDown = event.keyCode;
                     }
                 }
                 if (keybindings.matches(EditorAction.DuplicateSelection,
-                        event.keyCode, ctrlDown)) {
+                        event.keyCode, ctrlDown, shiftDown)) {
                     if (duplicateKeyDown < 0) {
                         if (onDuplicatePressed != null) onDuplicatePressed();
                         duplicateKeyDown = event.keyCode;
                     }
                 }
                 if (keybindings.matches(EditorAction.RenameSelection,
-                        event.keyCode, ctrlDown)) {
+                        event.keyCode, ctrlDown, shiftDown)) {
                     if (renameKeyDown < 0) {
                         if (onRenamePressed != null) onRenamePressed();
                         renameKeyDown = event.keyCode;
                     }
                 }
                 if (keybindings.matches(EditorAction.ToggleGrid,
-                        event.keyCode, ctrlDown)) {
+                        event.keyCode, ctrlDown, shiftDown)) {
                     if (toggleGridKeyDown < 0) {
                         if (onToggleGridPressed != null) onToggleGridPressed();
                         toggleGridKeyDown = event.keyCode;
                     }
                 }
                 if (keybindings.matches(EditorAction.FocusSelection,
-                        event.keyCode, ctrlDown)) {
+                        event.keyCode, ctrlDown, shiftDown)) {
                     if (focusSelectionKeyDown < 0) {
                         if (onFocusSelectionPressed != null) {
                             onFocusSelectionPressed();
                         }
                         focusSelectionKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.SaveCurrentScene,
+                        event.keyCode, ctrlDown, shiftDown)) {
+                    if (saveCurrentSceneKeyDown < 0) {
+                        if (onSaveCurrentScenePressed != null) {
+                            onSaveCurrentScenePressed();
+                        }
+                        saveCurrentSceneKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.SaveAll,
+                        event.keyCode, ctrlDown, shiftDown)) {
+                    if (saveAllKeyDown < 0) {
+                        if (onSaveAllPressed != null) onSaveAllPressed();
+                        saveAllKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.CutAsset,
+                        event.keyCode, ctrlDown, shiftDown)) {
+                    if (cutKeyDown < 0) {
+                        if (onCutPressed != null) onCutPressed();
+                        cutKeyDown = event.keyCode;
                     }
                 }
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
@@ -231,6 +264,11 @@ class InputAdapter {
                 if (event.keyCode == focusSelectionKeyDown) {
                     focusSelectionKeyDown = -1;
                 }
+                if (event.keyCode == saveCurrentSceneKeyDown) {
+                    saveCurrentSceneKeyDown = -1;
+                }
+                if (event.keyCode == saveAllKeyDown) saveAllKeyDown = -1;
+                if (event.keyCode == cutKeyDown) cutKeyDown = -1;
                 if (event.keyCode == snapHoldKeyDown) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -260,6 +298,9 @@ class InputAdapter {
                 renameKeyDown = -1;
                 toggleGridKeyDown = -1;
                 focusSelectionKeyDown = -1;
+                saveCurrentSceneKeyDown = -1;
+                saveAllKeyDown = -1;
+                cutKeyDown = -1;
                 if (snapHoldKeyDown >= 0) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -291,5 +332,13 @@ class InputAdapter {
 
     function viewportNavigationActive():Bool {
         return viewportNavigationQuery != null && viewportNavigationQuery();
+    }
+
+    /** Shift may arrive as the generic key or a left/right location code. */
+    static function shiftHeld():Bool {
+        return hxd.Key.isDown(hxd.Key.SHIFT)
+            || hxd.Key.isDown(hxd.Key.LSHIFT)
+            || hxd.Key.isDown(hxd.Key.RSHIFT)
+            || hxd.Key.isDown(0xA0) || hxd.Key.isDown(0xA1);
     }
 }

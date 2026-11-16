@@ -16,6 +16,8 @@ class DockLayout {
     public var leftPanelWidth:Float;
     public var rightPanelWidth:Float;
     public var consoleHeight:Float;
+    /** Active bottom dock tab: 0 = Output Log, 1 = Asset Browser. */
+    public var bottomTab:Int = 0;
 
     public function new(
         leftPanelWidth:Float = Theme.LEFT_PANEL_WIDTH,

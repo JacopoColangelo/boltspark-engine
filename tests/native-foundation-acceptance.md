@@ -63,7 +63,8 @@ M9 release hardening. They remain unchecked and must not be described as passed.
 - [x] Inter Regular, SemiBold, and Bold are rasterized from embedded TTF data by FreeType at exact 11/13/15px sizes, using native face hinting and correct pen advances; un-preloaded characters are cached on demand (`bin/ui-freetype-native-hint.png`, `bin/ui-freetype-release.png`, `bin/freetype-runtime-repro.log`). JetBrains Mono Regular uses the same path at 12px for console and numeric values while preserving its former 17px line height, 13px baseline, 7px digit advance, and zero-kerning fixed-width layout (`bin/console-freetype.png`, `bin/numeric-freetype.png`, `bin/text-freetype-evidence.txt`).
 - [x] Scene-hierarchy object labels are vertically centered from the exact Inter line metrics instead of the stale 4px offset; their text body now aligns with the disclosure/cube icon row (`bin/hierarchy-alignment.png`).
 - [x] The current editor control glyphs use the pinned Tabler Icons 3.52.0
-  mapping and dedicated 6–16px atlas rasters. PrintWindow captures from the
+  mapping and dedicated 6–16px atlas rasters, including the Asset Browser's
+  Folder and Scene glyphs. PrintWindow captures from the
   development and packaged DX12 editors are pixel-identical, and both native
   smoke launches close cleanly (`src/res/icons/tabler_ui.png`,
   `bin/test-results/tabler-icons-native.png`,
@@ -113,16 +114,18 @@ Executed on 2026-11-14 with window-scoped native key/mouse events against the Ha
 - [x] The keybindings HWND is assigned the launching editor as its native owner before its first show, then explicitly restored/raised/activated. A first-open menu probe confirmed `GW_OWNER == editor HWND`, preventing the settings window from opening behind the editor (`tests/native/historical/verify-first-keybindings-open.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] Rebind capture ignores modifier-only events: Ctrl then T captured `Ctrl+T` for Rotate in the separate window, persisted a complete versioned JSON map, synchronized into the already-running main editor, and immediately selected Rotate there (`bin/keybindings-native-window-rebound.png`, `bin/native-window-evidence.txt`). Duplicate chords are rejected and malformed/partial persisted maps leave the complete live/default map intact in `Keybindings.hx`.
 - [x] Shortcut commands, hold snapping, snap-to-grid, and Delete remain suppressed while an inspector/search text control owns keyboard capture.
-- [x] The Editor Keybindings window shows all 14 actions in a scrollable list with
+- [x] The Editor Keybindings window shows all 17 actions in a scrollable list with
   a native scrollbar and no instructional/mouse helper text; shrinking the HWND
   switches the list into its clipped scroll mode
   (`tests/native/Test-KeybindingsList.ps1`, `bin/test-results/keybindings-list/keybindings-state.log`).
 - [x] Viewport camera settings popups and editor dropdown/menu bodies keep the
   standard arrow cursor instead of Heaps' `Cursor.Button` pointing hand.
 - [x] Undo and Redo are exposed through the native Edit menu and rebindable
-  Ctrl+Z/Ctrl+Y defaults. Historical keybinding maps migrate to version 4 by
-  retaining existing actions and appending collision-free history, hierarchy,
-  grid, and F Focus Selection bindings.
+  Ctrl+Z/Ctrl+Y defaults; Ctrl+S saves the current scene and Ctrl+Shift+S saves
+  all; Ctrl+C/Ctrl+V/Ctrl+X copy, paste, and cut assets in the Asset Browser.
+  Historical keybinding maps migrate to version 6 by retaining existing
+  actions and appending collision-free history, hierarchy, grid, focus, and save
+  bindings (including Shift-aware chords).
 
 ## Viewport camera navigation
 
@@ -234,6 +237,30 @@ hosted Windows CI job.
   malformed references, duplicate IDs, cycles, and singular transforms are
   rejected; atomic saves retain a previous `.bak`
   (`tests/repro/ProjectSerializationRepro.hx`, `tests/fixtures/project/`).
+- [x] The integrated project session creates, saves, and reopens `*.boltproject`
+  and `*.boltscene` documents, resolves project-relative scene paths, registers
+  the default scene asset, rebuilds an `EditorSession` with stable identities
+  and components, tracks dirty state, and rejects missing, unsafe, and
+  unsupported-version inputs (`tests/repro/ProjectSessionRepro.hx`). The full
+  native build bundles `ui.hdll` for the Windows file dialogs; both development
+  and packaged editors still launch and close cleanly (`tools/test.ps1 -NativeSmoke`).
+- [x] File menu project commands are driven end-to-end in a native DX12 window:
+  Save Project As writes the manifest and scene, the title-strip dirty marker
+  appears on edits and clears on save, an unsaved-change answer of `no` cancels
+  close while `yes` allows it, and Open Project rebuilds the saved scene graph
+  (`tests/native/Test-ProjectFiles.ps1`). Bare picker names without a filter
+  extension are normalized to `.boltproject`/`.boltscene`, Save Current Scene on
+  an untitled project routes to Save Project As, and new scenes allocate unique
+  names/paths (`tests/repro/ProjectSessionRepro.hx`). The docked Asset Browser
+  scans real project files into folders and supports Add/Open/Rename/Move/Copy/
+  Delete with manifest/file consistency and a scrolling grid; the last scene is
+  protected, UTF-8 BOM documents
+  load, and a `.boltproject` command-line argument opens at startup
+  (`tests/native/Test-AssetBrowser.ps1`). Probe hooks
+  substitute scripted paths for the modal OS picker so the real menu → command →
+  storage path is tested.
+- [ ] Visual click-through of the native Windows file-picker chrome itself.
+  The command path is automated above; the modal OS dialog rendering is not.
 - [x] The renderer-independent ordered scene graph rejects hierarchy cycles,
   preserves exact world matrices during affine reparenting, canonicalizes
   selected forests, and restores parent/sibling/transform/identity/selection
