@@ -695,6 +695,7 @@ function New-NativeRelease {
         @{ Source = (Join-Path $repoRoot 'docs\THIRD_PARTY_NOTICES.md'); Name = 'THIRD-PARTY-NOTICES.md' },
         @{ Source = (Join-Path $repoRoot 'tools\font-source\Inter-LICENSE.txt'); Name = 'Inter-LICENSE.txt' },
         @{ Source = (Join-Path $repoRoot 'tools\font-source\JetBrainsMono-LICENSE.txt'); Name = 'JetBrainsMono-LICENSE.txt' },
+        @{ Source = (Join-Path $repoRoot 'third_party\tabler-icons\LICENSE'); Name = 'Tabler-Icons-LICENSE.txt' },
         @{ Source = (Join-Path $hlFreeTypeRoot 'LICENSE'); Name = 'hlfreetype-LICENSE.txt' },
         @{ Source = (Join-Path $hlFreeTypeRoot 'FreeType-LICENSE.txt'); Name = 'FreeType-LICENSE.txt' }
     )
@@ -733,6 +734,7 @@ function New-NativeRelease {
         'THIRD-PARTY-NOTICES.md',
         'Inter-LICENSE.txt',
         'JetBrainsMono-LICENSE.txt',
+        'Tabler-Icons-LICENSE.txt',
         'hlfreetype-LICENSE.txt',
         'FreeType-LICENSE.txt',
         'freetype.hdll'

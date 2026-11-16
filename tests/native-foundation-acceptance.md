@@ -62,7 +62,12 @@ M9 release hardening. They remain unchecked and must not be described as passed.
 - [x] Text is legible at baseline window size (1440x900 default; verified at 1296x900 after resize).
 - [x] Inter Regular, SemiBold, and Bold are rasterized from embedded TTF data by FreeType at exact 11/13/15px sizes, using native face hinting and correct pen advances; un-preloaded characters are cached on demand (`bin/ui-freetype-native-hint.png`, `bin/ui-freetype-release.png`, `bin/freetype-runtime-repro.log`). JetBrains Mono Regular uses the same path at 12px for console and numeric values while preserving its former 17px line height, 13px baseline, 7px digit advance, and zero-kerning fixed-width layout (`bin/console-freetype.png`, `bin/numeric-freetype.png`, `bin/text-freetype-evidence.txt`).
 - [x] Scene-hierarchy object labels are vertically centered from the exact Inter line metrics instead of the stale 4px offset; their text body now aligns with the disclosure/cube icon row (`bin/hierarchy-alignment.png`).
-- [x] All 25 analytic editor icon kinds are rasterized at exact integer sizes with pixel-grid-fitted 1/1.5/2px optical weights; axis-aligned stems cover stable physical pixels while curves and diagonals retain derivative anti-aliasing. The full size sheet and matching DX12 editor/release renders are recorded in `bin/ui-icon-grid-hint.png`, `bin/app-icon-editor.png`, and `bin/ui-icon-release.png`.
+- [x] The current editor control glyphs use the pinned Tabler Icons 3.52.0
+  mapping and dedicated 6–16px atlas rasters. PrintWindow captures from the
+  development and packaged DX12 editors are pixel-identical, and both native
+  smoke launches close cleanly (`src/res/icons/tabler_ui.png`,
+  `bin/test-results/tabler-icons-native.png`,
+  `bin/test-results/tabler-icons-release.png`).
 - [x] Resize behavior: chrome redraws to the new client size (`bin/m0_input_test.png` was captured at a resized 1296x900 window with correct layout). Maximize/restore re-uses the same `resize()` path.
 - [x] Native title-bar movement does not run the full vsynced interactive-resize renderer. The packaged-release Win32 probe measured move-loop timer dispatch at 8.381 ms average versus 23.609 ms while the resize callback was deliberately active; live rendering remains enabled for `WM_SIZING` only (`tests/native/historical/verify-move-loop.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] No Direct3D 12 device/runtime errors during the test (no exception dialogs, clean run log).

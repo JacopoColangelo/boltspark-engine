@@ -8,7 +8,7 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
 - An orange sample GameObject composed from Transform + MeshRenderer components
   in `s3d`, behind a native `h2d` editor chrome overlay.
 - A bounded 3D viewport clipped with Heaps' render-zone scissor; viewport clicks are converted into camera rays and synchronize cube selection with the hierarchy.
-- A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter and JetBrains Mono, exact-size pixel-grid-fitted analytic icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics. The Output Log stays focused on actionable warnings and errors instead of echoing routine selections, tool switches, and transform edits; launch with `BOLTSPARK_VERBOSE_LOGS` set to restore detailed interaction telemetry for diagnosis.
+- A compact native BoltUI editor shell with exact-size runtime FreeType glyph caching for Inter and JetBrains Mono, exact-size Tabler Icons, crisp vector surfaces, menu/transform/transport toolbars, searchable hierarchy, structured Inspector sections, viewport HUD, output log, and status diagnostics. The Output Log stays focused on actionable warnings and errors instead of echoing routine selections, tool switches, and transform edits; launch with `BOLTSPARK_VERBOSE_LOGS` set to restore detailed interaction telemetry for diagnosis.
 - The bounded 3D viewport has a Y-up editor grid, colored axes, studio lighting, and scale-invariant two-pixel selected-object wireframe feedback while retaining viewport ray picking and drag/drop placement.
 - Viewport camera controls follow Unreal-style activation: RMB captures free-look and enables WASD/QE flight, Shift/Ctrl speed modifiers, and wheel speed changes; an idle wheel over the viewport dollies in/out, MMB pans, Alt+LMB orbits in the expected tumble direction, and **F** frames the primary selection using its complete world-space bounds.
 - All three transform tools drive viewport gizmos: Move offers axis, two-axis plane, and center free-view-plane drags; Rotate offers axis rings plus a true virtual-sphere omni arc-ball; Scale offers axis/plane/uniform scaling. Arc-ball motion keeps the same response and rotation axis when the pointer enters or exits its virtual sphere, while large coalesced pointer deltas are subdivided so fast rim crossings cannot collapse. Successive Bell-surface points preserve off-center view-axis roll, while a linear pointer-travel angle keeps long relative-mode drags unbounded. Its accumulated quaternion remains untouched and normalized during long drags; an internal per-object Euler hint selects a stable equivalent branch, while the Inspector presents Unreal-style Rotator values in `(-180°, 180°]`. A clickable WORLD/LOCAL viewport control changes the shared axis frame (WORLD is the default), all changes flow through the editor command path with live inspector updates, and the default shortcuts are **1** (Move), **E** (Rotate), and **R** (Scale).
@@ -105,8 +105,8 @@ src/
     Theme.hx                  — modern dark-editor color/size tokens
     UiContext.hx              — embedded fonts, native cursors, window state
     AppIcon.hx                — shared ICO decoding for HWND and title-strip branding
-    UiSurface.hx / UiIcons.hx — square-edged surfaces and exact-size icon primitives
-    UiText*.hx / shaders/     — runtime FreeType text wrappers and pixel-fitted icon coverage
+    UiSurface.hx / UiIcons.hx — square-edged surfaces and exact-size Tabler icon atlas
+    UiText*.hx                — runtime FreeType text wrappers
     InputAdapter.hx           — central keyboard/focus/pointer reporting
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
@@ -116,6 +116,7 @@ src/
   boltspark/editor/           — pure editor session/model plus viewport and gizmos
     commands/                 — object, transform, duplicate, and hierarchy history
   res/fonts/                  — embedded Inter and JetBrains Mono TTF faces
+  res/icons/                  — embedded exact-size Tabler icon atlas
 tests/
   native-foundation-acceptance.md
   repro/                      — headless math, UI-core, command, serialization, and native repros
@@ -127,4 +128,5 @@ tools/
   generate-fonts.ps1          — sync the pinned JetBrains Mono runtime TTF resource
   font-source/                — JetBrains Mono source + OFL font license texts
 third_party/hlfreetype/       — pinned runtime TTF/OTF rasterizer and Heaps glyph cache
+third_party/tabler-icons/     — pinned icon mapping and MIT license
 ```

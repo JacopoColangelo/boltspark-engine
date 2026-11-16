@@ -1,7 +1,5 @@
 package boltspark.ui;
 
-import boltspark.ui.shaders.UiIconShader;
-
 enum abstract UiIconKind(Int) from Int to Int {
     var None = 0;
     var Add = 1;
@@ -23,46 +21,70 @@ enum abstract UiIconKind(Int) from Int to Int {
     var Grid = 17;
     var More = 18;
     var ChevronUp = 19;
-    var BrandOuter = 20;
-    var BrandBolt = 21;
-    var StatusDot = 22;
-    var Link = 23;
-    var Unlink = 24;
-    var Reset = 25;
+    var StatusDot = 20;
+    var Link = 21;
+    var Unlink = 22;
+    var Reset = 23;
 }
 
-/** Exact-size analytic editor icons with pixel-grid-fitted strokes. */
+/**
+ * Exact-size Tabler editor icons from the embedded, pre-rasterized atlas.
+ *
+ * The atlas contains a dedicated raster for every supported integer size, so
+ * small controls never downscale a large texture at runtime. Pixels are white
+ * with alpha coverage and are tinted here to follow the active UI state.
+ *
+ * Source mapping and MIT license: `third_party/tabler-icons/README.md`.
+ */
 class UiIcons {
+    static inline var CELL_SIZE:Int = 16;
+    static inline var ICON_COLUMNS:Int = 24;
+    static inline var MIN_SIZE:Int = 6;
+    static inline var MAX_SIZE:Int = 16;
+
+    static var atlas:h2d.Tile;
+
     public static function draw(target:h2d.Graphics, kind:UiIconKind, x:Float, y:Float,
             size:Float, color:Int, alpha:Float = 1):Void {
         target.removeChildren();
         if (kind == None || size <= 0) return;
 
-        // Like a hinted font glyph, each icon is rasterized at the exact size
-        // it occupies. Integer quad bounds keep the analytic coverage stable;
-        // the shader then fits one- and two-pixel stems to the pixel grid.
         var pixelSize = Math.max(1, Math.round(size));
+        var atlasSize = Std.int(Math.max(MIN_SIZE, Math.min(MAX_SIZE, pixelSize)));
+        var tile = getAtlas().sub(
+            kind * CELL_SIZE,
+            (atlasSize - MIN_SIZE) * CELL_SIZE,
+            atlasSize,
+            atlasSize);
 
-        // The one-pixel white texture only supplies a quad. Icon coverage is
-        // calculated analytically in UiIconShader; no icon bitmap is sampled.
-        var bitmap = new h2d.Bitmap(h2d.Tile.fromColor(0xFFFFFF), target);
+        var bitmap = new h2d.Bitmap(tile, target);
         bitmap.x = Math.round(x);
         bitmap.y = Math.round(y);
-        bitmap.width = pixelSize;
-        bitmap.height = pixelSize;
-        bitmap.smooth = false;
+        // Current BoltUI controls use 6..16 px exactly. Retain a graceful
+        // fallback for future out-of-range callers without expanding the
+        // embedded atlas: only those uncommon sizes use filtered scaling.
+        if (pixelSize != atlasSize) {
+            bitmap.width = pixelSize;
+            bitmap.height = pixelSize;
+            bitmap.smooth = true;
+        } else {
+            bitmap.smooth = false;
+        }
         bitmap.color.setColor(color);
         bitmap.color.a = Math.max(0, Math.min(1, alpha));
+    }
 
-        var shader = new UiIconShader();
-        shader.iconKind = kind;
-        shader.iconSize = pixelSize;
-        // Small controls retain a single-pixel stem. Header icons use a
-        // grayscale-hinted 1.5 px optical weight, while 16 px toolbar glyphs
-        // use two full pixels to match Inter SemiBold. Unlike the old
-        // size*0.075 rule, each supported size now has a deliberate weight.
-        var strokePixels = pixelSize >= 16 ? 2.0 : (pixelSize >= 14 ? 1.5 : 1.0);
-        shader.stroke = strokePixels / pixelSize;
-        bitmap.addShader(shader);
+    static function getAtlas():h2d.Tile {
+        if (atlas == null) {
+            atlas = hxd.Res.icons.tabler_ui.toTile();
+            var expectedWidth = ICON_COLUMNS * CELL_SIZE;
+            var expectedHeight = (MAX_SIZE - MIN_SIZE + 1) * CELL_SIZE;
+            if (atlas.width != expectedWidth || atlas.height != expectedHeight) {
+                throw 'Invalid Tabler icon atlas: expected ${expectedWidth}x${expectedHeight}, '
+                    + 'got ${atlas.width}x${atlas.height}';
+            }
+            atlas.getTexture().filter = h3d.mat.Data.Filter.Nearest;
+        }
+        return atlas;
     }
 }

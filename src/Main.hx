@@ -169,8 +169,8 @@ class Main extends hxd.App {
         // DOM, CSS, Electron, NW.js, CEF, or a WebView.
         // Inter and JetBrains Mono UI fonts are rasterized from their embedded
         // TTF faces by FreeType at the exact requested size and cached on
-        // demand. Everything else defaults to pixel-exact sampling;
-        // procedural icons perform analytic shader anti-aliasing.
+        // demand. Everything else defaults to pixel-exact sampling; Tabler UI
+        // icons use dedicated, pre-rasterized atlas entries at each UI size.
         s2d.defaultSmooth = false;
         snap = new GridSnapping();
         keybindings = new Keybindings();
