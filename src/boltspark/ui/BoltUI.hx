@@ -31,13 +31,14 @@ class BoltUI {
     final shell:EditorShell;
 
     /** Editor commands forwarded to the engine by Main. */
-    public var onCreateObject:Null<Void->Void>;
-    public var onCreateObjectAt:Null<Float->Float->Void>;
+    public var onCreatePrimitive:Null<String->Void>;
+    public var onDropPrimitive:Null<String->Float->Float->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
     public var onHierarchyObjectNameChanged:Null<Int->String->Void>;
     public var onCreateChildObject:Null<Int->Bool->Void>;
+    public var onCreateChildPrimitive:Null<Int->String->Void>;
     public var onCreateEmptyParent:Null<Array<Int>->Void>;
     public var onDuplicateObjects:Null<Array<Int>->Void>;
     public var onCopyObjects:Null<Array<Int>->Void>;
@@ -48,6 +49,8 @@ class BoltUI {
     public var onHierarchyDrop:Null<Array<Int>->Int->Int->Bool->Void>;
     public var onInspectorNumberChanged:Null<Int->String->Int->Float->Void>;
     public var onInspectorTextChanged:Null<Int->String->String->Void>;
+    public var onInspectorAssetChanged:Null<Int->String->String->Void>;
+    public var onInspectorBoolChanged:Null<Int->String->Bool->Void>;
     public var onInspectorEditBegin:Null<Int->String->Int->Void>;
     public var onInspectorEditEnd:Null<Int->String->Int->Void>;
     public var onInspectorReset:Null<Int->String->Void>;
@@ -96,8 +99,12 @@ class BoltUI {
         ctx = new UiContext(window);
         input = new InputAdapter(parent, keybindings, ctx.frame.input);
         shell = new EditorShell(parent, ctx, input, snapping);
-        shell.onCreateObject = function() if (onCreateObject != null) onCreateObject();
-        shell.onCreateObjectAt = function(x, y) if (onCreateObjectAt != null) onCreateObjectAt(x, y);
+        shell.onCreatePrimitive = function(meshId) {
+            if (onCreatePrimitive != null) onCreatePrimitive(meshId);
+        };
+        shell.onDropPrimitive = function(meshId, x, y) {
+            if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
+        };
         shell.onDeleteObjects = function(ids) if (onDeleteObjects != null) onDeleteObjects(ids);
         shell.onObjectsSelected = function(ids, primary) {
             if (onObjectsSelected != null) onObjectsSelected(ids, primary);
@@ -108,6 +115,9 @@ class BoltUI {
         };
         shell.onCreateChildObject = function(parentId, empty) {
             if (onCreateChildObject != null) onCreateChildObject(parentId, empty);
+        };
+        shell.onCreateChildPrimitive = function(parentId, meshId) {
+            if (onCreateChildPrimitive != null) onCreateChildPrimitive(parentId, meshId);
         };
         shell.onCreateEmptyParent = function(ids) {
             if (onCreateEmptyParent != null) onCreateEmptyParent(ids);
@@ -143,6 +153,16 @@ class BoltUI {
         shell.onInspectorTextChanged = function(component, property, value) {
             if (onInspectorTextChanged != null) {
                 onInspectorTextChanged(component, property, value);
+            }
+        };
+        shell.onInspectorAssetChanged = function(component, property, assetId) {
+            if (onInspectorAssetChanged != null) {
+                onInspectorAssetChanged(component, property, assetId);
+            }
+        };
+        shell.onInspectorBoolChanged = function(component, property, value) {
+            if (onInspectorBoolChanged != null) {
+                onInspectorBoolChanged(component, property, value);
             }
         };
         shell.onInspectorEditBegin = function(component, property, axis) {

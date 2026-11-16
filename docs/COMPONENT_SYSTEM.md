@@ -60,6 +60,35 @@ session.createObject("Cube", new EditorTransform(), -1,
 asset IDs to concrete Heaps primitives; adding another primitive does not
 require a new GameObject class.
 
+Meshes and materials are **reusable asset references**, not scene objects:
+`PrimitiveMeshes.all()` lists the built-in Cube, Sphere, Cylinder, Capsule, and
+Plane assets (and any future imported static meshes registered with
+`PrimitiveMeshes.register()`), while `Material.all()` lists the built-in Default
+Material plus any registered materials. A new `MeshRenderer` automatically uses
+the Default Material when none is supplied. Each renderer owns its own
+`h3d.scene.Mesh` and material instance; geometry is cached per (mesh asset id +
+`PrimitiveSettings`) pair, so multiple entities can share a mesh/material asset
+without sharing transforms or mutable renderer state.
+
+### Primitive settings
+
+Each primitive asset publishes its own geometry parameter schema via
+`PrimitiveMeshes.parameters()` (sphere: sides/rings/radius; cylinder:
+sides/radius/height plus a capped toggle; cube/plane/capsule: size fields).
+Values live in `PrimitiveSettings` on the **renderer instance**, not on the
+shared mesh asset, so two spheres may use different segment counts while still
+referencing one mesh asset. MeshRenderer serializes them in an optional
+`primitiveSettings` block of its component data and resets them to the
+primitive's defaults whenever the mesh asset changes.
+
+Every parameter row publishes a **reset action**
+(`MeshRenderer.resetInspectorProperty` restores that one parameter to
+`PrimitiveMeshes.defaultSettings()`), and all settings edits participate in
+undo/redo: numeric gestures commit one `PrimitiveSettingsCommand` at gesture
+end (scrub, typed value, or arrow step — never mid-drag), boolean toggles and
+resets commit immediately, and multi-selection gestures commit a single
+composite entry through `EditorSession.commitAppliedPrimitiveSettings`.
+
 ## Lifecycle and cleanup
 
 Subclass `Component` and override only the lifecycle methods needed:
@@ -90,9 +119,13 @@ reattached; undo/redo and duplication use `cloneComponent()`.
 
 Components override `inspectorData()` to publish UI-neutral property metadata.
 `ComponentInspectorSection` renders that metadata generically, so adding a
-component section does not require a GameObject-type check. Numeric, text,
-reset, and link commands route back through `Main`; custom components may
-override the corresponding `setInspector*` methods.
+component section does not require a GameObject-type check. Numeric (scalar,
+integer), boolean, text, asset-picker, reset, and link commands route back
+through `Main`; custom components may override the corresponding
+`setInspector*` methods, including `setInspectorAsset()` for type-aware object
+pickers and `setInspectorBool()` for toggles. Asset properties publish their
+accepted type plus their options, so the same picker works for meshes,
+materials, and future asset families.
 
 Serializable component types register factories with `ComponentRegistry` and
 return a versioned `ComponentData` from `toComponentData()`. Transform remains

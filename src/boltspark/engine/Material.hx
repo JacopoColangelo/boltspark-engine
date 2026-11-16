@@ -13,6 +13,7 @@ class Material {
     public var culling:MaterialCulling;
 
     static var sharedDefault:Null<Material>;
+    static var registered:Array<Material> = [];
 
     public function new(id:String, name:String, color:Int = 0xFFFFFF,
             shadows:Bool = false, specularAmount:Float = 0.18,
@@ -42,11 +43,39 @@ class Material {
         return sharedDefault;
     }
 
+    /**
+     * Register an additional reusable material asset. The Default Material is
+     * always available and is returned first by `all()`.
+     */
+    public static function register(material:Material):Void {
+        if (material == null || material.id == null
+                || StringTools.trim(material.id).length == 0) {
+            throw "Material registration requires a material with an ID";
+        }
+        if (material.id == DEFAULT_ID) return;
+        for (existing in registered) {
+            if (existing.id == material.id) {
+                throw 'Duplicate material id ${material.id}';
+            }
+        }
+        registered.push(material);
+    }
+
+    /** Stable asset list for type-aware Inspector pickers. */
+    public static function all():Array<Material> {
+        var result = [defaultMaterial()];
+        for (material in registered) {
+            if (material.id != DEFAULT_ID) result.push(material);
+        }
+        return result;
+    }
+
     public static function find(id:String):Null<Material> {
-        return switch (id) {
-            case DEFAULT_ID, "Default Material": defaultMaterial();
-            default: null;
-        };
+        if (id == DEFAULT_ID || id == "Default Material") return defaultMaterial();
+        for (material in registered) {
+            if (material.id == id) return material;
+        }
+        return null;
     }
 
 }

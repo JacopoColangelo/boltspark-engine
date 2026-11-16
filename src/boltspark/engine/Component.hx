@@ -55,6 +55,10 @@ class Component {
     public function setInspectorNumber(propertyId:String, axis:Int,
             value:Float):Bool return false;
     public function setInspectorText(propertyId:String, value:String):Bool return false;
+    /** Assign a reusable asset reference by id (empty id means "none"). */
+    public function setInspectorAsset(propertyId:String, assetId:String):Bool return false;
+    /** Toggle a boolean Inspector property. */
+    public function setInspectorBool(propertyId:String, value:Bool):Bool return false;
     public function resetInspectorProperty(propertyId:String):Bool return false;
     public function setInspectorLinked(propertyId:String, linked:Bool):Bool return false;
 

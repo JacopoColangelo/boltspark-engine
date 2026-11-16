@@ -11,7 +11,11 @@ import boltspark.ui.UiText;
 typedef MenuItem = {
     label:String,
     ?onClick:Void->Void,
-    ?submenu:Array<MenuItem>
+    ?submenu:Array<MenuItem>,
+    /** Draws an accent checkmark and tints the row as the active choice. */
+    ?selected:Bool,
+    /** Draws a muted dash when the choice differs across a multi-selection. */
+    ?mixed:Bool
 };
 
 /**
@@ -25,6 +29,8 @@ class MenuDropdown extends h2d.Object {
     static inline var ROW_HEIGHT:Int = 22;
     static inline var PADDING:Int = 3;
     static inline var MIN_WIDTH:Int = 168;
+    /** Left gutter reserved for the state mark of a selection-style menu. */
+    static inline var STATE_GUTTER:Float = 20;
 
     final context:UiContext;
     final panel:h2d.Object;
@@ -72,9 +78,11 @@ class MenuDropdown extends h2d.Object {
         clearRows(panelRows);
         closeSubmenu();
 
+        var hasStates = hasSelectionState(items);
         panelWidth = MIN_WIDTH;
         for (item in items) {
-            panelWidth = Math.max(panelWidth, measureLabel(item.label) + 44);
+            panelWidth = Math.max(panelWidth, measureLabel(item.label) + 44
+                + (hasStates ? STATE_GUTTER : 0));
         }
         panelHeight = items.length * ROW_HEIGHT + PADDING * 2;
         panelSurface.setSize(panelWidth, panelHeight);
@@ -93,7 +101,7 @@ class MenuDropdown extends h2d.Object {
                         close();
                         if (item.onClick != null) item.onClick();
                     },
-                item.submenu != null, true);
+                item.submenu != null, true, hasStates);
         }
 
         // Clamp inside the window frame.
@@ -120,9 +128,11 @@ class MenuDropdown extends h2d.Object {
     function openSubmenu(item:MenuItem, rowY:Float):Void {
         closeSubmenu();
         var items = item.submenu;
+        var hasStates = hasSelectionState(items);
         var width:Float = MIN_WIDTH;
         for (sub in items) {
-            width = Math.max(width, measureLabel(sub.label) + 44);
+            width = Math.max(width, measureLabel(sub.label) + 44
+                + (hasStates ? STATE_GUTTER : 0));
         }
         var height = items.length * ROW_HEIGHT + PADDING * 2;
         submenuSurface.setSize(width, height);
@@ -137,7 +147,7 @@ class MenuDropdown extends h2d.Object {
             addRowContent(row, sub, subRowY, width, function() {
                 close();
                 if (sub.onClick != null) sub.onClick();
-            }, false, false);
+            }, false, false, hasStates);
         }
         // Prefer a right-opening cascade, but flip left and vertically clamp
         // when the parent menu is near a window edge.
@@ -157,39 +167,76 @@ class MenuDropdown extends h2d.Object {
     }
 
     function addRowContent(row:h2d.Object, item:MenuItem, rowY:Float, width:Float,
-            activate:Void->Void, hasSubmenu:Bool, panelRow:Bool):Void {
+            activate:Void->Void, hasSubmenu:Bool, panelRow:Bool,
+            showStates:Bool):Void {
         // The wrapper is positioned at the row's Y; all content is relative.
         row.y = rowY;
+        var selected = item.selected == true;
+        // The active choice gets the same restrained teal the hierarchy uses
+        // for selected objects; plain rows stay on the panel surface.
+        var normalFill = selected ? Theme.ACCENT_MUTED : Theme.PANEL_ALT;
         var rowSurface = new UiSurface(context, row);
         rowSurface.setSize(width - PADDING * 2, ROW_HEIGHT - 1);
-        rowSurface.setStyle(Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
+        rowSurface.setStyle(normalFill, normalFill, 0);
         var rowHit = new h2d.Interactive(width - PADDING * 2, ROW_HEIGHT - 1, row);
         rowHit.backgroundColor = 0;
         rowHit.cursor = hxd.Cursor.Default;
         rowHit.onOver = function(_) {
-            rowSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
+            rowSurface.setStyle(
+                selected ? Theme.ACCENT_MUTED : Theme.SURFACE_3,
+                Theme.ACCENT, 0);
             // Cascade parents open their submenu on hover; plain rows close
             // an open cascade only when they belong to the parent panel. A
             // leaf inside the submenu must not close the submenu containing it.
             if (hasSubmenu) activate() else if (panelRow) closeSubmenu();
         };
-        rowHit.onOut = function(_) rowSurface.setStyle(
-            Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
+        rowHit.onOut = function(_) rowSurface.setStyle(normalFill, normalFill, 0);
         rowHit.onPush = function(event) {
             event.propagate = false;
             activate();
         };
+        if (showStates) drawStateMark(row, selected, item.mixed == true);
         var label = new UiText(context.font, row);
         label.text = item.label;
         label.lineBreak = false;
         label.textColor = Theme.TEXT;
-        label.x = 10;
+        label.x = 10 + (showStates ? STATE_GUTTER : 0);
         label.y = Math.round((ROW_HEIGHT - label.textHeight) * 0.5 - 1);
         if (hasSubmenu) {
             var chevron = new h2d.Graphics(row);
             UiIcons.draw(chevron, ChevronRight, 0, 0, 9, Theme.MUTED);
             chevron.x = width - PADDING - 16;
             chevron.y = Math.round((ROW_HEIGHT - 9) * 0.5);
+        }
+    }
+
+    static function hasSelectionState(items:Array<MenuItem>):Bool {
+        for (item in items) {
+            if (item.selected != null || item.mixed != null) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Selection-style menus reserve a left gutter so every label lines up,
+     * whether or not its row is active. An accent check marks the current
+     * choice; a muted dash marks a mixed multi-selection instead of a bullet
+     * glued to one label.
+     */
+    static function drawStateMark(row:h2d.Object, selected:Bool, mixed:Bool):Void {
+        if (!selected && !mixed) return;
+        var mark = new h2d.Graphics(row);
+        var x = 7.0;
+        var y = Math.round((ROW_HEIGHT - 10) * 0.5);
+        if (mixed) {
+            mark.lineStyle(1.6, Theme.MUTED);
+            mark.moveTo(x, y + 5);
+            mark.lineTo(x + 8, y + 5);
+        } else {
+            mark.lineStyle(1.8, Theme.ACCENT_HOVER);
+            mark.moveTo(x, y + 4);
+            mark.lineTo(x + 3.2, y + 7.4);
+            mark.lineTo(x + 9, y + 0.8);
         }
     }
 

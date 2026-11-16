@@ -18,6 +18,9 @@ class ComponentInspectorSection extends InspectorSection {
     public var onNumberEditBegin:Null<String->Int->Void>;
     public var onNumberEditEnd:Null<String->Int->Void>;
     public var onTextCommit:Null<String->String->Void>;
+    public var onBoolCommit:Null<String->Bool->Void>;
+    /** Fired when an asset picker is clicked; the owner opens a typed menu. */
+    public var onAssetPick:Null<String->Void>;
     public var onReset:Null<String->Void>;
     public var onLinkChanged:Null<String->Bool->Void>;
     public var onEditRejected:Null<String->Void>;
@@ -25,6 +28,9 @@ class ComponentInspectorSection extends InspectorSection {
     final ctx:UiContext;
     final vectors:Array<VectorPropertyControls> = [];
     final texts:Array<TextPropertyControls> = [];
+    final assets:Array<AssetPropertyControls> = [];
+    final numbers:Array<NumberPropertyControls> = [];
+    final bools:Array<BoolPropertyControls> = [];
     var hasLinkAction:Bool = false;
     var widthValue:Float = 0;
 
@@ -42,6 +48,12 @@ class ComponentInspectorSection extends InspectorSection {
                     createVector(property, row++, linkedScale);
                 case Text:
                     createText(property, row++);
+                case Asset:
+                    createAsset(property, row++);
+                case Number, Integer:
+                    createNumber(property, row++);
+                case Boolean:
+                    createBoolean(property, row++);
             }
         }
         if (row == 0) {
@@ -96,6 +108,9 @@ class ComponentInspectorSection extends InspectorSection {
         }
         for (row in texts) {
             if (row.input != null && row.input.isFocused()) return true;
+        }
+        for (row in numbers) {
+            if (row.field.isEditing()) return true;
         }
         return false;
     }
@@ -200,6 +215,135 @@ class ComponentInspectorSection extends InspectorSection {
         texts.push(row);
     }
 
+    function createAsset(property:ComponentPropertyData, rowIndex:Int):Void {
+        var row = new AssetPropertyControls(property.id, rowIndex);
+        row.label = new UiText(ctx.labelFont, content);
+        row.label.text = property.label;
+        row.label.textColor = Theme.TEXT_SECONDARY;
+        row.label.lineBreak = false;
+        var display = property.isMixed(0)
+            ? NumericDragField.MULTIPLE_TEXT : property.textValue;
+        row.field = new AssetPickerField(ctx, 100, Theme.CONTROL_HEIGHT,
+            display, content);
+        var propertyId = property.id;
+        row.field.onPick = function() {
+            if (onAssetPick != null) onAssetPick(propertyId);
+        };
+        assets.push(row);
+    }
+
+    /** Update the displayed label after an asset reference changes. */
+    public function updateAsset(propertyId:String, label:String,
+            mixed:Bool):Bool {
+        for (row in assets) {
+            if (row.propertyId != propertyId) continue;
+            row.field.setValue(mixed ? NumericDragField.MULTIPLE_TEXT : label);
+            return true;
+        }
+        return false;
+    }
+
+    function createNumber(property:ComponentPropertyData, rowIndex:Int):Void {
+        var row = new NumberPropertyControls(property.id, rowIndex);
+        row.label = new UiText(ctx.labelFont, content);
+        row.label.text = property.label;
+        row.label.textColor = Theme.TEXT_SECONDARY;
+        row.label.lineBreak = false;
+        var initial = property.numberValues.length > 0 ? property.numberValues[0] : 0;
+        var format = property.integerValue
+            ? function(value:Float) return Std.string(Std.int(Math.round(value)))
+            : function(value:Float) return Std.string(Math.round(value * 100) / 100);
+        row.field = new NumericDragField(ctx, 100, Theme.CONTROL_HEIGHT,
+            property.numberMin, property.numberMax, property.numberStep,
+            initial, format, "", Theme.TEXT, content);
+        row.field.setMultiple(property.isMixed(0));
+        var propertyId = property.id;
+        row.field.onValueChanged = function(value) {
+            if (onNumberCommit != null) onNumberCommit(propertyId, 0, value);
+        };
+        // Gesture brackets drive the history commit (one entry per scrub or
+        // typed edit) in Main; without them a settings edit would bypass
+        // undo/redo entirely.
+        row.field.onEditBegin = function() {
+            if (onNumberEditBegin != null) onNumberEditBegin(propertyId, 0);
+        };
+        row.field.onEditEnd = function() {
+            if (onNumberEditEnd != null) onNumberEditEnd(propertyId, 0);
+        };
+        row.field.onEditRejected = function(message) {
+            if (onEditRejected != null) onEditRejected(message);
+        };
+        if (property.resettable) {
+            row.resetButton = new UiButton(ctx, "", ACTION_WIDTH,
+                Theme.CONTROL_HEIGHT, content);
+            row.resetButton.setIcon(Reset);
+            var capturedPropertyId = property.id;
+            row.resetButton.onClick = function() {
+                if (onReset != null) onReset(capturedPropertyId);
+            };
+        }
+        numbers.push(row);
+    }
+
+    function createBoolean(property:ComponentPropertyData, rowIndex:Int):Void {
+        var row = new BoolPropertyControls(property.id, rowIndex);
+        row.label = new UiText(ctx.labelFont, content);
+        row.label.text = property.label;
+        row.label.textColor = Theme.TEXT_SECONDARY;
+        row.label.lineBreak = false;
+        row.field = new UiButton(ctx, "", 78, Theme.CONTROL_HEIGHT, content);
+        row.value = property.boolValue;
+        row.mixed = property.isMixed(0);
+        applyBoolLabel(row);
+        var captured = row;
+        row.field.onClick = function() {
+            captured.value = !captured.value;
+            captured.mixed = false;
+            applyBoolLabel(captured);
+            if (onBoolCommit != null) onBoolCommit(captured.propertyId, captured.value);
+        };
+        if (property.resettable) {
+            row.resetButton = new UiButton(ctx, "", ACTION_WIDTH,
+                Theme.CONTROL_HEIGHT, content);
+            row.resetButton.setIcon(Reset);
+            var propertyId = property.id;
+            row.resetButton.onClick = function() {
+                if (onReset != null) onReset(propertyId);
+            };
+        }
+        bools.push(row);
+    }
+
+    static function applyBoolLabel(row:BoolPropertyControls):Void {
+        row.field.setText(row.mixed ? NumericDragField.MULTIPLE_TEXT
+            : (row.value ? "On" : "Off"));
+        row.field.setSelected(row.value && !row.mixed);
+    }
+
+    /** Live update for a scalar property in a multi-object selection. */
+    public function updateNumber(propertyId:String, value:Float,
+            mixed:Bool):Bool {
+        for (row in numbers) {
+            if (row.propertyId != propertyId) continue;
+            row.field.setValue(value);
+            row.field.setMultiple(mixed);
+            return true;
+        }
+        return false;
+    }
+
+    public function updateBool(propertyId:String, value:Bool,
+            mixed:Bool):Bool {
+        for (row in bools) {
+            if (row.propertyId != propertyId) continue;
+            row.value = value;
+            row.mixed = mixed;
+            applyBoolLabel(row);
+            return true;
+        }
+        return false;
+    }
+
     function layoutControls():Void {
         var fieldStart = 72.0;
         var axisGap = 4.0;
@@ -247,6 +391,52 @@ class ComponentInspectorSection extends InspectorSection {
                     Math.max(0, widthValue - fieldStart - 8));
             }
         }
+
+        for (row in assets) {
+            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            row.label.x = 8;
+            row.label.y = rowY + Math.round(
+                (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
+            row.field.x = fieldStart;
+            row.field.y = rowY;
+            row.field.setWidth(Math.max(0, widthValue - fieldStart - 8));
+        }
+
+        // Number/boolean rows reserve the reset column whenever any row of
+        // that kind is resettable, so field widths stay aligned.
+        var numberReset = false;
+        for (row in numbers) if (row.resetButton != null) numberReset = true;
+        for (row in numbers) {
+            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            row.label.x = 8;
+            row.label.y = rowY + Math.round(
+                (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
+            row.field.x = fieldStart;
+            row.field.y = rowY;
+            row.field.setWidth(Math.max(0, (numberReset
+                ? resetX - axisGap : widthValue - 8) - fieldStart));
+            if (row.resetButton != null) {
+                row.resetButton.x = resetX;
+                row.resetButton.y = rowY;
+            }
+        }
+
+        var boolReset = false;
+        for (row in bools) if (row.resetButton != null) boolReset = true;
+        for (row in bools) {
+            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            row.label.x = 8;
+            row.label.y = rowY + Math.round(
+                (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
+            row.field.x = fieldStart;
+            row.field.y = rowY;
+            row.field.setWidth(Math.max(0, (boolReset
+                ? resetX - axisGap : widthValue - 8) - fieldStart));
+            if (row.resetButton != null) {
+                row.resetButton.x = resetX;
+                row.resetButton.y = rowY;
+            }
+        }
     }
 
     static function fitText(target:h2d.Text, fullValue:String,
@@ -276,6 +466,46 @@ private class VectorPropertyControls {
     public var resetButton:Null<UiButton>;
     public var linkButton:Null<UiButton>;
     public var linked:Bool = false;
+
+    public function new(propertyId:String, rowIndex:Int) {
+        this.propertyId = propertyId;
+        this.rowIndex = rowIndex;
+    }
+}
+
+private class AssetPropertyControls {
+    public final propertyId:String;
+    public final rowIndex:Int;
+    public var label:Null<h2d.Text>;
+    public var field:Null<AssetPickerField>;
+
+    public function new(propertyId:String, rowIndex:Int) {
+        this.propertyId = propertyId;
+        this.rowIndex = rowIndex;
+    }
+}
+
+private class NumberPropertyControls {
+    public final propertyId:String;
+    public final rowIndex:Int;
+    public var label:Null<h2d.Text>;
+    public var field:Null<NumericDragField>;
+    public var resetButton:Null<UiButton>;
+
+    public function new(propertyId:String, rowIndex:Int) {
+        this.propertyId = propertyId;
+        this.rowIndex = rowIndex;
+    }
+}
+
+private class BoolPropertyControls {
+    public final propertyId:String;
+    public final rowIndex:Int;
+    public var label:Null<h2d.Text>;
+    public var field:Null<UiButton>;
+    public var resetButton:Null<UiButton>;
+    public var value:Bool = false;
+    public var mixed:Bool = false;
 
     public function new(propertyId:String, rowIndex:Int) {
         this.propertyId = propertyId;

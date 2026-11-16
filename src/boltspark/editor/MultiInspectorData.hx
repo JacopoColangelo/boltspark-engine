@@ -92,6 +92,33 @@ class MultiInspectorData {
                 new ComponentPropertyData(base.id, base.label, Text, [],
                     base.textValue, base.editable, base.resettable,
                     base.linkable, base.linked, [mixed]);
+            case Asset:
+                var mixed = false;
+                for (peer in peers) {
+                    if (peer.assetId != base.assetId) mixed = true;
+                }
+                new ComponentPropertyData(base.id, base.label, Asset, [],
+                    base.textValue, base.editable, false, false, false,
+                    [mixed], base.assetType, base.assetId, base.options);
+            case Number, Integer:
+                var mixed = false;
+                for (peer in peers) {
+                    if (!close(valueAt(base.numberValues, 0),
+                            valueAt(peer.numberValues, 0))) mixed = true;
+                }
+                new ComponentPropertyData(base.id, base.label, base.kind,
+                    base.numberValues, "", base.editable, base.resettable,
+                    false, false,
+                    [mixed], null, "", null, false, base.numberMin,
+                    base.numberMax, base.numberStep, base.integerValue);
+            case Boolean:
+                var mixed = false;
+                for (peer in peers) {
+                    if (peer.boolValue != base.boolValue) mixed = true;
+                }
+                new ComponentPropertyData(base.id, base.label, Boolean, [], "",
+                    base.editable, base.resettable, false, false, [mixed],
+                    null, "", null, base.boolValue);
         };
     }
 

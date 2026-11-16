@@ -4,6 +4,7 @@ import boltspark.engine.ComponentRegistry;
 import boltspark.engine.GameObject;
 import boltspark.engine.MeshRenderer;
 import boltspark.engine.PrimitiveGameObjects;
+import boltspark.engine.inspector.ComponentPropertyKind;
 import boltspark.engine.Transform;
 import boltspark.project.ComponentData;
 import boltspark.project.SceneSerializer;
@@ -82,10 +83,16 @@ class ComponentSystemRepro {
         assertTrue(transformInspector.title == "Transform"
                 && transformInspector.properties.length == 3
                 && rendererInspector.title == "MeshRenderer"
-                && rendererInspector.properties.length == 2
+                && rendererInspector.properties.length == 5
                 && rendererInspector.properties[0].textValue == "Primitive Cube"
                 && rendererInspector.properties[1].textValue == "Default Material",
             "component-owned Inspector property definitions changed");
+        // Cube geometry parameters follow the two asset rows.
+        for (index in 2...5) {
+            var geometry = rendererInspector.properties[index];
+            assertTrue(geometry.kind == ComponentPropertyKind.Number,
+                "cube geometry rows must be number properties");
+        }
     }
 
     static function testEditorHistoryAndSerialization():Void {

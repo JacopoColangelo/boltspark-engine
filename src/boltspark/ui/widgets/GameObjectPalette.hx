@@ -1,5 +1,6 @@
 package boltspark.ui.widgets;
 
+import boltspark.engine.PrimitiveMeshes;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons;
@@ -7,21 +8,22 @@ import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
 import boltspark.ui.layout.LayoutRect;
 
+/**
+ * Add-Object palette listing the built-in primitive assets. Every row is both
+ * clickable (create at the origin) and draggable (drop into the viewport).
+ */
 class GameObjectPalette extends h2d.Object {
     static inline var WIDTH:Int = 210;
-    static inline var HEIGHT:Int = 64;
     static inline var ROW_HEIGHT:Int = 28;
+    static inline var TOP:Int = 31;
 
-    public var onCreateCube:Null<Void->Void>;
-    public var onDropCube:Null<Float->Float->Void>;
+    public var onCreatePrimitive:Null<String->Void>;
+    public var onDropPrimitive:Null<String->Float->Float->Void>;
 
     final context:UiContext;
     final background:UiSurface;
     final title:h2d.Text;
-    final cubeSurface:UiSurface;
-    final cubeRow:h2d.Interactive;
-    final cubeLabel:h2d.Text;
-    final cubeIcon:h2d.Graphics;
+    final rows:Array<PaletteRow> = [];
     final closeButton:UiButton;
     final dragPreviewBackground:UiSurface;
     final dragPreview:h2d.Text;
@@ -29,18 +31,22 @@ class GameObjectPalette extends h2d.Object {
     var viewport:LayoutRect;
     var dragStartX:Float = 0;
     var dragStartY:Float = 0;
+    var activeMeshId:String = "";
 
     public function new(context:UiContext, ?parent:h2d.Object) {
         super(parent);
         this.context = context;
         visible = false;
 
+        var meshes = [PrimitiveMeshes.cube(), PrimitiveMeshes.sphere(),
+            PrimitiveMeshes.cylinder(), PrimitiveMeshes.capsule(),
+            PrimitiveMeshes.plane()];
         background = new UiSurface(context, this);
-        background.setSize(WIDTH, HEIGHT);
+        background.setSize(WIDTH, TOP + meshes.length * ROW_HEIGHT + 6);
         background.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
 
         title = new UiText(context.semiboldFont, this);
-        title.text = "Add Object";
+        title.text = "Add Primitive";
         title.textColor = Theme.TEXT;
         title.lineBreak = false;
         title.x = 8;
@@ -52,30 +58,39 @@ class GameObjectPalette extends h2d.Object {
         closeButton.y = 3;
         closeButton.onClick = close;
 
-        cubeSurface = new UiSurface(context, this);
-        cubeSurface.x = 4;
-        cubeSurface.y = 31;
-        cubeSurface.setSize(WIDTH - 8, ROW_HEIGHT);
-        cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
-        cubeRow = new h2d.Interactive(WIDTH - 8, ROW_HEIGHT, this);
-        cubeRow.x = 4;
-        cubeRow.y = 31;
-        cubeRow.backgroundColor = 0;
-        cubeRow.cursor = hxd.Cursor.Move;
-        cubeRow.onOver = function(_) cubeSurface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
-        cubeRow.onOut = function(_) cubeSurface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
-        cubeRow.onPush = beginCubeDrag;
+        for (index in 0...meshes.length) {
+            var mesh = meshes[index];
+            var row = new PaletteRow(mesh.id);
+            row.y = TOP + index * ROW_HEIGHT;
+            row.surface = new UiSurface(context, this);
+            row.surface.x = 4;
+            row.surface.y = row.y;
+            row.surface.setSize(WIDTH - 8, ROW_HEIGHT);
+            row.surface.setStyle(Theme.SURFACE_2, Theme.BORDER, 0);
+            row.hit = new h2d.Interactive(WIDTH - 8, ROW_HEIGHT, this);
+            row.hit.x = 4;
+            row.hit.y = row.y;
+            row.hit.backgroundColor = 0;
+            row.hit.cursor = hxd.Cursor.Move;
+            var capturedRow = row;
+            row.hit.onOver = function(_) row.surface.setStyle(
+                Theme.SURFACE_3, Theme.ACCENT, 0);
+            row.hit.onOut = function(_) row.surface.setStyle(
+                Theme.SURFACE_2, Theme.BORDER, 0);
+            row.hit.onPush = function(event) beginPrimitiveDrag(capturedRow, event);
 
-        cubeIcon = new h2d.Graphics(this);
-        UiIcons.draw(cubeIcon, Cube, 0, 0, 14, Theme.CUBE_ORANGE);
-        cubeIcon.x = 11;
-        cubeIcon.y = 38;
-        cubeLabel = new UiText(context.semiboldFont, this);
-        cubeLabel.text = "Cube";
-        cubeLabel.textColor = Theme.TEXT;
-        cubeLabel.lineBreak = false;
-        cubeLabel.x = 33;
-        cubeLabel.y = 35;
+            row.icon = new h2d.Graphics(this);
+            UiIcons.draw(row.icon, Cube, 0, 0, 14, Theme.CUBE_ORANGE);
+            row.icon.x = 11;
+            row.icon.y = row.y + 7;
+            row.label = new UiText(context.semiboldFont, this);
+            row.label.text = mesh.name;
+            row.label.textColor = Theme.TEXT;
+            row.label.lineBreak = false;
+            row.label.x = 33;
+            row.label.y = row.y + 4;
+            rows.push(row);
+        }
 
         dragPreviewBackground = new UiSurface(context, parent);
         dragPreviewBackground.setSize(78, 26);
@@ -85,7 +100,7 @@ class GameObjectPalette extends h2d.Object {
         UiIcons.draw(dragPreviewIcon, Cube, 0, 0, 15, Theme.CUBE_ORANGE);
         dragPreviewIcon.visible = false;
         dragPreview = new UiText(context.semiboldFont, parent);
-        dragPreview.text = "Cube";
+        dragPreview.text = "Primitive";
         dragPreview.textColor = Theme.TEXT;
         dragPreview.visible = false;
     }
@@ -97,16 +112,16 @@ class GameObjectPalette extends h2d.Object {
     public function openAt(x:Float, y:Float, viewport:LayoutRect):Void {
         this.viewport = viewport;
         this.x = Math.max(6, Math.min(Math.max(6, context.width - WIDTH - 6), x));
+        var height = TOP + rows.length * ROW_HEIGHT + 6;
         this.y = Math.max(Theme.TOP_BAR_HEIGHT + 6,
-            Math.min(Math.max(Theme.TOP_BAR_HEIGHT + 6, context.height - HEIGHT - 6), y));
-        cubeRow.cursor = hxd.Cursor.Move;
+            Math.min(Math.max(Theme.TOP_BAR_HEIGHT + 6,
+                context.height - height - 6), y));
+        for (row in rows) row.hit.cursor = hxd.Cursor.Move;
         visible = true;
     }
 
     public function close():Void {
-        // Clear the special cursor before hiding. Heaps can still process the
-        // release against its previous hover list after this callback.
-        cubeRow.cursor = hxd.Cursor.Default;
+        for (row in rows) row.hit.cursor = hxd.Cursor.Default;
         visible = false;
         dragPreviewBackground.visible = false;
         dragPreview.visible = false;
@@ -114,12 +129,13 @@ class GameObjectPalette extends h2d.Object {
         context.restoreArrowCursor();
     }
 
-    function beginCubeDrag(event:hxd.Event):Void {
+    function beginPrimitiveDrag(row:PaletteRow, event:hxd.Event):Void {
         if (event.button != 0) return;
+        activeMeshId = row.meshId;
         dragStartX = context.window.mouseX;
         dragStartY = context.window.mouseY;
         dragPreview.visible = false;
-        cubeRow.startCapture(function(captured) {
+        row.hit.startCapture(function(captured) {
             switch (captured.kind) {
                 case EMove:
                     var mouseX = context.window.mouseX;
@@ -129,6 +145,7 @@ class GameObjectPalette extends h2d.Object {
                         dragPreview.visible = true;
                         dragPreviewBackground.visible = true;
                         dragPreviewIcon.visible = true;
+                        dragPreview.text = PrimitiveMeshes.find(row.meshId).name;
                     }
                     dragPreviewBackground.x = mouseX + 8;
                     dragPreviewBackground.y = mouseY + 6;
@@ -141,27 +158,40 @@ class GameObjectPalette extends h2d.Object {
                     var wasDrag = dragPreview.visible;
                     var mouseX = context.window.mouseX;
                     var mouseY = context.window.mouseY;
-                    cubeRow.stopCapture();
+                    row.hit.stopCapture();
                     if (wasDrag && viewport != null
                         && mouseX >= viewport.x && mouseX < viewport.x + viewport.width
                         && mouseY >= viewport.y && mouseY < viewport.y + viewport.height) {
-                        if (onDropCube != null) onDropCube(mouseX - viewport.x, mouseY - viewport.y);
-                    } else if (!wasDrag && onCreateCube != null) {
-                        onCreateCube();
+                        if (onDropPrimitive != null) {
+                            onDropPrimitive(activeMeshId,
+                                mouseX - viewport.x, mouseY - viewport.y);
+                        }
+                    } else if (!wasDrag && onCreatePrimitive != null) {
+                        onCreatePrimitive(activeMeshId);
                     }
                     close();
                     captured.propagate = false;
                 case EFocusLost:
-                    cubeRow.stopCapture();
+                    row.hit.stopCapture();
                     close();
                     captured.propagate = false;
                 case _:
                     captured.propagate = false;
             }
         });
-        // Consume the press without cancelling it. Cancellation makes Heaps
-        // continue hit-testing controls underneath the popup; when the compact
-        // menu overlaps hierarchy search, that input can steal this capture.
         event.propagate = false;
+    }
+}
+
+private class PaletteRow {
+    public final meshId:String;
+    public var y:Float = 0;
+    public var surface:UiSurface;
+    public var hit:h2d.Interactive;
+    public var icon:h2d.Graphics;
+    public var label:h2d.Text;
+
+    public function new(meshId:String) {
+        this.meshId = meshId;
     }
 }

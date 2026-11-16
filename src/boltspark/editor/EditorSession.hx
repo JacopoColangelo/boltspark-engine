@@ -10,8 +10,11 @@ import boltspark.editor.commands.RenameObjectCommand;
 import boltspark.editor.commands.ReparentObjectsCommand;
 import boltspark.editor.commands.AddComponentCommand;
 import boltspark.editor.commands.RemoveComponentCommand;
+import boltspark.editor.commands.PrimitiveSettingsCommand;
 import boltspark.editor.commands.TransformObjectCommand;
 import boltspark.engine.Component;
+import boltspark.engine.MeshRenderer;
+import boltspark.engine.PrimitiveSettings;
 import boltspark.engine.Transform;
 import boltspark.project.StableId;
 
@@ -400,6 +403,65 @@ class EditorSession {
             }
             commands.push(new TransformObjectCommand(this, object.persistentId,
                 before, after, description));
+        }
+        if (commands.length == 0) return false;
+        history.execute(commands.length == 1
+            ? commands[0]
+            : new CompositeCommand(description, commands));
+        notifyChanged();
+        return true;
+    }
+
+    /**
+     * Undoable setter for one object's primitive settings. Used by
+     * PrimitiveSettingsCommand for both execute and undo.
+     */
+    @:noCompletion public function commandPrimitiveSettings(
+            persistentId:String, settings:PrimitiveSettings):Void {
+        var renderer = requirePersistentObject(persistentId)
+            .getComponent(MeshRenderer);
+        if (renderer == null) {
+            throw 'MeshRenderer for ${persistentId} is missing';
+        }
+        renderer.primitiveSettings = settings;
+    }
+
+    /**
+     * Commit a validated primitive-settings edit as one history entry.
+     * No-op when the values did not change.
+     */
+    public function commitPrimitiveSettings(id:Int, before:PrimitiveSettings,
+            after:PrimitiveSettings, description:String):Bool {
+        var object = findObject(id);
+        if (object == null || before == null || after == null
+                || object.getComponent(MeshRenderer) == null
+                || before.sameAs(after)) return false;
+        history.execute(new PrimitiveSettingsCommand(this, object.persistentId,
+            before, after, description));
+        notifyChanged();
+        return true;
+    }
+
+    /**
+     * Commit one shared settings gesture across several objects as a single
+     * history entry, mirroring commitAppliedTransforms: arrays are parallel
+     * and no-op or invalid entries are skipped.
+     */
+    public function commitAppliedPrimitiveSettings(ids:Array<Int>,
+            befores:Array<PrimitiveSettings>, afters:Array<PrimitiveSettings>,
+            description:String):Bool {
+        if (ids == null || befores == null || afters == null) return false;
+        var commands:Array<EditorCommand> = [];
+        for (index in 0...ids.length) {
+            if (index >= befores.length || index >= afters.length) break;
+            var object = findObject(ids[index]);
+            var before = befores[index];
+            var after = afters[index];
+            if (object == null || before == null || after == null
+                    || object.getComponent(MeshRenderer) == null
+                    || before.sameAs(after)) continue;
+            commands.push(new PrimitiveSettingsCommand(this,
+                object.persistentId, before, after, description));
         }
         if (commands.length == 0) return false;
         history.execute(commands.length == 1

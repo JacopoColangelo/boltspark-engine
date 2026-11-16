@@ -4,7 +4,9 @@ import boltspark.editor.EditorCameraController;
 import boltspark.editor.EditorViewport;
 import boltspark.editor.GridSnapping;
 import boltspark.engine.ComponentTypeInfo;
+import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.inspector.ComponentInspectorData;
+import boltspark.engine.inspector.ComponentPropertyData;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
@@ -138,13 +140,17 @@ class EditorShell {
     final palette:GameObjectPalette;
     final menuDropdown:MenuDropdown;
 
-    public var onCreateObject:Null<Void->Void>;
-    public var onCreateObjectAt:Null<Float->Float->Void>;
+    /** Create a primitive by mesh asset id (palette click). */
+    public var onCreatePrimitive:Null<String->Void>;
+    /** Create a primitive by mesh asset id at viewport coordinates (palette drop). */
+    public var onDropPrimitive:Null<String->Float->Float->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
     public var onHierarchyObjectNameChanged:Null<Int->String->Void>;
     public var onCreateChildObject:Null<Int->Bool->Void>;
+    /** Parent id (-1 for root) plus the primitive mesh asset id. */
+    public var onCreateChildPrimitive:Null<Int->String->Void>;
     public var onCreateEmptyParent:Null<Array<Int>->Void>;
     public var onDuplicateObjects:Null<Array<Int>->Void>;
     public var onCopyObjects:Null<Array<Int>->Void>;
@@ -158,6 +164,9 @@ class EditorShell {
     /** Generic component-property command callbacks. */
     public var onInspectorNumberChanged:Null<Int->String->Int->Float->Void>;
     public var onInspectorTextChanged:Null<Int->String->String->Void>;
+    /** `(componentIndex, propertyId, assetId)` from a type-aware asset picker. */
+    public var onInspectorAssetChanged:Null<Int->String->String->Void>;
+    public var onInspectorBoolChanged:Null<Int->String->Bool->Void>;
     public var onInspectorEditBegin:Null<Int->String->Int->Void>;
     public var onInspectorEditEnd:Null<Int->String->Int->Void>;
     public var onInspectorReset:Null<Int->String->Void>;
@@ -840,11 +849,11 @@ class EditorShell {
         // panel interactives. Application windows are separate native HWNDs.
         menuDropdown = new MenuDropdown(ctx, root);
         palette = new GameObjectPalette(ctx, root);
-        palette.onCreateCube = function() {
-            if (onCreateObject != null) onCreateObject();
+        palette.onCreatePrimitive = function(meshId) {
+            if (onCreatePrimitive != null) onCreatePrimitive(meshId);
         };
-        palette.onDropCube = function(x, y) {
-            if (onCreateObjectAt != null) onCreateObjectAt(x, y);
+        palette.onDropPrimitive = function(meshId, x, y) {
+            if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
         };
 
         if (layoutError != null) log("layout: " + layoutError);
@@ -1613,6 +1622,14 @@ class EditorShell {
                     onInspectorTextChanged(componentIndex, propertyId, value);
                 }
             };
+            section.onAssetPick = function(propertyId) {
+                openAssetPicker(component, propertyId, componentIndex);
+            };
+            section.onBoolCommit = function(propertyId, value) {
+                if (onInspectorBoolChanged != null) {
+                    onInspectorBoolChanged(componentIndex, propertyId, value);
+                }
+            };
             section.onReset = function(propertyId) {
                 if (onInspectorReset != null) {
                     onInspectorReset(componentIndex, propertyId);
@@ -1634,6 +1651,40 @@ class EditorShell {
             componentSections.push(section);
             inspectorSections.push(section);
         }
+    }
+
+    /**
+     * Open the shared dropdown with the options published by the asset
+     * property. The property itself carries the type-aware choice list, so
+     * this stays generic for meshes, materials, and future asset families.
+     */
+    function openAssetPicker(component:ComponentInspectorData,
+            propertyId:String, componentIndex:Int):Void {
+        var property:Null<ComponentPropertyData> = null;
+        for (candidate in component.properties) {
+            if (candidate.id == propertyId) {
+                property = candidate;
+                break;
+            }
+        }
+        if (property == null || !property.editable || property.options.length == 0) return;
+        var items:Array<MenuItem> = [];
+        var mixed = property.isMixed(0);
+        for (option in property.options) {
+            var captured = option;
+            items.push({
+                label: captured.label,
+                selected: captured.id == property.assetId && !mixed,
+                mixed: mixed && captured.id == property.assetId,
+                onClick: function() {
+                    if (onInspectorAssetChanged != null) {
+                        onInspectorAssetChanged(componentIndex, propertyId, captured.id);
+                    }
+                }
+            });
+        }
+        closePaletteIfOpen();
+        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
     static inline function componentSectionKey(index:Int, typeId:String):String {
@@ -1864,26 +1915,40 @@ class EditorShell {
         return true;
     }
 
+    /** Primitive choices shared by the child and root creation menus. */
+    function primitiveMenuItems(parentId:Int):Array<MenuItem> {
+        var items:Array<MenuItem> = [];
+        for (mesh in PrimitiveMeshes.all()) {
+            var meshId = mesh.id;
+            items.push({
+                label: mesh.name,
+                onClick: function() {
+                    if (parentId >= 0) hierarchyExpanded.set(parentId, true);
+                    if (onCreateChildPrimitive != null) {
+                        onCreateChildPrimitive(parentId, meshId);
+                    }
+                }
+            });
+        }
+        return items;
+    }
+
     function openHierarchyContextMenu(id:Int):Void {
         var entry = findVisibleHierarchyEntry(id);
         if (entry == null) return;
         var actionIds = selectedObjectIds.indexOf(id) >= 0
             ? selectedObjectIds.copy() : [id];
+        var primitiveItems = primitiveMenuItems(id);
+        primitiveItems.push({
+            label: "Empty Object",
+            onClick: function() {
+                hierarchyExpanded.set(id, true);
+                if (onCreateChildObject != null) onCreateChildObject(id, true);
+            }
+        });
         var items:Array<MenuItem> = [{
             label: "Create Child",
-            submenu: [{
-                label: "Cube",
-                onClick: function() {
-                    hierarchyExpanded.set(id, true);
-                    if (onCreateChildObject != null) onCreateChildObject(id, false);
-                }
-            }, {
-                label: "Empty Object",
-                onClick: function() {
-                    hierarchyExpanded.set(id, true);
-                    if (onCreateChildObject != null) onCreateChildObject(id, true);
-                }
-            }]
+            submenu: primitiveItems
         }, {
             label: "Create Empty Parent",
             onClick: function() {
@@ -1932,19 +1997,16 @@ class EditorShell {
     }
 
     function openHierarchyRootContextMenu():Void {
+        var primitiveItems = primitiveMenuItems(-1);
+        primitiveItems.push({
+            label: "Empty Object",
+            onClick: function() {
+                if (onCreateChildObject != null) onCreateChildObject(-1, true);
+            }
+        });
         var items:Array<MenuItem> = [{
             label: "Create",
-            submenu: [{
-                label: "Cube",
-                onClick: function() {
-                    if (onCreateChildObject != null) onCreateChildObject(-1, false);
-                }
-            }, {
-                label: "Empty Object",
-                onClick: function() {
-                    if (onCreateChildObject != null) onCreateChildObject(-1, true);
-                }
-            }]
+            submenu: primitiveItems
         }, {
             label: "Paste at Root",
             onClick: function() {

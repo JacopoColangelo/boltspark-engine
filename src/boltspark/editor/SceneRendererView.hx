@@ -14,13 +14,14 @@ class SceneRendererView {
         }
         this.component = component;
         mesh = new h3d.scene.Mesh(
-            HeapsMeshFactory.resolve(component.mesh), parent);
+            HeapsMeshFactory.resolve(component.mesh, component.primitiveSettings), parent);
         synchronize();
     }
 
     public function synchronize():Void {
         if (component.mesh == null) return;
-        mesh.primitive = HeapsMeshFactory.resolve(component.mesh);
+        mesh.primitive = HeapsMeshFactory.resolve(
+            component.mesh, component.primitiveSettings);
         mesh.name = component.gameObject == null
             ? component.displayName
             : component.gameObject.name + " · " + component.displayName;

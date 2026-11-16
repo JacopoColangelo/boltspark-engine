@@ -22,6 +22,8 @@ import boltspark.engine.MeshRenderer;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.engine.inspector.ComponentPropertyData;
 import boltspark.engine.PrimitiveGameObjects;
+import boltspark.engine.PrimitiveMeshes;
+import boltspark.engine.PrimitiveSettings;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
 import boltspark.ui.AppIcon;
@@ -91,6 +93,15 @@ class Main extends hxd.App {
     // edited by a single scrub/type gesture (mirrors the single-object path).
     final inspectorEditIds:Array<Int> = [];
     final inspectorEditBefores:Array<EditorTransform> = [];
+    // Primitive-settings gesture snapshots. Numeric fields bracket every edit
+    // (scrub, typed commit, arrow step) with onEditBegin/onEditEnd; history is
+    // committed at gesture end so a drag never rebuilds the Inspector
+    // mid-capture, exactly like the transform path above.
+    var settingsEditPropertyId:String = "";
+    var settingsEditObjectId:Int = -1;
+    var settingsEditBefore:Null<PrimitiveSettings>;
+    final settingsEditIds:Array<Int> = [];
+    final settingsEditBefores:Array<PrimitiveSettings> = [];
     // Per-object anchors captured when a shared gizmo drag begins.
     final gizmoDragAnchors:Array<GizmoDragAnchor> = [];
     // Gizmo drag pointer tracking. During a drag the window enters
@@ -195,12 +206,14 @@ class Main extends hxd.App {
         editorViewport = new EditorViewport(nativeWindow, s3d, s2d,
             function() return boltUI.getViewportRect(), gridRenderer, axisGizmo);
         boltUI.onViewportClick = onViewportClick;
-        boltUI.onCreateObject = createCube;
-        boltUI.onCreateObjectAt = createCubeAtViewport;
+        boltUI.onCreatePrimitive = createPrimitive;
+        boltUI.onDropPrimitive = createPrimitiveAtViewport;
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
         boltUI.onInspectorNumberChanged = applyInspectorNumberChange;
         boltUI.onInspectorTextChanged = applyInspectorTextChange;
+        boltUI.onInspectorAssetChanged = applyInspectorAssetChange;
+        boltUI.onInspectorBoolChanged = applyInspectorBoolChange;
         boltUI.onInspectorEditBegin = beginComponentInspectorEdit;
         boltUI.onInspectorEditEnd = endComponentInspectorEdit;
         boltUI.onInspectorReset = resetInspectorProperty;
@@ -225,6 +238,7 @@ class Main extends hxd.App {
             editorSession.renameObject(id, trimmed);
         };
         boltUI.onCreateChildObject = createHierarchyObject;
+        boltUI.onCreateChildPrimitive = createHierarchyPrimitive;
         boltUI.onCreateEmptyParent = function(ids) {
             editorSession.createEmptyParent(ids, "GameObject");
         };
@@ -413,23 +427,22 @@ class Main extends hxd.App {
             return;
         }
         if (editorSession.selectedObjectIds.length > 1) {
-            var edited = false;
             for (id in editorSession.selectedObjectIds) {
                 var component = multiComponentFor(id, componentIndex);
-                if (component != null
-                        && component.setInspectorNumber(propertyId, axis, value)) {
-                    editorSession.componentEdited(id);
-                    edited = true;
+                if (component != null) {
+                    component.setInspectorNumber(propertyId, axis, value);
                 }
             }
-            if (edited) refreshSelectionInspector();
             return;
         }
         var component = selectedInspectorComponent(componentIndex);
-        if (component != null
-                && component.setInspectorNumber(propertyId, axis, value)) {
-            editorSession.componentEdited(editorSession.selectedObjectId);
+        if (component != null) {
+            component.setInspectorNumber(propertyId, axis, value);
         }
+        // No synchronous Inspector refresh here: a rebuild would destroy the
+        // drag field mid-gesture (Null access on release). The per-frame render
+        // sync in update() applies the new geometry, and the field already
+        // displays the committed value.
     }
 
     function applyInspectorTextChange(componentIndex:Int, propertyId:String,
@@ -455,9 +468,79 @@ class Main extends hxd.App {
         }
     }
 
+    /** Assign a shared mesh/material asset from a type-aware Inspector picker. */
+    function applyInspectorAssetChange(componentIndex:Int, propertyId:String,
+            assetId:String):Void {
+        if (editorSession.selectedObjectIds.length > 1) {
+            var edited = false;
+            for (id in editorSession.selectedObjectIds) {
+                var component = multiComponentFor(id, componentIndex);
+                if (component != null
+                        && component.setInspectorAsset(propertyId, assetId)) {
+                    editorSession.componentEdited(id);
+                    edited = true;
+                }
+            }
+            if (edited) refreshSelectionInspector();
+            return;
+        }
+        var component = selectedInspectorComponent(componentIndex);
+        if (component != null && component.setInspectorAsset(propertyId, assetId)) {
+            editorSession.componentEdited(editorSession.selectedObjectId);
+        } else {
+            boltUI.log('inspector: could not assign ${propertyId} asset ${assetId}');
+        }
+    }
+
+    /** Apply a boolean Inspector toggle to the selected component(s). */
+    function applyInspectorBoolChange(componentIndex:Int, propertyId:String,
+            value:Bool):Void {
+        // Boolean toggles are discrete clicks: history commits immediately and
+        // the resulting session notify may safely rebuild the Inspector (no
+        // drag capture is active, same as the asset-picker path).
+        var object = editorSession.findObject(editorSession.selectedObjectId);
+        var renderer = object == null ? null : object.getComponent(MeshRenderer);
+        if (renderer != null && renderer.isPrimitiveParameter(propertyId)) {
+            if (editorSession.selectedObjectIds.length > 1) {
+                var ids:Array<Int> = [];
+                var befores:Array<PrimitiveSettings> = [];
+                var afters:Array<PrimitiveSettings> = [];
+                for (id in editorSession.selectedObjectIds) {
+                    var candidate = editorSession.findObject(id);
+                    var selected = candidate == null
+                        ? null : candidate.getComponent(MeshRenderer);
+                    if (selected == null) continue;
+                    var before = selected.primitiveSettings.clone();
+                    if (!selected.setInspectorBool(propertyId, value)) continue;
+                    ids.push(id);
+                    befores.push(before);
+                    afters.push(selected.primitiveSettings.clone());
+                }
+                editorSession.commitAppliedPrimitiveSettings(ids, befores,
+                    afters, 'Edit ${primitiveParameterLabel(propertyId)} '
+                        + 'on ${ids.length} objects');
+                return;
+            }
+            var before = renderer.primitiveSettings.clone();
+            if (renderer.setInspectorBool(propertyId, value)) {
+                editorSession.commitPrimitiveSettings(object.id, before,
+                    renderer.primitiveSettings,
+                    'Edit ${object.name} ${renderer.parameterLabel(propertyId)}');
+            }
+            return;
+        }
+        var component = selectedInspectorComponent(componentIndex);
+        if (component != null) {
+            component.setInspectorBool(propertyId, value);
+        }
+    }
+
     function beginComponentInspectorEdit(componentIndex:Int,
             propertyId:String, axis:Int):Void {
-        if (!isSelectedTransform(componentIndex)) return;
+        if (!isSelectedTransform(componentIndex)) {
+            beginPrimitiveSettingsEdit(componentIndex, propertyId);
+            return;
+        }
         var row = transformPropertyRow(propertyId);
         if (row >= 0) beginInspectorTransformEdit(row, axis);
     }
@@ -465,11 +548,99 @@ class Main extends hxd.App {
     function endComponentInspectorEdit(componentIndex:Int,
             propertyId:String, axis:Int):Void {
         if (!isSelectedTransform(componentIndex)) {
+            endPrimitiveSettingsEdit(propertyId);
             clearInspectorTransformEdit();
             return;
         }
         var row = transformPropertyRow(propertyId);
         if (row >= 0) endInspectorTransformEdit(row, axis);
+    }
+
+    // ------------------------------------------------------------------
+    // Primitive-settings edit gestures. begin captures the MeshRenderer
+    // settings before a scrub/type/arrow gesture; end commits one history
+    // entry if the settings changed. No Inspector rebuild happens in between
+    // (the release path stays safe), and the per-frame render sync applies
+    // the geometry while the gesture is active.
+    // ------------------------------------------------------------------
+
+    function beginPrimitiveSettingsEdit(componentIndex:Int,
+            propertyId:String):Void {
+        var component = selectedInspectorComponent(componentIndex);
+        if (component == null || !Std.isOfType(component, MeshRenderer)) return;
+        var renderer = cast(component, MeshRenderer);
+        if (!renderer.isPrimitiveParameter(propertyId)) return;
+        settingsEditPropertyId = propertyId;
+        if (editorSession.selectedObjectIds.length > 1) {
+            for (id in editorSession.selectedObjectIds) {
+                var object = editorSession.findObject(id);
+                var selected = object == null
+                    ? null : object.getComponent(MeshRenderer);
+                if (selected == null) continue;
+                settingsEditIds.push(id);
+                settingsEditBefores.push(selected.primitiveSettings.clone());
+            }
+            return;
+        }
+        settingsEditObjectId = editorSession.selectedObjectId;
+        settingsEditBefore = renderer.primitiveSettings.clone();
+    }
+
+    function endPrimitiveSettingsEdit(propertyId:String):Void {
+        if (settingsEditPropertyId == "" || propertyId != settingsEditPropertyId) {
+            clearPrimitiveSettingsEdit();
+            return;
+        }
+        var editedPropertyId = settingsEditPropertyId;
+        if (settingsEditIds.length > 0) {
+            var ids:Array<Int> = [];
+            var befores:Array<PrimitiveSettings> = [];
+            var afters:Array<PrimitiveSettings> = [];
+            for (index in 0...settingsEditIds.length) {
+                var object = editorSession.findObject(settingsEditIds[index]);
+                var renderer = object == null
+                    ? null : object.getComponent(MeshRenderer);
+                if (renderer == null) continue;
+                ids.push(settingsEditIds[index]);
+                befores.push(settingsEditBefores[index]);
+                afters.push(renderer.primitiveSettings.clone());
+            }
+            clearPrimitiveSettingsEdit();
+            if (ids.length == 0) return;
+            var parameter = primitiveParameterLabel(editedPropertyId);
+            var label = ids.length == 1
+                ? 'Edit ${editorSession.findObject(ids[0]).name} ${parameter}'
+                : 'Edit ${parameter} on ${ids.length} objects';
+            editorSession.commitAppliedPrimitiveSettings(ids, befores, afters,
+                label);
+            return;
+        }
+        var objectId = settingsEditObjectId;
+        var before = settingsEditBefore;
+        clearPrimitiveSettingsEdit();
+        if (objectId < 0 || before == null) return;
+        var object = editorSession.findObject(objectId);
+        var renderer = object == null ? null : object.getComponent(MeshRenderer);
+        if (renderer == null) return;
+        editorSession.commitPrimitiveSettings(objectId, before,
+            renderer.primitiveSettings,
+            'Edit ${object.name} ${renderer.parameterLabel(editedPropertyId)}');
+    }
+
+    function clearPrimitiveSettingsEdit():Void {
+        settingsEditPropertyId = "";
+        settingsEditObjectId = -1;
+        settingsEditBefore = null;
+        settingsEditIds.resize(0);
+        settingsEditBefores.resize(0);
+    }
+
+    /** Display label of a primitive parameter, resolved from the selection. */
+    function primitiveParameterLabel(propertyId:String):String {
+        var selected = editorSession.findObject(editorSession.selectedObjectId);
+        var renderer = selected == null
+            ? null : selected.getComponent(MeshRenderer);
+        return renderer == null ? propertyId : renderer.parameterLabel(propertyId);
     }
 
     function resetInspectorProperty(componentIndex:Int, propertyId:String):Void {
@@ -481,6 +652,14 @@ class Main extends hxd.App {
             } else {
                 resetTransformRow(row);
             }
+            return;
+        }
+        var selectedComponent = selectedInspectorComponent(componentIndex);
+        if (selectedComponent != null
+                && Std.isOfType(selectedComponent, MeshRenderer)
+                && cast(selectedComponent, MeshRenderer)
+                    .isPrimitiveParameter(propertyId)) {
+            resetPrimitiveSettingsProperty(propertyId);
             return;
         }
         if (editorSession.selectedObjectIds.length > 1) {
@@ -499,6 +678,38 @@ class Main extends hxd.App {
         if (component != null && component.resetInspectorProperty(propertyId)) {
             editorSession.componentEdited(editorSession.selectedObjectId);
         }
+    }
+
+    /** Reset one primitive parameter with an undoable history entry. */
+    function resetPrimitiveSettingsProperty(propertyId:String):Void {
+        var parameter = primitiveParameterLabel(propertyId);
+        if (editorSession.selectedObjectIds.length > 1) {
+            var ids:Array<Int> = [];
+            var befores:Array<PrimitiveSettings> = [];
+            var afters:Array<PrimitiveSettings> = [];
+            for (id in editorSession.selectedObjectIds) {
+                var object = editorSession.findObject(id);
+                var renderer = object == null
+                    ? null : object.getComponent(MeshRenderer);
+                if (renderer == null) continue;
+                var before = renderer.primitiveSettings.clone();
+                if (!renderer.resetInspectorProperty(propertyId)) continue;
+                ids.push(id);
+                befores.push(before);
+                afters.push(renderer.primitiveSettings.clone());
+            }
+            editorSession.commitAppliedPrimitiveSettings(ids, befores, afters,
+                'Reset ${parameter} on ${ids.length} objects');
+            return;
+        }
+        var object = editorSession.findObject(editorSession.selectedObjectId);
+        var renderer = object == null ? null : object.getComponent(MeshRenderer);
+        if (renderer == null) return;
+        var before = renderer.primitiveSettings.clone();
+        if (!renderer.resetInspectorProperty(propertyId)) return;
+        editorSession.commitPrimitiveSettings(object.id, before,
+            renderer.primitiveSettings,
+            'Reset ${object.name} ${parameter}');
     }
 
     function setInspectorPropertyLinked(componentIndex:Int, propertyId:String,
@@ -1865,11 +2076,20 @@ class Main extends hxd.App {
             && point.z >= bounds.zMin && point.z <= bounds.zMax;
     }
 
-    function createCube():Void {
-        createCubeAtPosition(editorSession.nextRuntimeId * 1.5, 0);
+    /** Short object-name prefix ("Cube", "Sphere", ...) for a mesh asset id. */
+    function primitiveName(meshId:String):String {
+        var mesh = PrimitiveMeshes.find(meshId);
+        var label = mesh == null ? "Primitive" : mesh.name;
+        return StringTools.startsWith(label, "Primitive ")
+            ? label.substr("Primitive ".length) : label;
     }
 
-    function createCubeAtViewport(viewX:Float, viewY:Float):Void {
+    function createPrimitive(meshId:String):Void {
+        createPrimitiveAtPosition(meshId, editorSession.nextRuntimeId * 1.5, 0);
+    }
+
+    function createPrimitiveAtViewport(meshId:String, viewX:Float,
+            viewY:Float):Void {
         var ray = viewportRay(viewX, viewY);
         var x = editorSession.nextRuntimeId * 1.5;
         var z = 0.0;
@@ -1880,28 +2100,34 @@ class Main extends hxd.App {
                 z = ray.pz + ray.lz * distance;
             }
         }
-        createCubeAtPosition(x, z);
+        createPrimitiveAtPosition(meshId, x, z);
     }
 
-    function createCubeAtPosition(x:Float, z:Float):Void {
+    function createPrimitiveAtPosition(meshId:String, x:Float, z:Float):Void {
         var runtimeId = editorSession.nextRuntimeId;
-        var name = "Cube" + runtimeId;
-        // The current palette creates a unit cube with identity rotation/scale;
-        // constrain its half-unit geometry before it enters session history.
+        var name = primitiveName(meshId) + runtimeId;
+        // Palette objects get identity rotation/scale; constrain their pivot
+        // before they enter session history.
         var pivotLimit = WorldBounds.HALF_EXTENT - 0.5;
         var transform = new EditorTransform(
             Math.max(-pivotLimit, Math.min(pivotLimit, x)), 0,
             Math.max(-pivotLimit, Math.min(pivotLimit, z)));
         editorSession.createObject(name, transform, -1,
-            PrimitiveGameObjects.cubeComponents());
+            PrimitiveGameObjects.primitiveComponents(meshId));
         logActivity("scene: created " + name);
     }
 
     function createHierarchyObject(parentId:Int, empty:Bool):Void {
-        var runtimeId = editorSession.nextRuntimeId;
-        var name = empty ? "GameObject" : "Cube" + runtimeId;
+        // Non-empty children go through createHierarchyPrimitive; this only
+        // serves the "Empty Object" menu entry now.
+        editorSession.createObject("GameObject", new EditorTransform(),
+            parentId, []);
+    }
+
+    function createHierarchyPrimitive(parentId:Int, meshId:String):Void {
+        var name = primitiveName(meshId) + editorSession.nextRuntimeId;
         editorSession.createObject(name, new EditorTransform(), parentId,
-            empty ? [] : PrimitiveGameObjects.cubeComponents());
+            PrimitiveGameObjects.primitiveComponents(meshId));
     }
 
     function deleteSceneObjects(ids:Array<Int>):Void {
@@ -2083,7 +2309,8 @@ class Main extends hxd.App {
     }
 
     function undoEditorCommand():Void {
-        if (gizmoDragging || inspectorEditObjectId >= 0) return;
+        if (gizmoDragging || inspectorEditObjectId >= 0
+                || settingsEditPropertyId != "") return;
         var label = editorSession.history.undoLabel;
         if (!editorSession.undo()) return;
         logActivity('command: undo ${label}');
@@ -2091,7 +2318,8 @@ class Main extends hxd.App {
     }
 
     function redoEditorCommand():Void {
-        if (gizmoDragging || inspectorEditObjectId >= 0) return;
+        if (gizmoDragging || inspectorEditObjectId >= 0
+                || settingsEditPropertyId != "") return;
         var label = editorSession.history.redoLabel;
         if (!editorSession.redo()) return;
         logActivity('command: redo ${label}');
