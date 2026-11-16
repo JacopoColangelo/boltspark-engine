@@ -46,6 +46,8 @@ class NumericDragField extends h2d.Object {
     var widthValue:Float;
     var focused:Bool = false;
     var dragging:Bool = false;
+    /** True between push and threshold-crossing, before any capture is taken. */
+    var scrubArmed:Bool = false;
     /** Display-only state for a mixed multi-object property. */
     var multiple:Bool = false;
     /** True while a mixed field is focused and awaiting a replacement number. */
@@ -98,13 +100,12 @@ class NumericDragField extends h2d.Object {
                 input.text = "";
                 input.textColor = Theme.TEXT;
             }
-            scrubHit.visible = false;
             context.showTextInputCursor();
             updateFieldStyle();
         };
         input.onFocusLost = function(_) {
             focused = false;
-            scrubHit.visible = true;
+            scrubArmed = false;
             if (skipFocusCommit) skipFocusCommit = false else commitEdit();
             updateFieldStyle();
         };
@@ -128,6 +129,11 @@ class NumericDragField extends h2d.Object {
         scrubHit.backgroundColor = 0;
         scrubHit.cursor = ctx.resizeHorizontal;
         scrubHit.onPush = beginScrub;
+        scrubHit.onRelease = function(_) {
+            scrubArmed = false;
+            focusInput();
+        };
+        scrubHit.onMove = armScrubDrag;
         scrubHit.onOut = function(_) {
             // The hldx resize cursor is installed by a native callback. Force
             // the Win32 arrow back because Heaps can otherwise keep its
@@ -199,52 +205,71 @@ class NumericDragField extends h2d.Object {
 
     function beginScrub(event:hxd.Event):Void {
         if (event.button != 0) return;
+        // Arm a possible drag but take no capture yet: a plain click (the
+        // common case) must not leave an h2d capture that swallows the next
+        // click, and stopping a capture from its own release callback is what
+        // faults in HL/C.
+        scrubArmed = true;
         dragging = false;
         scrubStartX = context.window.mouseX;
         scrubStartValue = value;
-        scrubHit.startCapture(function(captured) {
-            switch (captured.kind) {
-                case EMove:
-                    var delta = context.window.mouseX - scrubStartX;
-                    if (!dragging && Math.abs(delta) >= SCRUB_THRESHOLD) {
-                        dragging = true;
-                        if (onEditBegin != null) onEditBegin();
-                        beginUnboundedScrub();
-                    }
-                    if (dragging) {
-                        var steps = Math.round(delta / PIXELS_PER_STEP);
-                        applyValue(scrubStartValue + steps * step, true);
-                    }
-                    captured.propagate = false;
-                case ERelease, EReleaseOutside:
-                    var pointerInside = captured.relX >= 0 && captured.relX < scrubHit.width
-                        && captured.relY >= 0 && captured.relY < scrubHit.height;
-                    var wasDragging = dragging;
-                    endScrubCapture();
-                    dragging = false;
-                    if (wasDragging && onEditEnd != null) onEditEnd();
-                    if (!wasDragging && pointerInside) {
-                        focusInput();
-                    } else if (!pointerInside) {
-                        context.restoreArrowCursor();
-                    }
-                    captured.propagate = false;
-                case EFocusLost:
-                    var wasDragging = dragging;
-                    dragging = false;
-                    endScrubCapture();
-                    if (wasDragging && onEditEnd != null) onEditEnd();
-                    context.restoreArrowCursor();
-                    captured.propagate = false;
-                case _:
-                    captured.propagate = false;
-            }
-        }, onScrubCaptureCancelled);
-        // Heaps capture above redirects scene events, while native capture
-        // makes Win32 continue sending those events outside a windowed client.
+        event.propagate = false;
+    }
+
+    /** Take capture only after real horizontal movement passes the threshold. */
+    function armScrubDrag(event:hxd.Event):Void {
+        if (!scrubArmed) return;
+        var delta = context.window.mouseX - scrubStartX;
+        if (Math.abs(delta) < SCRUB_THRESHOLD) return;
+        scrubArmed = false;
+        dragging = true;
+        if (onEditBegin != null) onEditBegin();
+        beginUnboundedScrub();
+        scrubHit.startCapture(handleScrubCapture, onScrubCaptureCancelled);
         context.setMouseCapture(true);
         nativeCaptureActive = true;
-        event.propagate = false;
+        var steps = Math.round(delta / PIXELS_PER_STEP);
+        applyValue(scrubStartValue + steps * step, true);
+    }
+
+    function handleScrubCapture(captured:hxd.Event):Void {
+        switch (captured.kind) {
+            case EMove:
+                var delta = context.window.mouseX - scrubStartX;
+                if (!dragging && Math.abs(delta) >= SCRUB_THRESHOLD) {
+                    dragging = true;
+                    if (onEditBegin != null) onEditBegin();
+                    beginUnboundedScrub();
+                }
+                if (dragging) {
+                    var steps = Math.round(delta / PIXELS_PER_STEP);
+                    applyValue(scrubStartValue + steps * step, true);
+                }
+                captured.propagate = false;
+            case ERelease, EReleaseOutside:
+                var pointerInside = captured.relX >= 0 && captured.relX < scrubHit.width
+                    && captured.relY >= 0 && captured.relY < scrubHit.height;
+                var wasDragging = dragging;
+                // Only a real drag owns a capture; plain clicks never take one.
+                if (wasDragging) endScrubCapture();
+                dragging = false;
+                if (wasDragging && onEditEnd != null) onEditEnd();
+                if (!wasDragging && pointerInside) {
+                    focusInput();
+                } else if (!pointerInside) {
+                    context.restoreArrowCursor();
+                }
+                captured.propagate = false;
+            case EFocusLost:
+                var wasDragging = dragging;
+                dragging = false;
+                endScrubCapture();
+                if (wasDragging && onEditEnd != null) onEditEnd();
+                context.restoreArrowCursor();
+                captured.propagate = false;
+            case _:
+                captured.propagate = false;
+        }
     }
 
     function endScrubCapture():Void {
