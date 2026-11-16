@@ -11,11 +11,19 @@ class ComponentPropertyData {
     public final resettable:Bool;
     public final linkable:Bool;
     public final linked:Bool;
+    /**
+     * Per-axis "no single value" flags for a multi-object selection. The
+     * backing value in `numberValues`/`textValue` stays valid (it is the
+     * primary object's value, used as an edit/scrub base), while the UI shows
+     * "Multiple Values" for flagged axes until the user commits a new value.
+     */
+    public final mixed:Array<Bool>;
 
     public function new(id:String, label:String, kind:ComponentPropertyKind,
             ?numberValues:Array<Float>, textValue:String = "",
             editable:Bool = true, resettable:Bool = false,
-            linkable:Bool = false, linked:Bool = false) {
+            linkable:Bool = false, linked:Bool = false,
+            ?mixed:Array<Bool>) {
         this.id = id;
         this.label = label;
         this.kind = kind;
@@ -25,6 +33,12 @@ class ComponentPropertyData {
         this.resettable = resettable;
         this.linkable = linkable;
         this.linked = linked;
+        this.mixed = mixed == null ? [false, false, false] : mixed.copy();
+    }
+
+    /** True when one axis (axis 0 for Text properties) differs across the selection. */
+    public inline function isMixed(axis:Int = 0):Bool {
+        return axis >= 0 && axis < mixed.length && mixed[axis];
     }
 
     public static function vector3(id:String, label:String,

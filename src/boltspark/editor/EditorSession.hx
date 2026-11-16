@@ -378,6 +378,37 @@ class EditorSession {
         return true;
     }
 
+    /**
+     * Commit one shared transform gesture across several objects as a single
+     * history entry. Arrays are parallel; no-op and invalid entries are
+     * skipped so undo restores the exact prior state of every touched object.
+     */
+    public function commitAppliedTransforms(ids:Array<Int>,
+            befores:Array<EditorTransform>, afters:Array<EditorTransform>,
+            description:String):Bool {
+        if (ids == null || befores == null || afters == null) return false;
+        var commands:Array<EditorCommand> = [];
+        for (index in 0...ids.length) {
+            if (index >= befores.length || index >= afters.length) break;
+            var object = findObject(ids[index]);
+            var before = befores[index];
+            var after = afters[index];
+            if (object == null || before == null || after == null
+                    || before.sameAs(after)) continue;
+            if (!after.isFiniteAndInvertible()) {
+                throw 'Transform for ${object.persistentId} is singular or non-finite';
+            }
+            commands.push(new TransformObjectCommand(this, object.persistentId,
+                before, after, description));
+        }
+        if (commands.length == 0) return false;
+        history.execute(commands.length == 1
+            ? commands[0]
+            : new CompositeCommand(description, commands));
+        notifyChanged();
+        return true;
+    }
+
     public function selectObject(id:Int):Void {
         selectObjects(id < 0 ? [] : [id], id);
     }

@@ -16,6 +16,8 @@ class NumericDragField extends h2d.Object {
     static inline var ARROW_WIDTH:Float = 15;
     static inline var SCRUB_THRESHOLD:Float = 3;
     static inline var PIXELS_PER_STEP:Float = 6;
+    /** Placeholder used when a multi-object selection has no single value. */
+    public static inline var MULTIPLE_TEXT:String = "Multiple Values";
 
     public var onValueChanged:Null<Float->Void>;
     public var onEditRejected:Null<String->Void>;
@@ -44,6 +46,10 @@ class NumericDragField extends h2d.Object {
     var widthValue:Float;
     var focused:Bool = false;
     var dragging:Bool = false;
+    /** Display-only state for a mixed multi-object property. */
+    var multiple:Bool = false;
+    /** True while a mixed field is focused and awaiting a replacement number. */
+    var multipleDraft:Bool = false;
     var nativeCaptureActive:Bool = false;
     var unboundedScrub:Bool = false;
     var endingCapture:Bool = false;
@@ -85,6 +91,13 @@ class NumericDragField extends h2d.Object {
         input.onChange = updateFieldStyle;
         input.onFocus = function(_) {
             focused = true;
+            if (multiple) {
+                // A mixed field has no value to show until the user commits a
+                // replacement. Clear the placeholder so typing is unambiguous.
+                multipleDraft = true;
+                input.text = "";
+                input.textColor = Theme.TEXT;
+            }
             scrubHit.visible = false;
             context.showTextInputCursor();
             updateFieldStyle();
@@ -101,7 +114,9 @@ class NumericDragField extends h2d.Object {
                 commitEdit();
             } else if (event.keyCode == hxd.Key.ESCAPE) {
                 skipFocusCommit = true;
-                input.text = format(value);
+                multipleDraft = false;
+                input.text = multiple ? MULTIPLE_TEXT : format(value);
+                if (multiple) input.textColor = Theme.MUTED;
             }
         };
 
@@ -151,8 +166,29 @@ class NumericDragField extends h2d.Object {
 
     public function setValue(next:Float):Void {
         value = clamp(next);
-        if (!focused && !dragging) input.text = format(value);
+        if (!focused && !dragging) input.text = multiple ? MULTIPLE_TEXT : format(value);
     }
+
+    /**
+     * Show "Multiple Values" instead of a number. The underlying `value`
+     * remains the primary object's value so arrow steps and scrubs have a
+     * sensible starting point; committing any edit clears the mixed state and
+     * applies the new value to the whole selection.
+     */
+    public function setMultiple(next:Bool):Void {
+        if (multiple == next) return;
+        multiple = next;
+        if (next) {
+            if (!focused && !dragging) input.text = MULTIPLE_TEXT;
+            input.textColor = Theme.MUTED;
+        } else {
+            multipleDraft = false;
+            input.textColor = Theme.TEXT;
+            if (!focused && !dragging) input.text = format(value);
+        }
+    }
+
+    public inline function isMultiple():Bool return multiple;
 
     public function setWidth(width:Float):Void {
         widthValue = Math.max(0, width);
@@ -292,6 +328,13 @@ class NumericDragField extends h2d.Object {
         // 2147.483647 and could turn a large positive transform negative.
         clamped = stableRound(clamped);
         var changed = Math.abs(clamped - value) > 0.0000001;
+        if (multiple) {
+            // Any committed value applies to the entire selection, so the
+            // field stops being "mixed" from this point on.
+            multiple = false;
+            multipleDraft = false;
+            input.textColor = Theme.TEXT;
+        }
         value = clamped;
         input.text = format(value);
         if (notify && changed && onValueChanged != null) {
@@ -306,25 +349,44 @@ class NumericDragField extends h2d.Object {
 
     function commitEdit():Void {
         var entered = StringTools.trim(input.text);
+        if (multipleDraft && entered.length == 0) {
+            // Focused a mixed field and typed nothing: leave the selection's
+            // heterogeneous values untouched and restore the placeholder.
+            multipleDraft = false;
+            input.text = MULTIPLE_TEXT;
+            input.textColor = Theme.MUTED;
+            return;
+        }
         if (!~/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.match(entered)) {
-            input.text = format(value);
+            restoreRejected();
             if (onEditRejected != null) onEditRejected("Enter a valid number.");
             return;
         }
         var parsed = Std.parseFloat(entered);
         if (!Math.isFinite(parsed)) {
-            input.text = format(value);
+            restoreRejected();
             if (onEditRejected != null) onEditRejected("Enter a finite number.");
             return;
         }
         if (parsed < min || parsed > max) {
-            input.text = format(value);
+            restoreRejected();
             if (onEditRejected != null) onEditRejected('Value must be between ${min} and ${max}.');
             return;
         }
         if (onEditBegin != null) onEditBegin();
         applyValue(parsed, true);
         if (onEditEnd != null) onEditEnd();
+    }
+
+    /** Restore the displayed value after a rejected edit. */
+    function restoreRejected():Void {
+        multipleDraft = false;
+        if (multiple) {
+            input.text = MULTIPLE_TEXT;
+            input.textColor = Theme.MUTED;
+        } else {
+            input.text = format(value);
+        }
     }
 
     function allowsCharacter(charCode:Int):Bool {

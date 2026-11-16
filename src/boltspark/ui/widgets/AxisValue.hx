@@ -35,6 +35,9 @@ class AxisValue extends h2d.Object {
 
     public inline function setValue(next:Float):Void field.setValue(next);
 
+    /** Show the mixed-selection placeholder instead of a numeric value. */
+    public inline function setMultiple(next:Bool):Void field.setMultiple(next);
+
     public inline function isEditing():Bool return field.isEditing();
 
     static function format(value:Float):String {

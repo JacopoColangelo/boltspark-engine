@@ -1525,16 +1525,20 @@ class EditorShell {
                     break;
                 }
             }
+        }
+        if (selectedObjectIds.length == 0) {
+            rebuildInspectorComponents([]);
+            inspectorContentMask.visible = false;
+            selectionStatusValue = "Select an object to inspect";
+        } else {
+            // Multi-selections keep the shared components visible. Values that
+            // differ are rendered as "Multiple Values" by the property rows.
             objectNameField.setValue(name);
             rebuildInspectorComponents(components == null ? [] : components);
             inspectorContentMask.visible = true;
-            selectionStatusValue = name + "  ·  Game Object";
-        } else {
-            rebuildInspectorComponents([]);
-            inspectorContentMask.visible = false;
             selectionStatusValue = selectedObjectIds.length > 1
-                ? selectedObjectIds.length + " objects selected"
-                : "Select an object to inspect";
+                ? name
+                : name + "  ·  Game Object";
         }
         selectionStatus.text = selectionStatusValue;
         inspectorScrollValue = 0;
@@ -1548,9 +1552,16 @@ class EditorShell {
     /** Live component-vector update while a viewport gizmo drag is active. */
     public function updateInspectorVector(componentIndex:Int,
             propertyId:String, x:Float, y:Float, z:Float):Void {
+        updateInspectorVectorMixed(componentIndex, propertyId,
+            [x, y, z], [false, false, false]);
+    }
+
+    /** Live vector update for a multi-object drag, including mixed axes. */
+    public function updateInspectorVectorMixed(componentIndex:Int,
+            propertyId:String, values:Array<Float>, mixed:Array<Bool>):Void {
         for (section in componentSections) {
             if (section.componentIndex == componentIndex) {
-                section.updateVector(propertyId, x, y, z);
+                section.updateVectorMixed(propertyId, values, mixed);
                 return;
             }
         }

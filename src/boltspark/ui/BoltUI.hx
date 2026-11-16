@@ -292,4 +292,10 @@ class BoltUI {
             propertyId:String, x:Float, y:Float, z:Float):Void {
         shell.updateInspectorVector(componentIndex, propertyId, x, y, z);
     }
+
+    /** Live vector update for a multi-object drag, including mixed axes. */
+    public function updateInspectorVectorMixed(componentIndex:Int,
+            propertyId:String, values:Array<Float>, mixed:Array<Bool>):Void {
+        shell.updateInspectorVectorMixed(componentIndex, propertyId, values, mixed);
+    }
 }

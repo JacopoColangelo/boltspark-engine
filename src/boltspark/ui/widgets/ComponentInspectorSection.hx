@@ -59,11 +59,23 @@ class ComponentInspectorSection extends InspectorSection {
 
     public function updateVector(propertyId:String,
             x:Float, y:Float, z:Float):Bool {
+        return updateVectorMixed(propertyId, [x, y, z], [false, false, false]);
+    }
+
+    /**
+     * Live values for a multi-object selection. Mixed axes keep their primary
+     * value as an edit base but display the "Multiple Values" placeholder.
+     */
+    public function updateVectorMixed(propertyId:String,
+            values:Array<Float>, mixed:Array<Bool>):Bool {
         for (row in vectors) {
             if (row.propertyId != propertyId) continue;
-            row.fields[0].setValue(x);
-            row.fields[1].setValue(y);
-            row.fields[2].setValue(z);
+            for (axis in 0...row.fields.length) {
+                row.fields[axis].setValue(
+                    axis < values.length ? values[axis] : 0);
+                row.fields[axis].setMultiple(
+                    axis < mixed.length && mixed[axis]);
+            }
             return true;
         }
         return false;
@@ -102,6 +114,7 @@ class ComponentInspectorSection extends InspectorSection {
                 60, Theme.CONTROL_HEIGHT, content);
             field.setValue(property.numberValues.length > axis
                 ? property.numberValues[axis] : 0);
+            field.setMultiple(property.isMixed(axis));
             var capturedAxis = axis;
             var propertyId = property.id;
             field.onCommit = function(value) {
@@ -155,7 +168,18 @@ class ComponentInspectorSection extends InspectorSection {
 
     function createText(property:ComponentPropertyData, rowIndex:Int):Void {
         var row = new TextPropertyControls(property.id, rowIndex);
-        if (property.editable) {
+        if (property.isMixed(0)) {
+            // Text components currently published by the engine are read-only;
+            // show the mixed placeholder instead of a misleading single value.
+            row.label = new UiText(ctx.labelFont, content);
+            row.label.text = property.label;
+            row.label.textColor = Theme.TEXT_SECONDARY;
+            row.label.lineBreak = false;
+            row.value = new UiText(ctx.font, content);
+            row.value.text = NumericDragField.MULTIPLE_TEXT;
+            row.value.textColor = Theme.MUTED;
+            row.value.lineBreak = false;
+        } else if (property.editable) {
             row.input = new TextInputField(ctx, property.label,
                 100, Theme.CONTROL_HEIGHT, property.textValue, content);
             row.input.setLabelWidth(66);
