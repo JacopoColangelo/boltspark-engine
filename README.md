@@ -58,6 +58,14 @@ Boltspark is a native Windows game engine and editor built on **HashLink + Heaps
   component-preserving history/serialization, generic MeshRenderer components,
   primitive mesh factories, and a metadata-driven component Inspector with an
   Add Component command. Cubes are ordinary GameObjects rather than object kinds.
+- The docked Asset Browser is now a professional two-pane editor component:
+  hierarchical folder tree with draggable/nestable folders, adaptive grid /
+  compact / detail views with multi-selection, breadcrumbs and history, live
+  search, type filtering and sorting, favorites and recent assets, real
+  generic file/folder operations with confirmation, direct drag-to-move
+  (Ctrl+drag to copy), and contextual keyboard shortcuts. It advertises only
+  the engine's one loadable format (`.boltscene`) while still showing unknown
+  files as generic files ([`docs/ASSET_BROWSER.md`](docs/ASSET_BROWSER.md)).
 
 ## Hard platform policy
 
@@ -122,6 +130,7 @@ Double-clicking `*.boltproject` requires an explicit, user-level association (no
 - [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) — third-party provenance, licenses, and release bundling policy
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — master development plan (do not modify)
 - [`docs/TESTING.md`](docs/TESTING.md) — tracked portable/native test matrix and commands
+- [`docs/ASSET_BROWSER.md`](docs/ASSET_BROWSER.md) — three-pane Asset Browser design, scope decision, and verification
 - [`docs/PROJECT_FORMAT.md`](docs/PROJECT_FORMAT.md) — initial versioned project/scene contracts
 - [`docs/COMPONENT_SYSTEM.md`](docs/COMPONENT_SYSTEM.md) — GameObject/component APIs, lifecycle, rendering, and extension
 - [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) — measured 15-minute idle/resize baseline
@@ -145,7 +154,9 @@ src/
     InputAdapter.hx           — central keyboard/focus/pointer reporting
     EditorShell.hx            — editor chrome layout and command callbacks
     widgets/                  — buttons, inputs, search, hierarchy, inspector, console, scrollbars
-    widgets/AssetBrowser.hx    — docked project asset list with scan/Add/Open/Rename/Delete
+    widgets/AssetBrowser.hx    — docked three-pane browser: folder tree, grid/list, inspector
+    widgets/AssetBrowserStore.hx — persisted favorites, recent assets, and view preferences
+    project/AssetTypeRegistry.hx — authoritative asset kinds/extensions and internal-file rules
     windows/                  — native top-level editor-window routing and H2D content
   boltspark/project/          — versioned project/scene data, validation, atomic storage
   boltspark/engine/           — GameObject, Component, Transform, rendering components/assets

@@ -135,9 +135,15 @@ try {
     if ($window -eq [IntPtr]::Zero) { throw 'Editor HWND did not appear.' }
     [void][BoltsparkAssetBrowserApi]::SetWindowPos(
         $window, [IntPtr]::Zero, 40, 40, 1440, 900, 0x0004)
-    Start-Sleep -Seconds 1
+    # Wait for the command-line project to finish loading instead of assuming
+    # a fixed delay: the HWND appears before the scene graph is rebuilt.
+    $startupDeadline = [DateTime]::UtcNow.AddSeconds(12)
+    do {
+        Start-Sleep -Milliseconds 150
+        $startupLog = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+        $loaded = $startupLog -match '\[console\] project: opened '
+    } while (-not $loaded -and [DateTime]::UtcNow -lt $startupDeadline)
 
-    $startupLog = Get-Content $stdout -Raw
     if ($startupLog -notmatch '\[console\] project: opened ') {
         throw 'Passing a .boltproject on the command line did not open it.'
     }
@@ -221,6 +227,32 @@ try {
         throw 'Asset open did not report a successful load.'
     }
 
+    # Folder rows record navigation history; back/forward and breadcrumbs work.
+    Send-Click $window ($consoleX + 60) ($contentY + 81)   # Scenes row
+    Start-Sleep -Milliseconds 200
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser navigate folder=Scenes') {
+        throw 'Clicking a folder row did not navigate.'
+    }
+    Send-Click $window ($consoleX + 15) ($contentY + 12)   # back arrow
+    Start-Sleep -Milliseconds 200
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser history index=0') {
+        throw 'Back arrow did not move through folder history.'
+    }
+    Send-Click $window ($consoleX + 39) ($contentY + 12)   # forward arrow
+    Start-Sleep -Milliseconds 200
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser history index=1') {
+        throw 'Forward arrow did not move through folder history.'
+    }
+    Send-Click $window ($consoleX + 100) ($contentY + 11)  # "Content" breadcrumb
+    Start-Sleep -Milliseconds 200
+    if ((Get-Content $stdout -Raw) -notmatch
+            '(?m)\[probe\] asset browser navigate folder=\r?$') {
+        throw 'Clicking the root breadcrumb did not return to Content.'
+    }
+
     # Add -> Folder creates a real directory and refreshes the folder column.
     $foldersBefore = [regex]::Matches((Get-Content $stdout -Raw),
         '\[probe\] asset browser folders=').Count
@@ -231,8 +263,9 @@ try {
     if ((Get-Content $stdout -Raw) -notmatch '\[console\] folder: created ') {
         throw 'Asset Browser Add -> Folder did not create a folder.'
     }
-    if (-not (Test-Path (Join-Path $workspace 'Scenes\New Folder'))) {
-        throw 'Created folder is missing on disk.'
+    # Add -> Folder creates at the Content root, never as an implicit subfolder.
+    if (-not (Test-Path (Join-Path $workspace 'New Folder'))) {
+        throw 'Created folder is missing from the Content root.'
     }
     if ([regex]::Matches((Get-Content $stdout -Raw),
             '\[probe\] asset browser folders=').Count -le $foldersBefore) {
@@ -256,12 +289,12 @@ try {
     if ((Get-Content $stdout -Raw) -notmatch '\[console\] folder: renamed ') {
         throw 'F2 did not rename the selected folder.'
     }
-    if (-not (Test-Path (Join-Path $workspace 'Scenes\Vault'))) {
-        throw 'Renamed folder is missing on disk.'
+    if (-not (Test-Path (Join-Path $workspace 'Vault'))) {
+        throw 'Renamed root folder is missing on disk.'
     }
     if ((Get-Content $stdout -Raw) -notmatch
-            '\[probe\] asset browser folder row=Vault depth=1') {
-        throw 'Folder rows show paths or wrong nesting instead of folder names.'
+            '\[probe\] asset browser folder row=Vault depth=0') {
+        throw 'Root folder rows show paths or wrong nesting instead of folder names.'
     }
 
     # Copy an asset with Ctrl+C, select the Vault folder, paste with Ctrl+V.
@@ -271,7 +304,7 @@ try {
     Send-Key $window 0x43 0x1E   # Ctrl+C
     Send-Message $window 0x0101 ([IntPtr]0x11) ([IntPtr]0xC01D0001)
     Start-Sleep -Milliseconds 200
-    Send-Click $window ($consoleX + 60) ($contentY + 70 + 22 + 11)
+    Send-Click $window ($consoleX + 60) ($contentY + 70 + 22 + 11)   # Vault row
     Start-Sleep -Milliseconds 150
     Send-Message $window 0x0100 ([IntPtr]0x11) ([IntPtr]0x001D)
     Send-Key $window 0x56 0x2F   # Ctrl+V
@@ -293,38 +326,139 @@ try {
         throw 'Asset Browser did not enable scrolling for a full grid.'
     }
 
-    # Drag the selected tile onto the Scenes folder and choose Move Here.
-    $folderRowY = $contentY + 70 + 11
+    # Dragging an asset onto a folder moves it immediately (no context menu).
+    $folderRowY = $contentY + 58   # "All" root row (stable target)
     Send-Mouse $window 0x0200 $tile0X $tileY ([IntPtr]::Zero)
     Start-Sleep -Milliseconds 80
     Send-Mouse $window 0x0201 $tile0X $tileY ([IntPtr]1)
     Send-Mouse $window 0x0200 ($consoleX + 60) $folderRowY ([IntPtr]1)
     Start-Sleep -Milliseconds 120
     Send-Mouse $window 0x0202 ($consoleX + 60) $folderRowY ([IntPtr]::Zero)
-    Start-Sleep -Milliseconds 300
-    if ((Get-Content $stdout -Raw) -notmatch '\[probe\] asset browser drop ') {
-        throw 'Dragging an asset onto a folder did not offer a drop action.'
-    }
-    # Copy Here creates a uniquely named duplicate in the target folder.
-    Send-Click $window ($consoleX + 100) ($folderRowY + 36)
     Start-Sleep -Milliseconds 600
-    if ((Get-Content $stdout -Raw) -notmatch '\[console\] asset: copied ') {
-        throw 'Drop action did not copy the asset into the folder.'
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser drop source=.* mode=move') {
+        throw 'Dragging an asset onto a folder did not move it directly.'
+    }
+    if ((Get-Content $stdout -Raw) -notmatch '\[console\] asset: moved ') {
+        throw 'Direct drop did not report a move.'
     }
 
-    # Collapsing Scenes hides the nested Vault row; expanding restores it.
-    $beforeRows = [regex]::Matches((Get-Content $stdout -Raw),
-        '\[probe\] asset browser folder row=Vault').Count
-    Send-Click $window ($consoleX + 10) ($contentY + 70 + 22 + 11)
+    # Ctrl+drop copies instead of moving. Synthetic drag timing is variable,
+    # so retry a couple of times before treating it as a failure.
+    $copyDone = $false
+    for ($attempt = 0; $attempt -lt 3 -and -not $copyDone; $attempt++) {
+        Send-Message $window 0x0100 ([IntPtr]0x11) ([IntPtr]0x001D)
+        Send-Mouse $window 0x0200 $tile0X $tileY ([IntPtr]::Zero)
+        Start-Sleep -Milliseconds 80
+        Send-Mouse $window 0x0201 $tile0X $tileY ([IntPtr]1)
+        Send-Mouse $window 0x0200 ($consoleX + 60) $folderRowY ([IntPtr]1)
+        Start-Sleep -Milliseconds 120
+        Send-Mouse $window 0x0202 ($consoleX + 60) $folderRowY ([IntPtr]::Zero)
+        Send-Message $window 0x0101 ([IntPtr]0x11) ([IntPtr]0xC01D0001)
+        Start-Sleep -Milliseconds 600
+        $copyDone = (Get-Content $stdout -Raw) -match
+            '\[probe\] asset browser drop source=.* mode=copy'
+    }
+    if (-not $copyDone) {
+        throw 'Ctrl+dragging an asset did not offer a copy.'
+    }
+
+    # Nested folders are explicit: right-click Vault -> New... -> Folder.
+    $vaultRowY = $contentY + 70 + 22 + 11
+    Send-RightClick $window ($consoleX + 60) $vaultRowY
+    $submenuY = [Math]::Min($vaultRowY, $rect.Bottom - (7 * 22 + 6) - 4)
+    Send-Click $window ($consoleX + 100) ($submenuY + 3 + 11)   # New... row
+    Send-Click $window (($consoleX + 60) + 168 + 40) ($submenuY + 17)   # Folder
+    Start-Sleep -Milliseconds 600
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser folder row=New Folder depth=1') {
+        throw 'New Subfolder did not create a nested folder row.'
+    }
+
+    # Collapsing Vault hides its nested row; expanding restores it.
+    $logBefore = (Get-Content $stdout -Raw).Length
+    Send-Click $window ($consoleX + 10) $vaultRowY
     Start-Sleep -Milliseconds 300
-    $collapsedRows = [regex]::Matches((Get-Content $stdout -Raw),
-        '\[probe\] asset browser folder row=Vault').Count
-    if ($collapsedRows -le $beforeRows) { throw 'Collapsing a folder did not hide its children.' }
-    Send-Click $window ($consoleX + 10) ($contentY + 70 + 22 + 11)
+    $collapsedSlice = (Get-Content $stdout -Raw).Substring($logBefore)
+    if ($collapsedSlice -match '\[probe\] asset browser folder row=New Folder') {
+        throw 'Collapsing a folder did not hide its children.'
+    }
+    $logBeforeExpand = (Get-Content $stdout -Raw).Length
+    Send-Click $window ($consoleX + 10) $vaultRowY
     Start-Sleep -Milliseconds 300
-    $expandedRows = [regex]::Matches((Get-Content $stdout -Raw),
-        '\[probe\] asset browser folder row=Vault').Count
-    if ($expandedRows -le $collapsedRows) { throw 'Expanding a folder did not restore its children.' }
+    $expandedSlice = (Get-Content $stdout -Raw).Substring($logBeforeExpand)
+    if ($expandedSlice -notmatch '\[probe\] asset browser folder row=New Folder') {
+        throw 'Expanding a folder did not restore its children.'
+    }
+
+    # Folder rows are draggable too: drag Vault onto Scenes to nest it.
+    $scenesRowY = $contentY + 70 + 11
+    Send-Mouse $window 0x0200 ($consoleX + 60) $vaultRowY ([IntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    Send-Mouse $window 0x0201 ($consoleX + 60) $vaultRowY ([IntPtr]1)
+    Send-Mouse $window 0x0200 ($consoleX + 60) $scenesRowY ([IntPtr]1)
+    Start-Sleep -Milliseconds 120
+    Send-Mouse $window 0x0202 ($consoleX + 60) $scenesRowY ([IntPtr]::Zero)
+    Start-Sleep -Milliseconds 600
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser folder drop source=Vault folder=Scenes') {
+        throw 'Dragging a folder onto another folder did not reparent it.'
+    }
+    if (-not (Test-Path (Join-Path $workspace 'Scenes\Vault'))) {
+        throw 'Dropped folder is missing from its new parent.'
+    }
+
+    # Right-click empty space opens the Add menu without using the + button.
+    Send-RightClick $window ($consoleX + 190) ($contentY + 13)   # empty toolbar space
+    Start-Sleep -Milliseconds 250
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] asset browser empty menu folder=') {
+        throw 'Right-clicking empty space did not open the Add menu.'
+    }
+    # Any left-click outside the rows must dismiss the open menu.
+    $closesBefore = [regex]::Matches((Get-Content $stdout -Raw),
+        '\[probe\] menu close').Count
+    Send-Click $window ($consoleX + 150) ($contentY + 13)
+    Start-Sleep -Milliseconds 250
+    if ([regex]::Matches((Get-Content $stdout -Raw),
+            '\[probe\] menu close').Count -le $closesBefore) {
+        throw 'Left-clicking outside a context menu did not dismiss it.'
+    }
+
+    # Wheel over the grid scrolls down with a positive delta.
+    $scrollBefore = [regex]::Matches((Get-Content $stdout -Raw),
+        '\[probe\] asset browser scroll=').Count
+    Send-Message $window 0x020A ([IntPtr](-120 -shl 16)) `
+        ([BoltsparkAssetBrowserApi]::MakeLParam($tile0X, $tileY))
+    Start-Sleep -Milliseconds 300
+    $scrollLog = (Get-Content $stdout -Raw)
+    if ([regex]::Matches($scrollLog, '\[probe\] asset browser scroll=').Count -le $scrollBefore) {
+        throw 'Wheel over the asset grid did not scroll.'
+    }
+    if ($scrollLog -notmatch '\[probe\] asset browser scroll=0\.(0*[1-9])') {
+        throw 'Wheel down did not move the scroll position forward.'
+    }
+
+    # Delete key routes to the Asset Browser for both assets and folders.
+    Send-Click $window $tile0X $tileY
+    Start-Sleep -Milliseconds 150
+    Send-Key $window 0x2E 0x53   # Delete
+    Start-Sleep -Milliseconds 500
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] confirm Delete assets=yes') {
+        throw 'Delete key did not act on the selected asset.'
+    }
+    Send-Click $window ($consoleX + 60) ($contentY + 125)   # nested New Folder row
+    Start-Sleep -Milliseconds 150
+    Send-Key $window 0x2E 0x53   # Delete
+    Start-Sleep -Milliseconds 500
+    if ((Get-Content $stdout -Raw) -notmatch
+            '\[probe\] confirm Delete folder=yes') {
+        throw 'Delete key did not act on the selected folder.'
+    }
+    if ((Get-Content $stdout -Raw) -notmatch '\[console\] folder: deleted ') {
+        throw 'Delete key did not actually remove the selected folder.'
+    }
 
     [void][BoltsparkAssetBrowserApi]::PostMessage(
         $window, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)

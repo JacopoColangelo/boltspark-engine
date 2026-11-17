@@ -16,6 +16,7 @@ class ComponentSystemRepro {
         testGenericGameObjectApi();
         testPrimitiveComposition();
         testEditorHistoryAndSerialization();
+        testRemoveComponentHistory();
         Sys.println("[component-system] ownership, lifecycle, primitives, history, and serialization passed");
     }
 
@@ -149,6 +150,31 @@ class ComponentSystemRepro {
         }
         assertTrue(foundUnknown,
             "unknown component payload/envelope fields were not preserved");
+    }
+
+    static function testRemoveComponentHistory():Void {
+        var session = new EditorSession(33);
+        var object = session.addInitialObject("Removable");
+        var renderer = PrimitiveGameObjects.createCubeRenderer();
+        assertTrue(session.addComponent(object.id, renderer),
+            "Add Component command was rejected");
+        var attached = object.getComponent(MeshRenderer);
+        var index = object.components.indexOf(attached);
+        assertTrue(index == 1, "added component was not placed after Transform");
+
+        assertTrue(!session.removeComponentAt(object.id, 0),
+            "mandatory Transform was removed through EditorSession");
+        assertTrue(session.removeComponentAt(object.id, index)
+                && object.getComponent(MeshRenderer) == null
+                && attached.destroyed
+                && session.history.undoLabel == "Remove MeshRenderer",
+            "Remove Component did not enter history or destroy the component");
+        assertTrue(session.undo() && object.getComponent(MeshRenderer) != null,
+            "Remove Component undo failed");
+        assertTrue(session.redo() && object.getComponent(MeshRenderer) == null,
+            "Remove Component redo failed");
+        assertTrue(!session.removeComponentAt(object.id, 99),
+            "out-of-range component index was accepted");
     }
 
     static function assertThrows(action:Void->Void, message:String):Void {

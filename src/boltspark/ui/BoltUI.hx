@@ -6,6 +6,7 @@ import boltspark.engine.ComponentTypeInfo;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.HierarchyEntry;
+import boltspark.project.ProjectSession.AssetDetails;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.windows.ApplicationWindowKind;
 
@@ -57,6 +58,7 @@ class BoltUI {
     public var onInspectorReset:Null<Int->String->Void>;
     public var onInspectorLinkChanged:Null<Int->String->Bool->Void>;
     public var onAddComponent:Null<String->Void>;
+    public var onRemoveComponent:Null<Int->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     public var onTransformSpaceChanged:Null<Bool->Void>;
@@ -88,6 +90,13 @@ class BoltUI {
     public var onNewFolder:Null<String->String>;
     public var onMoveAsset:Null<String->String->Void>;
     public var onCopyAsset:Null<String->String->Void>;
+    public var onDeleteAssets:Null<Array<String>->Void>;
+    public var onQueryAssetDetails:Null<String->AssetDetails>;
+    public var onDuplicateAsset:Null<String->Void>;
+    public var onDeleteFolder:Null<String->Bool->Void>;
+    public var onMoveFolder:Null<String->String->Void>;
+    public var onRevealAsset:Null<String->Void>;
+    public var onCopyAssetPath:Null<String->Void>;
     /** Open an editor dialog as its own native top-level application window. */
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Start an editor-window host before the user reaches its menu leaf. */
@@ -205,6 +214,9 @@ class BoltUI {
         shell.onAddComponent = function(typeId) {
             if (onAddComponent != null) onAddComponent(typeId);
         };
+        shell.onRemoveComponent = function(index) {
+            if (onRemoveComponent != null) onRemoveComponent(index);
+        };
         shell.onViewportClick = function(x, y) if (onViewportClick != null) onViewportClick(x, y);
         shell.onToolChanged = function(tool) if (onToolChanged != null) onToolChanged(tool);
         shell.onTransformSpaceChanged = function(local) {
@@ -258,6 +270,27 @@ class BoltUI {
         };
         shell.onCopyAsset = function(source, folder) {
             if (onCopyAsset != null) onCopyAsset(source, folder);
+        };
+        shell.onDeleteAssets = function(sources) {
+            if (onDeleteAssets != null) onDeleteAssets(sources);
+        };
+        shell.onQueryAssetDetails = function(source) {
+            return onQueryAssetDetails != null ? onQueryAssetDetails(source) : null;
+        };
+        shell.onDuplicateAsset = function(source) {
+            if (onDuplicateAsset != null) onDuplicateAsset(source);
+        };
+        shell.onDeleteFolder = function(folder, recursive) {
+            if (onDeleteFolder != null) onDeleteFolder(folder, recursive);
+        };
+        shell.onMoveFolder = function(source, parent) {
+            if (onMoveFolder != null) onMoveFolder(source, parent);
+        };
+        shell.onRevealAsset = function(source) {
+            if (onRevealAsset != null) onRevealAsset(source);
+        };
+        shell.onCopyAssetPath = function(source) {
+            if (onCopyAssetPath != null) onCopyAssetPath(source);
         };
         shell.onOpenApplicationWindow = function(kind) {
             if (onOpenApplicationWindow != null) onOpenApplicationWindow(kind);

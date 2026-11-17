@@ -33,6 +33,8 @@ class MenuDropdown extends h2d.Object {
     static inline var STATE_GUTTER:Float = 20;
 
     final context:UiContext;
+    /** Full-window catch behind the rows: any outside left-click dismisses. */
+    final dismissCatch:h2d.Interactive;
     final panel:h2d.Object;
     final panelSurface:UiSurface;
     final panelCatch:h2d.Interactive;
@@ -52,6 +54,15 @@ class MenuDropdown extends h2d.Object {
         super(parent);
         this.context = context;
         visible = false;
+
+        dismissCatch = new h2d.Interactive(1, 1, this);
+        dismissCatch.backgroundColor = 0;
+        dismissCatch.cursor = hxd.Cursor.Default;
+        dismissCatch.onPush = function(event) {
+            event.propagate = false;
+            close();
+        };
+        dismissCatch.visible = false;
 
         panel = new h2d.Object(this);
         panelSurface = new UiSurface(context, panel);
@@ -107,16 +118,26 @@ class MenuDropdown extends h2d.Object {
         // Clamp inside the window frame.
         this.x = Math.max(4, Math.min(x, context.width - panelWidth - 4));
         this.y = Math.max(4, Math.min(y, context.height - panelHeight - 4));
+        // The menu object itself is offset to the popup position; pull the
+        // catch back so it covers the whole window in screen coordinates.
+        dismissCatch.x = -this.x;
+        dismissCatch.y = -this.y;
+        dismissCatch.width = context.width;
+        dismissCatch.height = context.height;
+        dismissCatch.visible = true;
         visible = true;
         isOpen = true;
+        Sys.println('[probe] menu open');
     }
 
     public function close():Void {
         if (!isOpen) return;
         clearRows(panelRows);
         closeSubmenu();
+        dismissCatch.visible = false;
         visible = false;
         isOpen = false;
+        Sys.println('[probe] menu close');
     }
 
     function closeSubmenu():Void {

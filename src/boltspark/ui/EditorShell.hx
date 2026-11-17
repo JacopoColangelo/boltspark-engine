@@ -23,6 +23,7 @@ import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.AssetBrowser;
 import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
+import boltspark.project.ProjectSession.AssetDetails;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.widgets.NumericDragField;
 import boltspark.ui.widgets.ScrollBar;
@@ -179,6 +180,8 @@ class EditorShell {
     public var onInspectorReset:Null<Int->String->Void>;
     public var onInspectorLinkChanged:Null<Int->String->Bool->Void>;
     public var onAddComponent:Null<String->Void>;
+    /** Component index whose header remove action was clicked. */
+    public var onRemoveComponent:Null<Int->Void>;
     public var onViewportClick:Null<Float->Float->Void>;
     public var onToolChanged:Null<Int->Void>;
     /** `true` selects Local axes; `false` selects World axes. */
@@ -207,6 +210,13 @@ class EditorShell {
     public var onNewFolder:Null<String->String>;
     public var onMoveAsset:Null<String->String->Void>;
     public var onCopyAsset:Null<String->String->Void>;
+    public var onQueryAssetDetails:Null<String->AssetDetails>;
+    public var onDeleteAssets:Null<Array<String>->Void>;
+    public var onDuplicateAsset:Null<String->Void>;
+    public var onDeleteFolder:Null<String->Bool->Void>;
+    public var onMoveFolder:Null<String->String->Void>;
+    public var onRevealAsset:Null<String->Void>;
+    public var onCopyAssetPath:Null<String->Void>;
     /** Application-level dialogs are routed upward and hosted in native windows. */
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Opportunistically initialize a hidden host before its menu command runs. */
@@ -809,6 +819,16 @@ class EditorShell {
         // Input diagnostics are intentionally not surfaced in the shipped status bar.
         input.onDeletePressed = function() {
             if (anyTextCaptureActive()) return;
+            if (activeBottomTab == 0) {
+                if (assetBrowser.hasSelection()) {
+                    assetBrowser.deleteSelection();
+                    return;
+                }
+                if (assetBrowser.hasFolderSelection()) {
+                    assetBrowser.deleteSelectedFolder();
+                    return;
+                }
+            }
             deleteSelection();
         };
         input.onUndoPressed = function() {
@@ -850,6 +870,15 @@ class EditorShell {
             if (selectedObjectId < 0) return;
             beginRenameFor(selectedObjectId);
         };
+        // Asset Browser contextual shortcuts. These are deliberately not added
+        // to the rebindable registry: they act only while the browser tab is
+        // frontmost, and the text-capture guard keeps them out of text fields.
+        input.onRawKeyDown = function(keyCode) {
+            if (activeBottomTab != 0 || anyTextCaptureActive()) return;
+            if (assetBrowser.handleShortcut(keyCode,
+                    hxd.Key.isDown(hxd.Key.CTRL), hxd.Key.isDown(hxd.Key.SHIFT),
+                    hxd.Key.isDown(hxd.Key.ALT))) return;
+        };
         // Tool shortcuts (1 Move / E Rotate / R Scale by default) share the
         // text-capture guard: typing in a field must not hijack the keypress.
         input.onShortcutPressed = function(tool:Int) {
@@ -879,6 +908,9 @@ class EditorShell {
             if (menuDropdown.isOpen) {
                 menuDropdown.close();
                 return;
+            }
+            if (activeBottomTab == 0 && !anyTextCaptureActive()) {
+                assetBrowser.clearSelection();
             }
             closePaletteIfOpen();
         };
@@ -971,6 +1003,27 @@ class EditorShell {
         };
         assetBrowser.onCopyAsset = function(source, folder) {
             if (onCopyAsset != null) onCopyAsset(source, folder);
+        };
+        assetBrowser.onDeleteAssets = function(sources) {
+            if (onDeleteAssets != null) onDeleteAssets(sources);
+        };
+        assetBrowser.onQueryAssetDetails = function(source) {
+            return onQueryAssetDetails != null ? onQueryAssetDetails(source) : null;
+        };
+        assetBrowser.onDuplicateAsset = function(source) {
+            if (onDuplicateAsset != null) onDuplicateAsset(source);
+        };
+        assetBrowser.onDeleteFolder = function(folder, recursive) {
+            if (onDeleteFolder != null) onDeleteFolder(folder, recursive);
+        };
+        assetBrowser.onMoveFolder = function(source, parent) {
+            if (onMoveFolder != null) onMoveFolder(source, parent);
+        };
+        assetBrowser.onRevealAsset = function(source) {
+            if (onRevealAsset != null) onRevealAsset(source);
+        };
+        assetBrowser.onCopyAssetPath = function(source) {
+            if (onCopyAssetPath != null) onCopyAssetPath(source);
         };
         palette = new GameObjectPalette(ctx, root);
         palette.onCreatePrimitive = function(meshId) {
@@ -1808,6 +1861,9 @@ class EditorShell {
                 }
             };
             section.onEditRejected = function(message) log("inspector: " + message);
+            section.onRemoveRequested = function(index) {
+                if (onRemoveComponent != null) onRemoveComponent(index);
+            };
             var capturedSection = section;
             var capturedKey = sectionKey;
             section.onToggle = function() {
@@ -2203,7 +2259,7 @@ class EditorShell {
 
     /** True while any text-entry control owns the keyboard. */
     function anyTextCaptureActive():Bool {
-        if (assetBrowser.isRenaming()) return true;
+        if (assetBrowser.isRenaming() || assetBrowser.isSearchFocused()) return true;
         if (fovInput.isEditing()) return true;
         if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
         for (row in hierarchyRows) if (row.isRenaming()) return true;

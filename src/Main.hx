@@ -26,6 +26,7 @@ import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.PrimitiveSettings;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
+import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
 import boltspark.ui.AppIcon;
 import boltspark.ui.BoltUI;
@@ -232,6 +233,7 @@ class Main extends hxd.App {
         boltUI.onInspectorReset = resetInspectorProperty;
         boltUI.onInspectorLinkChanged = setInspectorPropertyLinked;
         boltUI.onAddComponent = addSelectedComponent;
+        boltUI.onRemoveComponent = removeSelectedComponent;
         boltUI.onToolChanged = setEditorTool;
         boltUI.onTransformSpaceChanged = setTransformSpace;
         boltUI.onViewportHover = onViewportHover;
@@ -308,7 +310,8 @@ class Main extends hxd.App {
         boltUI.onFileSaveProjectAs = fileSaveProjectAs;
         boltUI.onFileSaveScene = fileSaveScene;
         boltUI.onFileSaveAll = fileSaveAll;
-        boltUI.onQueryAssets = function() return projectSession.scanAssets();
+        boltUI.onQueryAssets = function() return projectSession.scanAllAssets();
+        boltUI.onQueryAssetDetails = function(source) return projectSession.assetDetails(source);
         boltUI.onOpenAsset = openAsset;
         boltUI.onNewScene = createAssetScene;
         boltUI.onRenameAsset = renameAsset;
@@ -318,6 +321,12 @@ class Main extends hxd.App {
         boltUI.onNewFolder = createAssetFolder;
         boltUI.onMoveAsset = moveAsset;
         boltUI.onCopyAsset = copyAsset;
+        boltUI.onDeleteAssets = deleteAssets;
+        boltUI.onDuplicateAsset = duplicateAsset;
+        boltUI.onDeleteFolder = deleteAssetFolder;
+        boltUI.onMoveFolder = moveAssetFolder;
+        boltUI.onRevealAsset = revealAsset;
+        boltUI.onCopyAssetPath = copyAssetPath;
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
@@ -790,6 +799,21 @@ class Main extends hxd.App {
             }
         } catch (error:Dynamic) {
             boltUI.log('component: could not add ${typeId}: ${Std.string(error)}');
+        }
+    }
+
+    /** Remove a component through history; the mandatory Transform is protected. */
+    function removeSelectedComponent(componentIndex:Int):Void {
+        if (editorSession.selectedObjectIds.length > 1) {
+            boltUI.log("inspector: select a single object to remove components");
+            return;
+        }
+        var selected = editorSession.findObject(editorSession.selectedObjectId);
+        if (selected == null || componentIndex <= 0
+                || componentIndex >= selected.components.length) return;
+        var label = selected.components[componentIndex].displayName;
+        if (editorSession.removeComponentAt(selected.id, componentIndex)) {
+            logActivity('component: removed ${label} from ${selected.name}');
         }
     }
 
@@ -2501,16 +2525,19 @@ class Main extends hxd.App {
 
     function renameAsset(source:String, name:String):Void {
         try {
-            projectSession.renameScene(source, name);
-            reloadEditorSession();
-            boltUI.log('asset: renamed ${source} to ${name}');
+            var target = projectSession.renameAnyAsset(source, name);
+            if (projectSession.isScenePath(source)) reloadEditorSession();
+            else boltUI.refreshAssetBrowser();
+            boltUI.log('asset: renamed ${source} to ${target}');
         } catch (e:Dynamic) reportProjectError('rename asset', e);
     }
 
     function deleteAsset(source:String):Void {
+        if (!confirmDestructive("Delete asset", 'Delete ${source}? This cannot be undone.')) return;
         try {
-            projectSession.deleteScene(source);
-            reloadEditorSession();
+            projectSession.deleteAnyAsset(source);
+            if (projectSession.isScenePath(source)) reloadEditorSession();
+            else boltUI.refreshAssetBrowser();
             boltUI.log('asset: deleted ${source}');
         } catch (e:Dynamic) reportProjectError('delete asset', e);
     }
@@ -2541,18 +2568,155 @@ class Main extends hxd.App {
 
     function moveAsset(source:String, folder:String):Void {
         try {
-            projectSession.moveScene(source, folder);
-            reloadEditorSession();
-            boltUI.log('asset: moved ${source} to ${folder}');
+            var moved = projectSession.moveAnyAsset(source, folder);
+            if (projectSession.isScenePath(source)) reloadEditorSession();
+            else boltUI.refreshAssetBrowser();
+            boltUI.log('asset: moved ${source} to ${moved}');
         } catch (e:Dynamic) reportProjectError('move asset', e);
     }
 
     function copyAsset(source:String, folder:String):Void {
         try {
-            var destination = projectSession.copyScene(source, folder);
+            var destination = projectSession.copyAnyAsset(source, folder);
             boltUI.refreshAssetBrowser();
             boltUI.log('asset: copied ${source} to ${destination}');
         } catch (e:Dynamic) reportProjectError('copy asset', e);
+    }
+
+    function deleteAssets(sources:Array<String>):Void {
+        if (sources.length == 0) return;
+        var label = sources.length == 1 ? sources[0] : '${sources.length} assets';
+        if (!confirmDestructive("Delete assets", 'Delete ${label}? This cannot be undone.')) return;
+        var scenesChanged = false;
+        try {
+            for (source in sources) {
+                if (projectSession.isScenePath(source)) scenesChanged = true;
+                projectSession.deleteAnyAsset(source);
+            }
+            if (scenesChanged) reloadEditorSession();
+            else boltUI.refreshAssetBrowser();
+            boltUI.log('asset: deleted ${sources.length} asset(s)');
+        } catch (e:Dynamic) reportProjectError('delete assets', e);
+    }
+
+    function duplicateAsset(source:String):Void {
+        try {
+            var destination = projectSession.duplicateAnyAsset(source);
+            boltUI.refreshAssetBrowser();
+            boltUI.log('asset: duplicated ${source} to ${destination}');
+        } catch (e:Dynamic) reportProjectError('duplicate asset', e);
+    }
+
+    function deleteAssetFolder(folder:String, recursive:Bool):Void {
+        // Fail visibly before confirmation when the project rule would reject
+        // it; otherwise the operation looks like it silently did nothing.
+        if (!projectSession.canDeleteFolder(folder)) {
+            printActivity('[probe] delete folder rejected=${folder}');
+            boltUI.log('folder: cannot delete ${folder} - a project must keep at least one scene');
+            #if hl
+            if (!inputProbeMode) {
+                hl.UI.dialog("Cannot delete folder",
+                    "A project must keep at least one scene. Move the scene out first.",
+                    haxe.EnumFlags.ofInt(0));
+            }
+            #end
+            return;
+        }
+        if (!confirmDestructive("Delete folder",
+                'Delete folder ${folder} and everything inside it?')) return;
+        try {
+            projectSession.deleteFolder(folder, recursive);
+            reloadEditorSession();
+            boltUI.log('folder: deleted ${folder}');
+        } catch (e:Dynamic) reportProjectError('delete folder', e);
+    }
+
+    function moveAssetFolder(source:String, parent:String):Void {
+        try {
+            var target = projectSession.moveFolder(source, parent);
+            reloadEditorSession();
+            boltUI.log('folder: moved ${source} to ${target}');
+        } catch (e:Dynamic) reportProjectError('move folder', e);
+    }
+
+    function revealAsset(source:String):Void {
+        if (!requireProject("reveal files in Explorer")) return;
+        try {
+            // The root/"All" folder has an empty relative path; reveal the
+            // project's asset root instead of feeding "" to ProjectPath.
+            var absolute = isEmptyAssetPath(source)
+                ? projectSession.assetRootPath()
+                : projectSession.absoluteAssetPath(source);
+            printActivity('[probe] reveal path=${absolute}');
+            #if hl
+            if (!inputProbeMode) {
+                // ProjectSession paths use haxe.io.Path.join, which emits "/"
+                // on HashLink. explorer.exe /select silently ignores the switch
+                // for forward-slash paths and opens a default view instead.
+                var nativePath = StringTools.replace(absolute, "/", "\\");
+                printActivity('[probe] reveal native=${nativePath}');
+                // `start` detaches from the shell immediately (~0.03s). Calling
+                // explorer.exe directly makes Sys.command wait on the shell
+                // process, which is what causes the long visible stall.
+                Sys.command('cmd /c start "" explorer.exe /select,"' + nativePath + '"');
+            }
+            #end
+        } catch (e:Dynamic) reportProjectError('reveal asset', e);
+    }
+
+    function copyAssetPath(source:String):Void {
+        if (!requireProject("copy an asset path")) return;
+        try {
+            var value = isEmptyAssetPath(source)
+                ? projectSession.assetRootPath()
+                : ProjectPath.normalizeRelative(source);
+            printActivity('[probe] copy asset path=${value}');
+            #if hl
+            // Native Windows clipboard from the bundled ui.hdll; no PowerShell
+            // process, no quoting, and no editor stall.
+            if (!inputProbeMode && !hl.UI.setClipboardText(value)) {
+                boltUI.log('asset: clipboard unavailable for ${value}');
+            }
+            #end
+        } catch (e:Dynamic) reportProjectError('copy asset path', e);
+    }
+
+    /**
+     * Explorer/clipboard actions only make sense inside a real project. With an
+     * untitled session, ask the user to create one instead of revealing the
+     * process working directory (which is not a project root).
+     */
+    function requireProject(action:String):Bool {
+        if (projectSession.projectPath != "") return true;
+        printActivity('[probe] project required for ${action}');
+        if (inputProbeMode) {
+            fileNewProject();
+            return false;
+        }
+        #if hl
+        // DialogFlags.YesNo is flag bit 1 << 0.
+        var accepted = hl.UI.dialog("No project",
+            'Create a project before you ${action}?', haxe.EnumFlags.ofInt(1));
+        if (accepted) fileNewProject();
+        #end
+        return false;
+    }
+
+    static function isEmptyAssetPath(source:String):Bool {
+        return source == null || StringTools.trim(source).length == 0;
+    }
+
+    function confirmDestructive(title:String, message:String):Bool {
+        if (inputProbeMode) {
+            printActivity('[probe] confirm ${title}=yes');
+            return true;
+        }
+        #if hl
+        // DialogFlags.YesNo is flag bit 1 << 0.
+        return hl.UI.dialog(title, message, haxe.EnumFlags.ofInt(1));
+        #else
+        return true;
+        #end
     }
 
     function fileNewProject():Void {

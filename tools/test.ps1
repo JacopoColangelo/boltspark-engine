@@ -3,6 +3,7 @@ param(
     [switch]$Build,
     [switch]$NativeSmoke,
     [switch]$CommandHistory,
+    [switch]$ComponentRemoval,
     [switch]$RotationHandoff,
     [switch]$WindowLifecycle,
     [switch]$DpiProbe,
@@ -125,7 +126,8 @@ try {
             'SceneHierarchyRepro',
             'KeybindingsMigrationRepro',
             'ProjectSerializationRepro',
-            'ProjectSessionRepro'
+            'ProjectSessionRepro',
+            'AssetBrowserRepro'
         )) {
             Invoke-Haxe ($directClassPaths + @('--interp', '-main', $test)) `
                 "Portable $test"
@@ -164,7 +166,8 @@ try {
         @{ Name = 'SceneObjectAffineRepro'; Output = 'scene-object-affine-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'KeybindingsMigrationRepro'; Output = 'keybindings-migration-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
-        @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') }
+        @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
+        @{ Name = 'AssetBrowserRepro'; Output = 'asset-browser-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') }
     )
     foreach ($test in $hlTests) {
         $output = Join-Path $testOutput $test.Output
@@ -199,6 +202,10 @@ try {
     if ($CommandHistory) {
         & (Join-Path $repoRoot 'tests\native\Test-CommandHistory.ps1')
         Assert-LastExitCode 'Native command-history test'
+    }
+    if ($ComponentRemoval) {
+        & (Join-Path $repoRoot 'tests\native\Test-ComponentRemoval.ps1')
+        Assert-LastExitCode 'Native component-removal test'
     }
     if ($RotationHandoff) {
         & (Join-Path $repoRoot 'tests\native\Test-RotationRingHandoff.ps1')
@@ -235,6 +242,8 @@ try {
     if ($AssetBrowser) {
         & (Join-Path $repoRoot 'tests\native\Test-AssetBrowser.ps1')
         Assert-LastExitCode 'Asset Browser probe'
+        & (Join-Path $repoRoot 'tests\native\Test-RevealRoot.ps1')
+        Assert-LastExitCode 'Asset Browser root reveal probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

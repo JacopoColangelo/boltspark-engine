@@ -5,6 +5,7 @@ import boltspark.engine.inspector.ComponentPropertyData;
 import boltspark.engine.inspector.ComponentPropertyKind;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
+import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiText;
 
 /** Generic retained-H2D section generated from Component property metadata. */
@@ -24,6 +25,8 @@ class ComponentInspectorSection extends InspectorSection {
     public var onReset:Null<String->Void>;
     public var onLinkChanged:Null<String->Bool->Void>;
     public var onEditRejected:Null<String->Void>;
+    /** Fired with the section's component index when its remove action is used. */
+    public var onRemoveRequested:Null<Int->Void>;
 
     final ctx:UiContext;
     final vectors:Array<VectorPropertyControls> = [];
@@ -31,6 +34,7 @@ class ComponentInspectorSection extends InspectorSection {
     final assets:Array<AssetPropertyControls> = [];
     final numbers:Array<NumberPropertyControls> = [];
     final bools:Array<BoolPropertyControls> = [];
+    final removeButton:Null<UiButton>;
     var hasLinkAction:Bool = false;
     var widthValue:Float = 0;
 
@@ -40,6 +44,23 @@ class ComponentInspectorSection extends InspectorSection {
         this.ctx = ctx;
         componentIndex = data.componentIndex;
         typeId = data.typeId;
+
+        // Mandatory components (Transform) publish removable=false and get no
+        // header action. The button is parented after the section hit area so
+        // it captures its own clicks instead of collapsing the section.
+        removeButton = data.removable
+            ? new UiButton(ctx, "", ACTION_WIDTH,
+                Theme.SECTION_HEADER_HEIGHT - 4, this)
+            : null;
+        if (removeButton != null) {
+            removeButton.setIcon(Trash);
+            removeButton.setQuiet();
+            removeButton.setDanger();
+            var index = data.componentIndex;
+            removeButton.onClick = function() {
+                if (onRemoveRequested != null) onRemoveRequested(index);
+            };
+        }
 
         var row = 0;
         for (property in data.properties) {
@@ -66,6 +87,10 @@ class ComponentInspectorSection extends InspectorSection {
     override public function setWidth(width:Float):Void {
         widthValue = Math.max(0, width);
         super.setWidth(widthValue);
+        if (removeButton != null) {
+            removeButton.x = Math.max(0, widthValue - 4 - ACTION_WIDTH);
+            removeButton.y = 2;
+        }
         layoutControls();
     }
 

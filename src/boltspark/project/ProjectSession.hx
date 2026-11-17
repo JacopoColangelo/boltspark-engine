@@ -12,6 +12,31 @@ typedef AssetFileInfo = {
     var kind:String;
     var active:Bool;
     var registered:Bool;
+    /** Lower-case extension without the dot ("" for extensionless files). */
+    var extension:String;
+    /** Human-readable type label from AssetTypeRegistry. */
+    var kindLabel:String;
+    /** True only when the engine has a real loader for this file. */
+    var loadable:Bool;
+};
+
+/** On-demand metadata for one asset, fetched for the inspector only. */
+typedef AssetDetails = {
+    var source:String;
+    var name:String;
+    var folder:String;
+    var kind:String;
+    var kindLabel:String;
+    var extension:String;
+    var loadable:Bool;
+    var registered:Bool;
+    var active:Bool;
+    /** Absolute path on disk. */
+    var absolutePath:String;
+    /** Byte length, or -1 when the file disappeared. */
+    var size:Int;
+    /** Last-modified epoch seconds, or -1 when unavailable. */
+    var modified:Float;
 };
 
 /**
@@ -181,15 +206,18 @@ class ProjectSession {
             }
             var lower = entry.toLowerCase();
             if (!StringTools.endsWith(lower, "." + SCENE_EXT)) continue;
-            var kind = "scene";
+            var info = AssetTypeRegistry.infoFor(entry);
             var name = new Path(entry).file;
             output.push({
                 source: childRelative,
                 name: name,
                 folder: relative,
-                kind: kind,
+                kind: info.kind,
                 active: false,
-                registered: false
+                registered: false,
+                extension: info.extension,
+                kindLabel: info.label,
+                loadable: info.loadable
             });
         }
     }
@@ -218,15 +246,383 @@ class ProjectSession {
         }
     }
 
-    /** Create a folder under the project root; returns its relative path. */
+    /**
+     * Scan every user-visible file under the project root. Recognized formats
+     * get their engine kind; unknown files stay listed as generic files so the
+     * browser mirrors the filesystem without implying the engine can import
+     * them. Internal files (manifest, backups, dot files) are skipped.
+     */
+    public function scanAllAssets():Array<AssetFileInfo> {
+        var result:Array<AssetFileInfo> = [];
+        if (projectPath == "") return result;
+        collectAllAssets(projectRootDir(), "", result);
+        result.sort(function(a, b) {
+            var folderOrder = a.folder == b.folder ? 0 : (a.folder < b.folder ? -1 : 1);
+            if (folderOrder != 0) return folderOrder;
+            return a.name == b.name ? 0 : (a.name < b.name ? -1 : 1);
+        });
+        var registered = sceneSources();
+        for (asset in result) {
+            asset.active = asset.loadable && asset.source == sceneSource;
+            asset.registered = registered.indexOf(asset.source) >= 0;
+        }
+        return result;
+    }
+
+    static function collectAllAssets(root:String, relative:String,
+            output:Array<AssetFileInfo>):Void {
+        var directory = relative == "" ? root : Path.join([root, relative]);
+        if (!sys.FileSystem.exists(directory)
+                || !sys.FileSystem.isDirectory(directory)) return;
+        for (entry in sys.FileSystem.readDirectory(directory)) {
+            if (AssetTypeRegistry.isInternal(entry)) continue;
+            var childRelative = relative == "" ? entry : relative + "/" + entry;
+            var fullPath = Path.join([root, childRelative]);
+            if (sys.FileSystem.isDirectory(fullPath)) {
+                collectAllAssets(root, childRelative, output);
+                continue;
+            }
+            var info = AssetTypeRegistry.infoFor(entry);
+            output.push({
+                source: childRelative,
+                name: new Path(entry).file,
+                folder: relative,
+                kind: info.kind,
+                active: false,
+                registered: false,
+                extension: info.extension,
+                kindLabel: info.label,
+                loadable: info.loadable
+            });
+        }
+    }
+
+    /** Metadata for one asset, fetched on demand by the inspector. */
+    public function assetDetails(source:String):AssetDetails {
+        var normalized = ProjectPath.normalizeRelative(source);
+        var info = AssetTypeRegistry.infoFor(new Path(normalized).file);
+        var rawExtension = new Path(normalized).ext;
+        var actualExtension = rawExtension == null ? "" : rawExtension.toLowerCase();
+        var absolute = resolveAgainst(projectRootDir(), normalized);
+        var size = -1;
+        var modified = -1.0;
+        try {
+            if (sys.FileSystem.exists(absolute)) {
+                var stat = sys.FileSystem.stat(absolute);
+                size = stat.size;
+                modified = stat.mtime.getTime() / 1000;
+            }
+        } catch (_:Dynamic) {}
+        return {
+            source: normalized,
+            name: new Path(normalized).file,
+            folder: normalizeFolder(new Path(normalized).dir),
+            kind: info.kind,
+            kindLabel: info.label,
+            extension: actualExtension,
+            loadable: info.loadable,
+            registered: isRegisteredScene(normalized),
+            active: info.loadable && normalized == sceneSource,
+            absolutePath: absolute,
+            size: size,
+            modified: modified
+        };
+    }
+
+    /** True when a source uses the one format the engine can load. */
+    public function isScenePath(source:String):Bool {
+        return StringTools.endsWith(ProjectPath.normalizeRelative(source).toLowerCase(),
+            "." + SCENE_EXT);
+    }
+
+    /** Absolute path of a project-relative source, for reveal/copy-path. */
+    public function absoluteAssetPath(source:String):String {
+        return resolveAgainst(projectRootDir(), ProjectPath.normalizeRelative(source));
+    }
+
+    /**
+     * Absolute path of the asset root itself. An empty relative source (the
+     * "All / Content" folder) has no ProjectPath representation, so callers
+     * that reveal or copy a path must use this instead of normalizeRelative("").
+     * Before a project is created the working directory is the asset root.
+     */
+    public function assetRootPath():String {
+        return sys.FileSystem.absolutePath(projectRootDir());
+    }
+
+    // ------------------------------------------------------------------
+    // Generic asset operations
+    //
+    // The scene-specific methods above keep their manifest bookkeeping. These
+    // helpers extend the same commands to generic files and folders so the
+    // browser never offers an action it cannot actually perform.
+    // ------------------------------------------------------------------
+
+    public function renameAnyAsset(source:String, newName:String):String {
+        var normalized = ProjectPath.normalizeRelative(source);
+        if (isRegisteredScene(normalized)) {
+            renameScene(normalized, newName);
+            return sceneSource;
+        }
+        var path = new Path(normalized);
+        var base = sanitizeAssetName(newName, path.ext == null ? "" : path.ext);
+        var target = path.dir == "" ? base : path.dir + "/" + base;
+        target = ProjectPath.normalizeRelative(target);
+        var from = resolveAgainst(projectRootDir(), normalized);
+        var to = resolveAgainst(projectRootDir(), target);
+        requireExists(from);
+        if (to != from && sys.FileSystem.exists(to)) {
+            throw 'A file already exists at ${target}';
+        }
+        sys.FileSystem.rename(from, to);
+        return target;
+    }
+
+    public function deleteAnyAsset(source:String):Void {
+        var normalized = ProjectPath.normalizeRelative(source);
+        if (isRegisteredScene(normalized)) {
+            deleteScene(normalized);
+            return;
+        }
+        var path = resolveAgainst(projectRootDir(), normalized);
+        requireExists(path);
+        sys.FileSystem.deleteFile(path);
+        removeBackup(path);
+    }
+
+    public function moveAnyAsset(source:String, targetFolder:String):String {
+        var normalized = ProjectPath.normalizeRelative(source);
+        if (isRegisteredScene(normalized)) {
+            moveScene(normalized, targetFolder);
+            return normalized;
+        }
+        var folder = normalizeFolder(targetFolder);
+        var fileName = new Path(normalized).file;
+        var rawExtension = new Path(normalized).ext;
+        var extension = rawExtension == null ? "" : rawExtension;
+        var leaf = extension == "" ? fileName : fileName + "." + extension;
+        var destination = uniqueAssetPath(folder, leaf, "");
+        var from = resolveAgainst(projectRootDir(), normalized);
+        var to = resolveAgainst(projectRootDir(), destination);
+        requireExists(from);
+        sys.FileSystem.createDirectory(new Path(to).dir);
+        sys.FileSystem.rename(from, to);
+        return destination;
+    }
+
+    public function copyAnyAsset(source:String, targetFolder:String):String {
+        var normalized = ProjectPath.normalizeRelative(source);
+        if (isRegisteredScene(normalized)) return copyScene(normalized, targetFolder);
+        var folder = normalizeFolder(targetFolder);
+        var fileName = new Path(normalized).file;
+        var rawExtension = new Path(normalized).ext;
+        var extension = rawExtension == null ? "" : rawExtension;
+        var leaf = extension == "" ? fileName : fileName + "." + extension;
+        var destination = uniqueAssetPath(folder, leaf, "");
+        var from = resolveAgainst(projectRootDir(), normalized);
+        var to = resolveAgainst(projectRootDir(), destination);
+        requireExists(from);
+        sys.FileSystem.createDirectory(new Path(to).dir);
+        sys.io.File.copy(from, to);
+        return destination;
+    }
+
+    /** Copy an asset beside itself with a unique name. */
+    public function duplicateAnyAsset(source:String):String {
+        var normalized = ProjectPath.normalizeRelative(source);
+        return copyAnyAsset(normalized, normalizeFolder(new Path(normalized).dir));
+    }
+
+    /**
+     * Delete a folder. `recursive` must be true for non-empty folders; the UI
+     * asks for confirmation first. Registered scenes inside the folder are
+     * unregistered, and the last remaining scene can never be removed this way.
+     */
+    /** False when removing this folder would leave the project with no scene. */
+    public function canDeleteFolder(folder:String):Bool {
+        var normalized = normalizeFolder(folder);
+        if (normalized == "") return false;
+        var prefix = normalized + "/";
+        var scenesInside = 0;
+        for (asset in project.assets) {
+            if (asset.type != "scene") continue;
+            if (StringTools.startsWith(ProjectPath.normalizeRelative(asset.source), prefix)) {
+                scenesInside++;
+            }
+        }
+        return sceneSources().length - scenesInside >= 1;
+    }
+
+    public function deleteFolder(folder:String, recursive:Bool):Void {
+        var normalized = normalizeFolder(folder);
+        if (normalized == "") throw "The content root cannot be deleted.";
+        var root = projectRootDir();
+        var absolute = resolveAgainst(root, normalized);
+        requireExists(absolute);
+        if (!sys.FileSystem.isDirectory(absolute)) throw 'Not a folder: ${normalized}';
+        var prefix = normalized + "/";
+        var scenesInside = 0;
+        for (asset in project.assets) {
+            if (asset.type != "scene") continue;
+            if (StringTools.startsWith(ProjectPath.normalizeRelative(asset.source), prefix)) {
+                scenesInside++;
+            }
+        }
+        if (sceneSources().length - scenesInside < 1) {
+            throw "A project must keep at least one scene.";
+        }
+        var entries = collectRelativeEntries(absolute, normalized);
+        if (entries.length > 0 && !recursive) {
+            throw 'Folder is not empty: ${normalized}';
+        }
+        for (relative in entries) {
+            var file = resolveAgainst(root, relative);
+            if (sys.FileSystem.isDirectory(file)) continue;
+            sys.FileSystem.deleteFile(file);
+            removeBackup(file);
+        }
+        // Children first, then the folder itself.
+        entries.sort(function(a, b) return b.length - a.length);
+        for (relative in entries) {
+            var directory = resolveAgainst(root, relative);
+            if (sys.FileSystem.exists(directory) && sys.FileSystem.isDirectory(directory)) {
+                sys.FileSystem.deleteDirectory(directory);
+            }
+        }
+        var removed:Array<AssetRecord> = [];
+        for (asset in project.assets) {
+            if (asset.type == "scene"
+                    && StringTools.startsWith(ProjectPath.normalizeRelative(asset.source), prefix)) {
+                removed.push(asset);
+            }
+        }
+        for (asset in removed) project.assets.remove(asset);
+        if (StringTools.startsWith(sceneSource, prefix)) {
+            var next = sceneSources()[0];
+            scene = DocumentStore.loadScene(resolveAgainst(root, next));
+            sceneSource = next;
+            scenePath = resolveAgainst(root, next);
+        }
+        sys.FileSystem.deleteDirectory(absolute);
+        // The active scene may have lived in the removed folder. Rebind the
+        // default scene id before validation so the manifest stays consistent.
+        bindSceneAsset();
+        DocumentStore.saveProject(projectPath, project);
+        dirty = true;
+        stateChanged();
+    }
+
+    /** Move a folder (and every path inside it) under a new parent. */
+    public function moveFolder(source:String, targetParent:String):String {
+        var normalized = normalizeFolder(source);
+        if (normalized == "") throw "The content root cannot be moved.";
+        var parent = normalizeFolder(targetParent);
+        if (parent == normalized || StringTools.startsWith(parent, normalized + "/")) {
+            throw "A folder cannot be moved into itself.";
+        }
+        var parts = normalized.split("/");
+        var leaf = parts[parts.length - 1];
+        var destination = parent == "" ? leaf : parent + "/" + leaf;
+        var root = projectRootDir();
+        var from = resolveAgainst(root, normalized);
+        var to = resolveAgainst(root, destination);
+        requireExists(from);
+        if (to == from) return normalized;
+        if (sys.FileSystem.exists(to)) throw 'A folder already exists at ${destination}';
+        sys.FileSystem.createDirectory(new Path(to).dir);
+        sys.FileSystem.rename(from, to);
+        repointAssetPaths(normalized, destination);
+        DocumentStore.saveProject(projectPath, project);
+        dirty = true;
+        stateChanged();
+        return destination;
+    }
+
+    static function collectRelativeEntries(absoluteDirectory:String,
+            relative:String):Array<String> {
+        var result:Array<String> = [];
+        for (entry in sys.FileSystem.readDirectory(absoluteDirectory)) {
+            if (AssetTypeRegistry.isInternal(entry)) continue;
+            var child = relative == "" ? entry : relative + "/" + entry;
+            var full = Path.join([absoluteDirectory, entry]);
+            if (sys.FileSystem.isDirectory(full)) {
+                result.push(child);
+                for (nested in collectRelativeEntries(full, child)) result.push(nested);
+            } else {
+                result.push(child);
+            }
+        }
+        return result;
+    }
+
+    function repointAssetPaths(oldPrefix:String, newPrefix:String):Void {
+        var prefix = oldPrefix + "/";
+        for (asset in project.assets) {
+            var source = ProjectPath.normalizeRelative(asset.source);
+            if (StringTools.startsWith(source, prefix)) {
+                asset.source = newPrefix + "/" + source.substr(prefix.length);
+            }
+        }
+        if (StringTools.startsWith(sceneSource, prefix)) {
+            sceneSource = newPrefix + "/" + sceneSource.substr(prefix.length);
+            scenePath = resolvePath(sceneSource);
+        }
+    }
+
+    function uniqueAssetPath(folder:String, leaf:String, exclude:String):String {
+        var path = new Path(leaf);
+        var base = path.file;
+        var extension = path.ext == null ? "" : path.ext;
+        var candidate = folder == "" ? leaf : folder + "/" + leaf;
+        var suffix = 2;
+        while (candidate != exclude
+                && sys.FileSystem.exists(resolveAgainst(projectRootDir(), candidate))) {
+            var name = base + " " + suffix + (extension == "" ? "" : "." + extension);
+            candidate = folder == "" ? name : folder + "/" + name;
+            suffix++;
+        }
+        return candidate;
+    }
+
+    static function sanitizeAssetName(name:String, extension:String):String {
+        var base = safeFileName(name);
+        if (extension.length > 0
+                && !StringTools.endsWith(base.toLowerCase(), "." + extension.toLowerCase())) {
+            base += "." + extension;
+        }
+        return base;
+    }
+
+    function isRegisteredScene(source:String):Bool {
+        var normalized = ProjectPath.normalizeRelative(source);
+        for (asset in project.assets) {
+            if (asset.type != "scene") continue;
+            if (ProjectPath.normalizeRelative(asset.source) == normalized) return true;
+        }
+        return false;
+    }
+
+    static function normalizeFolder(folder:String):String {
+        var trimmed = StringTools.trim(folder).split("\\").join("/");
+        if (trimmed == "" || trimmed == "/") return "";
+        while (trimmed.length > 1 && StringTools.endsWith(trimmed, "/")) {
+            trimmed = trimmed.substr(0, trimmed.length - 1);
+        }
+        return ProjectPath.normalizeRelative(trimmed);
+    }
+
+    /**
+     * Create a folder under `parent`. An empty parent means the Content root;
+     * callers that want a subfolder pass an explicit folder path.
+     */
     public function createFolder(parent:String, name:String):String {
         if (projectPath == "") throw "Open or create a project before creating folders.";
-        var root = assetFolder(parent);
+        var root = normalizeFolder(parent);
         var base = safeFileName(name);
-        var relative = root + "/" + base;
+        var relative = root == "" ? base : root + "/" + base;
         var suffix = 2;
         while (sys.FileSystem.exists(resolveAgainst(projectRootDir(), relative))) {
-            relative = root + "/" + base + " " + suffix;
+            relative = root == "" ? base + " " + suffix : root + "/" + base + " " + suffix;
             suffix++;
         }
         sys.FileSystem.createDirectory(resolveAgainst(projectRootDir(), relative));
@@ -277,14 +673,12 @@ class ProjectSession {
         var normalized = ProjectPath.normalizeRelative(source);
         var asset = requireSceneAsset(normalized);
         var folder = assetFolder(targetFolder);
-        var destination = folder + "/" + new Path(normalized).file + "." + SCENE_EXT;
+        var fileName = new Path(normalized).file + "." + SCENE_EXT;
+        var destination = uniqueAssetPath(folder, fileName, normalized);
         if (destination == normalized) return;
         var from = resolveAgainst(projectRootDir(), normalized);
         var to = resolveAgainst(projectRootDir(), destination);
         requireExists(from);
-        if (sys.FileSystem.exists(to)) {
-            throw 'An asset already exists at ${destination}';
-        }
         sys.FileSystem.createDirectory(new Path(to).dir);
         sys.FileSystem.rename(from, to);
         asset.source = destination;

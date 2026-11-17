@@ -51,6 +51,13 @@ class InputAdapter {
     public var onCutPressed:Null<Void->Void>;
     /** The native window lost keyboard focus; release held navigation state. */
     public var onWindowFocusLost:Null<Void->Void>;
+    /**
+     * Raw key-down notification after rebindable actions have been dispatched.
+     * Consumers must apply their own focus/text guards. The Asset Browser uses
+     * this for contextual shortcuts (Ctrl+F/A/R, Backspace, Enter, Alt+arrows)
+     * without adding hardcoded action keys to the keybindings registry.
+     */
+    public var onRawKeyDown:Null<Int->Void>;
     /** Returns true only while RMB fly navigation owns the viewport. */
     public var viewportNavigationQuery:Null<Void->Bool>;
 
@@ -247,6 +254,7 @@ class InputAdapter {
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
                     onEscapePressed();
                 }
+                if (onRawKeyDown != null) onRawKeyDown(event.keyCode);
                 refresh();
             case EKeyUp:
                 keyUpCount++;

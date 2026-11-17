@@ -127,6 +127,14 @@ pickers and `setInspectorBool()` for toggles. Asset properties publish their
 accepted type plus their options, so the same picker works for meshes,
 materials, and future asset families.
 
+### Removing components in the editor
+
+Each removable component section shows a trash action in its header. Clicking
+it routes through `EditorSession.removeComponentAt()` and command history, so
+removal is undoable and the detached instance receives `onDestroy()` exactly
+once. The mandatory Transform publishes `removable = false` and gets no header
+action. Like Add Component, removal is limited to a single selected object.
+
 Serializable component types register factories with `ComponentRegistry` and
 return a versioned `ComponentData` from `toComponentData()`. Transform remains
 in the scene schema's top-level `transform` field for schema-1 compatibility.

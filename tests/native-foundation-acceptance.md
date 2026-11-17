@@ -90,6 +90,7 @@ M9 release hardening. They remain unchecked and must not be described as passed.
 - [x] Clear all removes the console history.
 - [x] Normal editor sessions do not flood the Output Log with startup, tool-switch, selection, transform, snapping, or gizmo telemetry. After launch, a Rotate switch, and a viewport selection change, the panel remained empty and development stdout contained only the required DX12 driver identity; `BOLTSPARK_PROBE`/`BOLTSPARK_VERBOSE_LOGS` restores detailed diagnostics for automated probes (`bin/quiet-console.png`, `bin/quiet-console-stdout.txt`, `bin/verbose-console-probe-stdout.txt`).
 - [x] Inspector thumb dragging reveals later properties clipped by a short panel (`bin/thumb-inspector-before.png`, `bin/thumb-inspector-after-down.png`).
+- [x] Each removable component section exposes a header trash action; clicking it detaches the component and commits one undoable `Remove <Component>` command. The mandatory Transform publishes `removable = false` and has no remove action (`tests/native/Test-ComponentRemoval.ps1`, `tests/repro/ComponentSystemRepro.hx`).
 - [x] Inspector wheel scrolling is direction-correct over property values, while a value owns keyboard focus, and directly over the scrollbar (`bin/wheel-property-after-down.png`, `bin/wheel-property-focused-after-down.png`, `bin/wheel-scrollbar-after-down.png`).
 - [x] Shift-click selects a contiguous range in the hierarchy.
 - [x] Left-clicking empty hierarchy list space or uncovered hierarchy header chrome clears keyboard focus and object selection, while rows and Search retain their own behavior (`bin/hierarchy-empty-body-deselect.png`, `bin/hierarchy-empty-header-deselect.png`, `bin/hierarchy-search-preserves-selection.png`).
@@ -259,6 +260,19 @@ hosted Windows CI job.
   (`tests/native/Test-AssetBrowser.ps1`). Probe hooks
   substitute scripted paths for the modal OS picker so the real menu → command →
   storage path is tested.
+- [x] The professional two-pane Asset Browser adds folder tree / grid+list,
+  breadcrumb + back/forward/up navigation, live search,
+  type filtering, four sort keys, adjustable thumbnail size, compact and detail
+  views, multi-selection, tooltips, favorites and recent assets, real generic
+  file/folder operations, direct drag-to-move with Ctrl-to-copy, draggable and
+  nestable folders, root-level folder creation, and contextual shortcuts. Its
+  data layer is covered by headless assertions (`tests/repro/AssetBrowserRepro.hx`), the original
+  native interaction probe still passes
+  (`tests/native/Test-AssetBrowser.ps1`), and the rendered layout was inspected
+  in a DX12 PrintWindow capture (`bin/test-results/asset-browser-visual/asset-browser.png`).
+  Reveal in Explorer on the root "All" folder with no project loaded prompts
+  project creation instead of throwing or opening a stray directory
+  (`tests/native/Test-RevealRoot.ps1`).
 - [ ] Visual click-through of the native Windows file-picker chrome itself.
   The command path is automated above; the modal OS dialog rendering is not.
 - [x] The renderer-independent ordered scene graph rejects hierarchy cycles,

@@ -61,6 +61,11 @@ class SearchField extends h2d.Object {
 
     public inline function isFocused():Bool return focused;
 
+    /** Focus the underlying text input (used by the Asset Browser Ctrl+F). */
+    public function focusInput():Void {
+        input.focus();
+    }
+
     public function setWidth(value:Float):Void {
         widthValue = Math.max(0, value);
         layout();
