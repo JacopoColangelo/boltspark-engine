@@ -131,6 +131,7 @@ Double-clicking `*.boltproject` requires an explicit, user-level association (no
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — master development plan (do not modify)
 - [`docs/TESTING.md`](docs/TESTING.md) — tracked portable/native test matrix and commands
 - [`docs/ASSET_BROWSER.md`](docs/ASSET_BROWSER.md) — three-pane Asset Browser design, scope decision, and verification
+- [`docs/UI_CONVENTIONS.md`](docs/UI_CONVENTIONS.md) — stable BoltUI cursor, menu, popover, alignment, and icon rules
 - [`docs/PROJECT_FORMAT.md`](docs/PROJECT_FORMAT.md) — initial versioned project/scene contracts
 - [`docs/COMPONENT_SYSTEM.md`](docs/COMPONENT_SYSTEM.md) — GameObject/component APIs, lifecycle, rendering, and extension
 - [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) — measured 15-minute idle/resize baseline

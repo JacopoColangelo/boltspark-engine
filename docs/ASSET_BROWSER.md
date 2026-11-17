@@ -34,10 +34,15 @@ recreating Unreal/Unity asset infrastructure.
 - Two panes: hierarchical folder tree (left) and a full-width asset area
   (center). There is deliberately no per-asset inspector panel, matching the
   Unreal/Godot content-browser model; metadata is available in the detail list.
-- Responsive toolbar: back / forward / parent, breadcrumb, live search, type
-  filter, sort, grid / compact-list / detail-list modes, a Settings button that
-  opens a thumbnail-size slider, favorites, refresh, and the original Add menu.
-  Without an inspector the grid uses the full remaining width.
+- Responsive toolbar: back / forward / parent, breadcrumb, live search, separate
+  labeled **Filter** and **Sort** buttons (each with its own short menu, so
+  neither becomes a catch-all as options grow), a Settings popover that holds
+  both the grid / compact-list / detail-list view switcher and the shared
+  `UiSlider` (thin rail, teal fill, tiny rectangular handle, value in an inset
+  field), and the original Add menu. The inert Refresh button was removed;
+  Ctrl+R and the context-menu Refresh entry remain. Favorites moved to a
+  compact star in the folder header. Without an inspector the grid uses the
+  full remaining width.
 - Right-clicking empty space or a folder opens a compact context menu whose
   first item is a **New…** submenu (Folder first, then Scene). This keeps the
   menu short so more creation actions can be added later. Paste, Select All,
@@ -62,16 +67,21 @@ recreating Unreal/Unity asset infrastructure.
   Content root; nested folders are an explicit right-click choice.
 
 ### Browsing
-- Grid with adjustable thumbnails, compact list, and detail list (Name / Type /
-  Size / Modified), adaptive columns, lazy on-demand metadata for size and
-  date, single / Ctrl / Shift multi-selection, hover feedback, delayed tooltips
-  with the full relative path, ACTIVE badge, and favorite marker.
+- Grid with large, size-adaptive thumbnails using Tabler's `outline/photo`
+  scene glyph for loadable assets and a neutral document preview for generic
+  files, compact list, and
+  detail list (Name / Type / Size / Modified), adaptive columns, lazy on-demand
+  metadata for size and date, single / Ctrl / Shift multi-selection, hover
+  feedback, a small ACTIVE dot, and a favorite marker. The old per-tile type
+  caption and the persistent status sentence were removed as clutter; transient
+  errors still appear briefly at the bottom of the pane.
 
 ### Search / sort / filter
 - Search matches name, file name, relative path, folder, extension, kind and
   type label, updating on every keystroke.
-- Filters: all files, scenes, generic files, favorites, recent.
-- Sort by name / type / size / modified, ascending or descending.
+- Filter menu: all files, scenes, generic files, favorites, recent.
+- Sort menu: name / type / size / modified, ascending or descending. It is a
+  separate button and menu so future filter or sort options grow independently.
 
 ### Operations
 - Open, rename, duplicate, copy, cut, paste, delete (single confirm for a whole
@@ -108,6 +118,7 @@ recreating Unreal/Unity asset infrastructure.
 |---|---|
 | `src/boltspark/project/AssetTypeRegistry.hx` | Central registry of recognized extensions and internal-file exclusions. |
 | `src/boltspark/ui/widgets/AssetBrowserStore.hx` | JSON persistence for favorites, recent, folder width, and view preferences. |
+| `src/boltspark/ui/widgets/UiSlider.hx` | Reusable editor slider: thin rail, accent fill, small rectangular handle, inset value field. |
 | `tests/repro/AssetBrowserRepro.hx` | Headless assertions covering registry, discovery, metadata, generic file/folder operations, root-level folder creation, asset-root resolution, and store persistence. |
 
 ## Files modified
@@ -137,9 +148,10 @@ recreating Unreal/Unity asset infrastructure.
 - **Lazy metadata.** `scanAllAssets` stores only path/kind; size and modified
   date are fetched by `assetDetails` when the inspector or sort needs them and
   cached per refresh.
-- **No new render pipeline.** Thumbnails are the existing exact-size Tabler
-  icon atlas, tinted through `UiIcons`, because the engine has no image assets
-  to decode. No model or audio previews exist to reuse.
+- **No new render pipeline.** Thumbnails are Tabler alpha-mask PNGs tinted
+  through `UiIcons`: the exact-size 6-16px atlas for small controls and a 64px
+  `outline/photo` mask for scene preview tiles. The engine has no image assets
+  to decode, and no model or audio previews exist to reuse.
 - **Probe stability.** Existing tile/folder geometry, Add menu layout, context
   menu row order, and `[probe]` lines were retained so the tracked native test
   still drives the real UI unchanged.
@@ -169,12 +181,15 @@ build 26300 x64:
   -ProjectFiles -AssetBrowser` — pass; all requested native and release checks
   succeeded.
 - Visual verification: DX12 `PrintWindow` capture at
-  `bin/test-results/asset-browser-visual/asset-browser.png`.
+  `bin/test-results/asset-browser-visual/asset-browser.png`; the redesigned
+  view (plus open filter and size-slider popovers) is captured as
+  `asset-browser-redesign.png`, `asset-browser-filter-menu.png`, and
+  `asset-browser-settings.png` in the same folder.
 
 ## Remaining limitations
 
 - **No filesystem watcher.** External changes are picked up by manual refresh
-  (Refresh button, Ctrl+R, or tab activation). The project had no watcher
+  (Ctrl+R, the context-menu Refresh entry, or tab activation). The project had no watcher
   infrastructure to reuse, avoiding a background rescan that could block the
   render loop.
 - **No OS drag-in.** Dragging files from Windows Explorer into the dock is not
@@ -182,9 +197,10 @@ build 26300 x64:
   multi-asset and folder drags are supported.
 - **No cross-panel asset drop.** Assets use an internal path-array payload, but
   no other editor panel currently consumes it.
-- **No image/texture thumbnails.** The engine cannot load image files, so
-  previews for `.boltscene` and generic files are type icons rather than
-  rendered content.
+- **No real image/texture thumbnails.** The engine cannot load image files, so
+  previews for `.boltscene` and generic files are Tabler icon stand-ins rather
+  than rendered content. They scale with the thumbnail-size slider instead of
+  staying a fixed 16px atlas icon.
 - **Explorer integration is Windows-shell based.** Reveal launches
   `explorer.exe /select,<native path>`; project paths use forward slashes
   internally, so the handler converts them to Windows separators before the

@@ -31,10 +31,13 @@ class SceneSerializer {
                 var serialized = ComponentRegistry.serialize(component);
                 if (serialized != null) components.push(serialized);
             }
+            var extras:Dynamic = {};
+            if (!object.visible) Reflect.setField(extras, "visible", false);
+            if (!object.enabled) Reflect.setField(extras, "enabled", false);
             document.entities.push(new SceneEntityData(object.persistentId,
                 object.name,
                 object.parent == null ? null : object.parent.persistentId,
-                data, components));
+                data, components, extras));
         }
         ProjectValidator.validateScene(document);
         return document;
@@ -49,9 +52,13 @@ class SceneSerializer {
         for (entity in document.entities) {
             var components = [for (component in entity.components)
                 ComponentRegistry.deserialize(component)];
+            var storedVisible = Reflect.field(entity.extraFields, "visible");
+            var storedEnabled = Reflect.field(entity.extraFields, "enabled");
             var object = session.addInitialObject(entity.name,
                 toEditorTransform(entity.transform), entity.id,
-                components);
+                components, -1, -1,
+                storedVisible == null ? true : storedVisible,
+                storedEnabled == null ? true : storedEnabled);
             entityToObject.set(entity.id, object);
         }
 

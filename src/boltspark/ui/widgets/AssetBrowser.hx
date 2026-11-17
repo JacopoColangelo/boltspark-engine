@@ -12,6 +12,7 @@ import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
 import boltspark.ui.UiTextInput;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
+import boltspark.ui.widgets.UiSlider;
 import hxd.Key;
 
 typedef FolderNode = {
@@ -60,6 +61,8 @@ class AssetBrowser extends h2d.Object {
     static inline var ROW_HEIGHT:Float = 22;
     static inline var LIST_ROW_HEIGHT:Float = 20;
     static inline var TILE_GAP:Float = 8;
+    /** Space reserved under a grid preview for its name. */
+    static inline var TILE_LABEL_HEIGHT:Float = 20;
     static inline var DETAILS_NAME_WIDTH:Float = 168;
     static inline var DETAILS_COL_WIDTH:Float = 72;
 
@@ -80,7 +83,9 @@ class AssetBrowser extends h2d.Object {
     final listMask:h2d.Mask;
     final gridScroll:ScrollBar;
 
-    final navGlyphs:h2d.Graphics;
+    final backGlyph:h2d.Graphics;
+    final forwardGlyph:h2d.Graphics;
+    final upGlyph:h2d.Graphics;
     final backButton:h2d.Interactive;
     final forwardButton:h2d.Interactive;
     final upButton:h2d.Interactive;
@@ -92,14 +97,15 @@ class AssetBrowser extends h2d.Object {
     final viewDetailsButton:UiButton;
     final settingsButton:UiButton;
     final settingsPanel:UiSurface;
+    final settingsHeader:UiSurface;
+    final settingsDivider:UiSurface;
     final settingsCatch:h2d.Interactive;
+    final settingsViewTitle:UiText;
     final settingsTitle:UiText;
-    final settingsValue:UiText;
-    final settingsTrack:h2d.Graphics;
-    final settingsThumb:h2d.Interactive;
+    final settingsSlider:UiSlider;
     var settingsOpen:Bool = false;
-    final refreshButton:UiButton;
-    final favoriteButton:UiButton;
+    final favoriteHeaderStar:h2d.Graphics;
+    final favoriteHeaderHit:h2d.Interactive;
     final filterMenu:MenuDropdown;
     final sortMenu:MenuDropdown;
     final favoriteMenu:MenuDropdown;
@@ -131,7 +137,7 @@ class AssetBrowser extends h2d.Object {
     var sortAsc:Bool = true;
     var foldersFirst:Bool = true;
     var viewMode:Int = 0;
-    var thumbnailSize:Int = 88;
+    var thumbnailSize:Int = 104;
 
     final detailCache:Map<String, AssetDetails> = [];
 
@@ -209,15 +215,17 @@ class AssetBrowser extends h2d.Object {
         statusText = new UiText(ctx.captionFont, this);
         statusText.textColor = Theme.MUTED;
         statusText.lineBreak = false;
+        statusText.visible = false;
 
-        // Navigation cluster. Glyphs are drawn directly onto the toolbar so
-        // no new atlas icons are required and hover state is drawn explicitly.
-        navGlyphs = new h2d.Graphics(this);
+        // Navigation cluster uses pinned Tabler glyphs, tinted by availability.
+        backGlyph = new h2d.Graphics(this);
+        forwardGlyph = new h2d.Graphics(this);
+        upGlyph = new h2d.Graphics(this);
         backButton = makeNavHit(goBack);
         forwardButton = makeNavHit(goForward);
         upButton = makeNavHit(navigateToParent);
 
-        searchField = new SearchField(ctx, "Search assets\u2026", 150, 18, this);
+        searchField = new SearchField(ctx, "Search assets\u2026", 220, 20, this);
         searchField.onChange = function(value) {
             searchText = StringTools.trim(value.toLowerCase());
             scrollValue = 0;
@@ -225,50 +233,81 @@ class AssetBrowser extends h2d.Object {
             Sys.println('[probe] asset browser search=${searchText}');
         };
 
-        filterButton = new UiButton(ctx, "All types", 78, 18, this);
-        filterButton.setQuiet();
+        // Filter and sort stay separate so neither menu has to grow into a
+        // catch-all as more options are added later.
+        filterButton = new UiButton(ctx, "All", 90, 20, this);
+        filterButton.setIcon(Filter);
+        filterButton.setIconSize(14);
         filterButton.onClick = openFilterMenu;
-        sortButton = new UiButton(ctx, "Name \u2191", 76, 18, this);
-        sortButton.setQuiet();
+        sortButton = new UiButton(ctx, "Name \u2191", 96, 20, this);
+        sortButton.setIcon(Sort);
+        sortButton.setIconSize(14);
         sortButton.onClick = openSortMenu;
 
-        viewGridButton = makeIconButton(this, "", function() setViewMode(0), null, Grid);
-        viewListButton = makeIconButton(this, "", function() setViewMode(1), null, Hierarchy);
-        viewDetailsButton = makeIconButton(this, "", function() setViewMode(2), null, Sliders);
-        settingsButton = new UiButton(ctx, "", 22, 18, this);
-        settingsButton.setIcon(Sliders);
-        settingsButton.onClick = openSettings;
+        // View modes live in the settings popover, not the toolbar. Framed
+        // buttons read as one aligned segmented control (quiet buttons would
+        // leave bare icons next to a bordered selected one).
+        viewGridButton = makeIconButton(menus, function() setViewMode(0), Grid).setQuiet(false);
+        viewListButton = makeIconButton(menus, function() setViewMode(1), List).setQuiet(false);
+        viewDetailsButton = makeIconButton(menus, function() setViewMode(2), Table).setQuiet(false);
+        settingsButton = makeIconButton(this, openSettings, Settings);
 
         settingsCatch = new h2d.Interactive(1, 1, menus);
         settingsCatch.backgroundColor = 0;
+        // The full-window dismiss catch must not show the pointing-hand cursor
+        // through transparent parts of the settings popover.
+        settingsCatch.cursor = hxd.Cursor.Default;
         settingsCatch.onPush = function(event) {
             event.propagate = false;
             closeSettings();
         };
         settingsPanel = new UiSurface(ctx, menus);
         settingsPanel.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
+        settingsHeader = new UiSurface(ctx, menus);
+        settingsHeader.setStyle(Theme.PANEL_HEADER, Theme.BORDER, 0);
+        settingsDivider = new UiSurface(ctx, menus);
+        settingsDivider.setStyle(Theme.BORDER, Theme.BORDER, 0, 0);
+        settingsViewTitle = new UiText(ctx.semiboldFont, menus);
+        settingsViewTitle.text = "Asset Browser Settings";
+        settingsViewTitle.textColor = Theme.TEXT;
+        settingsViewTitle.lineBreak = false;
         settingsTitle = new UiText(ctx.semiboldFont, menus);
-        settingsTitle.text = "Asset Browser Settings";
+        settingsTitle.text = "Thumbnail size";
         settingsTitle.textColor = Theme.TEXT;
         settingsTitle.lineBreak = false;
-        settingsValue = new UiText(ctx.captionFont, menus);
-        settingsValue.textColor = Theme.TEXT_SECONDARY;
-        settingsValue.lineBreak = false;
-        settingsTrack = new h2d.Graphics(menus);
-        settingsThumb = new h2d.Interactive(14, 14, menus);
-        settingsThumb.backgroundColor = 0;
-        settingsThumb.cursor = hxd.Cursor.Default;
-        settingsThumb.onPush = function(_) beginSettingsDrag();
+        settingsSlider = new UiSlider(ctx, SETTINGS_WIDTH - 24,
+            THUMB_MIN, THUMB_MAX, thumbnailSize, " px", menus);
+        settingsSlider.onChange = function(value) {
+            thumbnailSize = Std.int(value);
+            store.thumbnailSize = thumbnailSize;
+            refreshLayout();
+        };
+        // The popover surface was created after the buttons; lift them above it.
+        menus.addChild(viewGridButton);
+        menus.addChild(viewListButton);
+        menus.addChild(viewDetailsButton);
         settingsCatch.visible = false;
         settingsPanel.visible = false;
+        settingsHeader.visible = false;
+        settingsDivider.visible = false;
+        settingsViewTitle.visible = false;
         settingsTitle.visible = false;
-        settingsValue.visible = false;
-        settingsTrack.visible = false;
-        settingsThumb.visible = false;
+        settingsSlider.visible = false;
+        viewGridButton.visible = false;
+        viewListButton.visible = false;
+        viewDetailsButton.visible = false;
 
-        refreshButton = makeIconButton(this, "", refresh, null, Reset);
-        favoriteButton = new UiButton(ctx, "Fav", 40, 18, this);
-        favoriteButton.onClick = openFavoriteMenu;
+        // A compact star in the folder header replaces the old "Fav" toolbar
+        // button; it opens the favorites list without adding toolbar text.
+        favoriteHeaderStar = new h2d.Graphics(this);
+        UiIcons.draw(favoriteHeaderStar, Star, 0, 0, 12, Theme.MUTED);
+        favoriteHeaderHit = new h2d.Interactive(16, 16, this);
+        favoriteHeaderHit.backgroundColor = 0;
+        favoriteHeaderHit.cursor = hxd.Cursor.Default;
+        favoriteHeaderHit.onPush = function(event) {
+            event.propagate = false;
+            openFavoriteMenu();
+        };
 
         addButton = new UiButton(ctx, "Add", 54, 20, this);
         addButton.setIcon(Add);
@@ -309,7 +348,7 @@ class AssetBrowser extends h2d.Object {
         folderSplitter.onPush = function(_) beginFolderSplitterDrag();
 
         folderTitle = new UiText(ctx.captionFont, this);
-        folderTitle.text = "Folders";
+        folderTitle.text = "FOLDERS";
         folderTitle.textColor = Theme.MUTED;
         folderTitle.lineBreak = false;
 
@@ -364,7 +403,7 @@ class AssetBrowser extends h2d.Object {
     // ------------------------------------------------------------------
 
     function makeNavHit(action:Void->Void):h2d.Interactive {
-        var hit = new h2d.Interactive(22, 18, this);
+        var hit = new h2d.Interactive(22, 20, this);
         hit.backgroundColor = 0;
         hit.cursor = hxd.Cursor.Default;
         hit.onPush = function(event) {
@@ -374,46 +413,29 @@ class AssetBrowser extends h2d.Object {
         return hit;
     }
 
-    function makeIconButton(parent:h2d.Object, label:String, action:Void->Void,
-            ?customDraw:h2d.Graphics->Float->Float->Int->Void,
-            ?icon:UiIconKind):UiButton {
-        var button = new UiButton(ctx, label, 22, 18, parent);
+    function makeIconButton(parent:h2d.Object, action:Void->Void,
+            icon:UiIconKind):UiButton {
+        var button = new UiButton(ctx, "", 26, 20, parent);
         button.setQuiet();
         button.onClick = action;
-        if (icon != null) button.setIcon(icon);
-        if (customDraw != null) {
-            var glyph = new h2d.Graphics(button);
-            customDraw(glyph, 7, 5, Theme.TEXT_SECONDARY);
-        }
+        button.setIcon(icon);
+        // UiButton normally derives the icon size from the control height;
+        // a 20px toolbar needs an explicit size to stay legible.
+        button.setIconSize(16);
         return button;
     }
 
-    static function drawBackArrow(g:h2d.Graphics, x:Float, y:Float, color:Int):Void {
-        g.lineStyle(1.6, color);
-        g.moveTo(x + 8, y + 1);
-        g.lineTo(x + 2, y + 5);
-        g.lineTo(x + 8, y + 9);
-        g.moveTo(x + 2, y + 5);
-        g.lineTo(x + 9, y + 5);
+    function drawFavoriteIcon(color:Int):Void {
+        UiIcons.draw(favoriteHeaderStar, Star, 0, 0, 12, color);
     }
 
-    static function drawForwardArrow(g:h2d.Graphics, x:Float, y:Float, color:Int):Void {
-        g.lineStyle(1.6, color);
-        g.moveTo(x + 2, y + 1);
-        g.lineTo(x + 8, y + 5);
-        g.lineTo(x + 2, y + 9);
-        g.moveTo(x + 8, y + 5);
-        g.lineTo(x + 1, y + 5);
-    }
-
-    static function drawUpArrow(g:h2d.Graphics, x:Float, y:Float, color:Int):Void {
-        g.lineStyle(1.6, color);
-        g.moveTo(x + 5, y + 9);
-        g.lineTo(x + 5, y + 1);
-        g.moveTo(x + 5, y + 1);
-        g.lineTo(x + 2, y + 4);
-        g.moveTo(x + 5, y + 1);
-        g.lineTo(x + 8, y + 4);
+    function redrawNavGlyphs():Void {
+        var backColor = folderHistoryIndex > 0 ? Theme.ACCENT : Theme.DISABLED;
+        var forwardColor = folderHistoryIndex < folderHistory.length - 1
+            ? Theme.ACCENT : Theme.DISABLED;
+        UiIcons.draw(backGlyph, ArrowLeft, 8, 6, 14, backColor);
+        UiIcons.draw(forwardGlyph, ArrowRight, 32, 6, 14, forwardColor);
+        UiIcons.draw(upGlyph, ArrowUp, 56, 6, 14, Theme.TEXT_SECONDARY);
     }
 
     // ------------------------------------------------------------------
@@ -640,18 +662,14 @@ class AssetBrowser extends h2d.Object {
             cursor -= 4;
             return result;
         }
-        refreshButton.x = place(22);
-        settingsButton.x = place(22);
-        viewGridButton.x = place(22);
-        viewListButton.x = place(22);
-        viewDetailsButton.x = place(22);
-        sortButton.x = place(76);
-        sortButton.setWidth(76);
-        filterButton.x = place(78);
-        filterButton.setWidth(78);
-        favoriteButton.x = place(40);
-        searchField.x = place(Math.min(150, Math.max(90, widthValue * 0.2)));
-        searchField.setWidth(cursor + 150 - searchField.x > 0 ? 150 : 90);
+        settingsButton.x = place(26);
+        sortButton.x = place(96);
+        sortButton.setWidth(96);
+        filterButton.x = place(90);
+        filterButton.setWidth(90);
+        var searchWidth = Math.min(240, Math.max(130, widthValue * 0.26));
+        searchField.x = place(searchWidth);
+        searchField.setWidth(searchWidth);
 
         backButton.x = 4;
         forwardButton.x = 28;
@@ -659,15 +677,18 @@ class AssetBrowser extends h2d.Object {
         backButton.y = 3;
         forwardButton.y = 3;
         upButton.y = 3;
-        navGlyphs.clear();
-        drawBackArrow(navGlyphs, 11, 7, Theme.TEXT_SECONDARY);
-        drawForwardArrow(navGlyphs, 35, 7, Theme.TEXT_SECONDARY);
-        drawUpArrow(navGlyphs, 59, 7, Theme.TEXT_SECONDARY);
-        for (button in [refreshButton, settingsButton, viewGridButton, viewListButton,
-                viewDetailsButton, sortButton, filterButton, favoriteButton]) {
+        redrawNavGlyphs();
+        for (button in [settingsButton, sortButton, filterButton]) {
             button.y = 3;
         }
-        searchField.y = 4;
+        searchField.y = 3;
+
+        favoriteHeaderStar.x = folderWidth - 20;
+        favoriteHeaderStar.y = TOOLBAR_HEIGHT + 4;
+        favoriteHeaderHit.x = folderWidth - 22;
+        favoriteHeaderHit.y = TOOLBAR_HEIGHT + 2;
+        drawFavoriteIcon(store.favorites.length > 0
+            ? Theme.WARNING : Theme.DISABLED);
 
         var breadcrumbEnd = searchField.x - 6;
         rebuildBreadcrumbs(Math.max(80, breadcrumbEnd));
@@ -682,21 +703,24 @@ class AssetBrowser extends h2d.Object {
     // Menus
     // ------------------------------------------------------------------
 
+    /** Type/favorites/recent only. Sorting has its own button and menu so
+     *  neither list becomes a growing catch-all. */
     function openFilterMenu():Void {
         var items:Array<MenuItem> = [];
         var options = [
-            {key: "all", label: "All files"},
+            {key: "all", label: "All assets"},
             {key: AssetTypeRegistry.KIND_SCENE, label: AssetTypeRegistry.SCENE_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_FILE, label: AssetTypeRegistry.FILE_INFO_LABEL},
             {key: "favorites", label: "Favorites"},
             {key: "recent", label: "Recent"}
         ];
         for (option in options) {
+            var captured = option.key;
             items.push({
                 label: option.label,
-                selected: typeFilter == option.key,
+                selected: typeFilter == captured,
                 onClick: function() {
-                    typeFilter = option.key;
+                    typeFilter = captured;
                     store.typeFilter = typeFilter;
                     store.save();
                     scrollValue = 0;
@@ -711,12 +735,14 @@ class AssetBrowser extends h2d.Object {
         var names = ["Name", "Type", "Size", "Modified"];
         var items:Array<MenuItem> = [];
         for (index in 0...names.length) {
+            var capturedIndex = index;
             items.push({
-                label: names[index] + (sortKey == index ? (sortAsc ? "  \u2191" : "  \u2193") : ""),
+                label: names[index] + (sortKey == index
+                    ? (sortAsc ? "  \u2191" : "  \u2193") : ""),
                 selected: sortKey == index,
                 onClick: function() {
-                    if (sortKey == index) sortAsc = !sortAsc;
-                    else { sortKey = index; sortAsc = true; }
+                    if (sortKey == capturedIndex) sortAsc = !sortAsc;
+                    else { sortKey = capturedIndex; sortAsc = true; }
                     saveViewState();
                     rebuildAll();
                 }
@@ -727,7 +753,8 @@ class AssetBrowser extends h2d.Object {
 
     static inline var THUMB_MIN:Int = 64;
     static inline var THUMB_MAX:Int = 192;
-    static inline var SLIDER_WIDTH:Float = 178;
+    static inline var SETTINGS_WIDTH:Float = 242;
+    static inline var SETTINGS_HEIGHT:Float = 150;
 
     function openSettings():Void {
         if (settingsOpen) {
@@ -738,22 +765,37 @@ class AssetBrowser extends h2d.Object {
         settingsCatch.width = ctx.width;
         settingsCatch.height = ctx.height;
         settingsCatch.visible = true;
-        var px = this.x + settingsButton.x - 92;
+        var px = this.x + settingsButton.x - 96;
         var py = this.y + TOOLBAR_HEIGHT;
-        settingsPanel.x = Math.max(4, Math.min(px, ctx.width - 214));
-        settingsPanel.y = Math.max(4, Math.min(py, ctx.height - 86));
-        settingsPanel.setSize(210, 82);
-        settingsTitle.x = settingsPanel.x + 10;
-        settingsTitle.y = settingsPanel.y + 8;
-        settingsValue.x = settingsPanel.x + 10;
-        settingsValue.y = settingsPanel.y + 27;
-        settingsThumb.y = settingsPanel.y + 47;
+        settingsPanel.x = Math.max(4, Math.min(px, ctx.width - SETTINGS_WIDTH - 4));
+        settingsPanel.y = Math.max(4, Math.min(py, ctx.height - SETTINGS_HEIGHT - 4));
+        settingsPanel.setSize(SETTINGS_WIDTH, SETTINGS_HEIGHT);
+        settingsHeader.x = settingsPanel.x;
+        settingsHeader.y = settingsPanel.y;
+        settingsHeader.setSize(SETTINGS_WIDTH, 28);
+        settingsDivider.x = settingsPanel.x + 12;
+        settingsDivider.y = settingsPanel.y + 72;
+        settingsDivider.setSize(SETTINGS_WIDTH - 24, 1);
+        settingsViewTitle.x = settingsPanel.x + 12;
+        settingsViewTitle.y = settingsPanel.y + 5;
+        for (index in 0...3) {
+            var button = [viewGridButton, viewListButton, viewDetailsButton][index];
+            button.x = settingsPanel.x + 12 + index * 30;
+            button.y = settingsPanel.y + 38;
+            button.visible = true;
+        }
+        settingsTitle.x = settingsPanel.x + 12;
+        settingsTitle.y = settingsPanel.y + 86;
+        settingsSlider.setWidth(SETTINGS_WIDTH - 24);
+        settingsSlider.x = settingsPanel.x + 12;
+        settingsSlider.y = settingsPanel.y + 108;
         settingsPanel.visible = true;
+        settingsHeader.visible = true;
+        settingsDivider.visible = true;
+        settingsViewTitle.visible = true;
         settingsTitle.visible = true;
-        settingsValue.visible = true;
-        settingsTrack.visible = true;
-        settingsThumb.visible = true;
-        updateSettingsSlider();
+        settingsSlider.visible = true;
+        updateViewButtons();
     }
 
     function closeSettings():Void {
@@ -762,47 +804,14 @@ class AssetBrowser extends h2d.Object {
         store.save();
         settingsCatch.visible = false;
         settingsPanel.visible = false;
+        settingsHeader.visible = false;
+        settingsDivider.visible = false;
+        settingsViewTitle.visible = false;
         settingsTitle.visible = false;
-        settingsValue.visible = false;
-        settingsTrack.visible = false;
-        settingsThumb.visible = false;
-    }
-
-    function updateSettingsSlider():Void {
-        var ratio = (thumbnailSize - THUMB_MIN) / (THUMB_MAX - THUMB_MIN);
-        settingsThumb.x = settingsPanel.x + 16 + ratio * SLIDER_WIDTH - 7;
-        settingsValue.text = 'Thumbnail size: ${thumbnailSize} px';
-        settingsTrack.clear();
-        var y = settingsPanel.y + 54;
-        settingsTrack.lineStyle(4, Theme.SURFACE_3);
-        settingsTrack.moveTo(settingsPanel.x + 16, y);
-        settingsTrack.lineTo(settingsPanel.x + 16 + SLIDER_WIDTH, y);
-        settingsTrack.lineStyle(3, Theme.ACCENT);
-        settingsTrack.moveTo(settingsPanel.x + 16, y);
-        settingsTrack.lineTo(settingsThumb.x + 7, y);
-    }
-
-    function beginSettingsDrag():Void {
-        settingsThumb.startCapture(function(event) {
-            switch (event.kind) {
-                case EMove:
-                    var local = ctx.window.mouseX - settingsPanel.x - 16;
-                    var ratio = Math.max(0, Math.min(1, local / SLIDER_WIDTH));
-                    var size = THUMB_MIN + Std.int(ratio * (THUMB_MAX - THUMB_MIN));
-                    if (size != thumbnailSize) {
-                        thumbnailSize = size;
-                        store.thumbnailSize = size;
-                        refreshLayout();
-                    }
-                    updateSettingsSlider();
-                    event.propagate = false;
-                case ERelease, EReleaseOutside, EFocusLost:
-                    settingsThumb.stopCapture();
-                    event.propagate = false;
-                case _:
-                    event.propagate = false;
-            }
-        });
+        settingsSlider.visible = false;
+        viewGridButton.visible = false;
+        viewListButton.visible = false;
+        viewDetailsButton.visible = false;
     }
 
     function openFavoriteMenu():Void {
@@ -842,23 +851,23 @@ class AssetBrowser extends h2d.Object {
         refreshLayout();
     }
 
+    function updateViewButtons():Void {
+        viewGridButton.setSelected(viewMode == 0);
+        viewListButton.setSelected(viewMode == 1);
+        viewDetailsButton.setSelected(viewMode == 2);
+    }
+
     function updateToolbarState():Void {
-        filterButton.setText(typeFilter == "all" ? "All types"
+        filterButton.setText(typeFilter == "all" ? "All"
             : typeFilter == "favorites" ? "Favorites"
             : typeFilter == "recent" ? "Recent"
             : typeFilter == AssetTypeRegistry.KIND_SCENE ? "Scenes" : "Files");
         var sortNames = ["Name", "Type", "Size", "Modified"];
         sortButton.setText(sortNames[sortKey] + (sortAsc ? " \u2191" : " \u2193"));
-        viewGridButton.setSelected(viewMode == 0);
-        viewListButton.setSelected(viewMode == 1);
-        viewDetailsButton.setSelected(viewMode == 2);
-        navGlyphs.clear();
-        var backColor = folderHistoryIndex > 0 ? Theme.ACCENT : Theme.DISABLED;
-        var forwardColor = folderHistoryIndex < folderHistory.length - 1
-            ? Theme.ACCENT : Theme.DISABLED;
-        drawBackArrow(navGlyphs, 11, 7, backColor);
-        drawForwardArrow(navGlyphs, 35, 7, forwardColor);
-        drawUpArrow(navGlyphs, 59, 7, Theme.TEXT_SECONDARY);
+        drawFavoriteIcon(store.favorites.length > 0
+            ? Theme.WARNING : Theme.DISABLED);
+        updateViewButtons();
+        redrawNavGlyphs();
     }
 
     // ------------------------------------------------------------------
@@ -1252,13 +1261,14 @@ class AssetBrowser extends h2d.Object {
             default: buildGrid(shown);
         }
 
-        var suffix = selectedSources.length > 1 ? ' Â· ${selectedSources.length} selected' : "";
-        statusText.text = '${shown.length} asset(s) Â· double-click to open${suffix}';
+        // No persistent status sentence under the grid: selection is visible on
+        // the tiles themselves, and transient messages use showStatus().
     }
 
     function buildGrid(shown:Array<AssetFileInfo>):Void {
         var width = tileWidth();
         var height = tileHeight();
+        var previewHeight = Math.max(30, height - TILE_LABEL_HEIGHT - 6);
         for (index in 0...shown.length) {
             var entry = shown[index];
             var position = tilePosition(index, shown.length);
@@ -1269,51 +1279,72 @@ class AssetBrowser extends h2d.Object {
             assetRows.push(tile);
 
             var selected = isSelected(entry.source);
-            var surface = new UiSurface(ctx, tile);
-            surface.setSize(width, height);
-            surface.setStyle(selected ? Theme.ACCENT_MUTED : Theme.SURFACE_1,
-                selected ? Theme.ACCENT : Theme.BORDER, 0);
-
-            var icon = new h2d.Graphics(tile);
-            var iconKind = iconFor(entry);
-            var iconSize = Math.min(22, Math.max(14, Std.int(height * 0.28)));
-            UiIcons.draw(icon, iconKind,
-                Math.round((width - iconSize) * 0.5), 10, iconSize,
-                selected ? Theme.ACCENT
-                    : entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
+            var preview = new h2d.Graphics(tile);
+            drawPreview(preview, entry, 4, 2, width - 8, previewHeight, selected);
 
             var name = new UiText(ctx.captionFont, tile);
-            name.text = shorten(entry.name, Std.int(Math.max(8, width / 7)));
+            name.text = shorten(entry.name, Std.int(Math.max(8, (width - 8) / 6.2)));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
             name.lineBreak = false;
             name.x = Math.max(2, Math.round((width - name.textWidth) * 0.5));
-            name.y = height - 32;
+            name.y = height - 17;
 
-            var type = new UiText(ctx.captionFont, tile);
-            type.text = entry.kindLabel.toUpperCase();
-            type.textColor = selected ? Theme.ACCENT : Theme.MUTED;
-            type.lineBreak = false;
-            type.x = Math.max(2, Math.round((width - type.textWidth) * 0.5));
-            type.y = height - 18;
-
-            if (entry.active) {
-                var badge = new UiText(ctx.captionFont, tile);
-                badge.text = "ACTIVE";
-                badge.textColor = Theme.ACCENT;
-                badge.lineBreak = false;
-                badge.x = Math.max(2, Math.round((width - badge.textWidth) * 0.5));
-                badge.y = height - 18;
-                type.visible = false;
-            }
             if (store.isFavorite(entry.source)) {
-                var star = new UiText(ctx.captionFont, tile);
-                star.text = "\u2605";
-                star.textColor = Theme.WARNING;
-                star.lineBreak = false;
-                star.x = width - 12;
-                star.y = 2;
+                var star = new h2d.Graphics(tile);
+                UiIcons.draw(star, Star, width - 19, 3, 12, Theme.WARNING);
             }
             attachItemHit(tile, entry, width, height);
+        }
+    }
+
+    /** Large preview tile. Scenes use Tabler's `outline/photo` glyph - a framed
+     *  landscape is the familiar shorthand for a level/scene thumbnail - and
+     *  generic files keep a neutral document glyph. Both scale with the
+     *  thumbnail-size slider. */
+    function drawPreview(g:h2d.Graphics, entry:AssetFileInfo,
+            x:Float, y:Float, w:Float, h:Float, selected:Bool):Void {
+        g.beginFill(selected ? 0x245045 : Theme.SURFACE_1);
+        g.drawRect(x, y, w, h);
+        g.endFill();
+        g.lineStyle(1, selected ? Theme.ACCENT : Theme.SURFACE_3);
+        g.drawRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        g.lineStyle(0);
+
+        var cx = x + w * 0.5;
+        var cy = y + h * 0.5;
+        if (entry.loadable) {
+            var iconSize = Math.min(w, h) * 0.68;
+            UiIcons.drawSceneThumb(g, cx - iconSize * 0.5, cy - iconSize * 0.5,
+                iconSize, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
+        } else {
+            var base = 0x7A8794;
+            var pw = Math.min(w * 0.42, h * 0.58);
+            var ph = pw * 1.3;
+            var px = cx - pw * 0.5;
+            var py = y + (h - ph) * 0.5;
+            g.beginFill(0x000000, 0.28);
+            g.drawRect(px + 2, py + 3, pw, ph);
+            g.endFill();
+            g.beginFill(shade(base, 0.85));
+            g.drawRect(px, py, pw, ph);
+            g.endFill();
+            g.beginFill(Theme.FIELD_BG);
+            g.drawRect(px + pw * 0.6, py, pw * 0.4, ph * 0.24);
+            g.endFill();
+            g.beginFill(shade(base, 1.2));
+            g.drawRect(px + pw * 0.6, py, pw * 0.4, ph * 0.22);
+            g.endFill();
+            for (line in 0...4) {
+                g.beginFill(0x000000, 0.18);
+                g.drawRect(px + pw * 0.12, py + ph * (0.38 + line * 0.13),
+                    pw * 0.7, Math.max(1, ph * 0.035));
+                g.endFill();
+            }
+        }
+        if (entry.active) {
+            g.beginFill(Theme.ACCENT);
+            g.drawCircle(x + 9, y + 9, 3);
+            g.endFill();
         }
     }
 
@@ -1418,7 +1449,7 @@ class AssetBrowser extends h2d.Object {
 
     function iconFor(entry:AssetFileInfo):UiIconKind {
         if (entry.kind == AssetTypeRegistry.KIND_SCENE) return Scene;
-        return Hierarchy;
+        return Document;
     }
 
     function attachItemHit(target:h2d.Object, entry:AssetFileInfo,
@@ -1815,7 +1846,7 @@ class AssetBrowser extends h2d.Object {
         Sys.println('[probe] asset browser open source=${selectedSource}');
         var entry = findEntry(selectedSource);
         if (entry == null || !entry.loadable) {
-            statusText.text = "No engine preview for this file type";
+            showStatus("No engine preview for this file type");
             return;
         }
         store.markRecent(selectedSource);
@@ -1993,6 +2024,22 @@ class AssetBrowser extends h2d.Object {
 
     static function shorten(value:String, max:Int):String {
         return value.length <= max ? value : value.substr(0, max - 1) + "\u2026";
+    }
+
+    static function shade(color:Int, factor:Float):Int {
+        var r = Std.int(Math.max(0, Math.min(255, Math.round(((color >> 16) & 0xFF) * factor))));
+        var g = Std.int(Math.max(0, Math.min(255, Math.round(((color >> 8) & 0xFF) * factor))));
+        var b = Std.int(Math.max(0, Math.min(255, Math.round((color & 0xFF) * factor))));
+        return (r << 16) | (g << 8) | b;
+    }
+
+    /** Brief, self-hiding message for errors that have no other UI surface. */
+    function showStatus(message:String):Void {
+        statusText.text = message;
+        statusText.visible = true;
+        haxe.Timer.delay(function() {
+            if (statusText.text == message) statusText.visible = false;
+        }, 2400);
     }
 
     static function formatSize(bytes:Int):String {

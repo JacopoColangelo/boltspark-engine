@@ -30,6 +30,7 @@ import boltspark.ui.widgets.ScrollBar;
 import boltspark.ui.widgets.SearchField;
 import boltspark.ui.widgets.TextInputField;
 import boltspark.ui.widgets.UiButton;
+import boltspark.ui.widgets.UiCheckbox;
 import boltspark.ui.widgets.ViewportSnapBar;
 
 /**
@@ -84,6 +85,7 @@ class EditorShell {
 
     final objectSection:InspectorSection;
     final objectNameField:TextInputField;
+    final enabledCheckbox:UiCheckbox;
 
     final componentSections:Array<ComponentInspectorSection> = [];
     final componentSectionExpanded:Map<String, Bool> = [];
@@ -164,7 +166,11 @@ class EditorShell {
     public var onCopyObjects:Null<Array<Int>->Void>;
     /** Parent ID, or -1 for root/default placement. */
     public var onPasteObjects:Null<Int->Void>;
+    /** Query for context-aware Paste entries; omitted means nothing to paste. */
+    public var onQueryObjectClipboard:Null<Void->Bool>;
     public var onUnparentObjects:Null<Array<Int>->Void>;
+    public var onToggleObjectVisibility:Null<Int->Void>;
+    public var onSetObjectEnabled:Null<Int->Bool->Void>;
     public var onSelectSubtree:Null<Int->Void>;
     public var onCanHierarchyDrop:Null<Array<Int>->Int->Bool>;
     /** IDs, parent ID, insertion index, preserve world. */
@@ -593,6 +599,10 @@ class EditorShell {
             if (onObjectNameChanged != null) onObjectNameChanged(name);
         };
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
+        enabledCheckbox = new UiCheckbox(ctx, "Enabled", objectSection.content);
+        enabledCheckbox.onChanged = function(value) {
+            if (onSetObjectEnabled != null) onSetObjectEnabled(selectedObjectId, value);
+        };
 
         addComponentButton = new UiButton(ctx, "Add Component",
             Theme.RIGHT_PANEL_WIDTH - 16, Theme.CONTROL_HEIGHT,
@@ -1560,7 +1570,7 @@ class EditorShell {
     }
 
     function layoutInspectorProperties():Void {
-        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT;
+        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT * 2;
 
         var width = Math.max(0, inspectorContentMask.width);
         var y:Float = 0;
@@ -1575,6 +1585,9 @@ class EditorShell {
         objectNameField.x = 8;
         objectNameField.y = 2;
         objectNameField.setWidth(Math.max(0, width - 16));
+        enabledCheckbox.x = 10;
+        enabledCheckbox.y = INSPECTOR_ROW_HEIGHT + 4;
+        enabledCheckbox.setWidth(Math.max(0, width - 20));
 
         addComponentButton.x = 8;
         addComponentButton.y = Math.round(y + 8);
@@ -1678,6 +1691,9 @@ class EditorShell {
                 row.onSelect = selectHierarchyRow;
                 row.onWheel = function(delta) scrollHierarchy(delta);
                 row.onToggle = toggleHierarchyEntry;
+                row.onToggleVisibility = function(id) {
+                    if (onToggleObjectVisibility != null) onToggleObjectVisibility(id);
+                };
                 row.onContextMenu = openHierarchyContextMenu;
                 row.onRename = renameHierarchyObject;
                 row.onDragStart = beginHierarchyDrag;
@@ -1724,7 +1740,7 @@ class EditorShell {
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
             name:String, ?components:Array<ComponentInspectorData>,
-            ?availableTypes:Array<ComponentTypeInfo>):Void {
+            ?availableTypes:Array<ComponentTypeInfo>, enabled:Bool = true):Void {
         selectedObjectIds = ids.copy();
         selectedObjectId = primaryId;
         availableComponentTypes = availableTypes == null
@@ -1762,6 +1778,7 @@ class EditorShell {
             // Multi-selections keep the shared components visible. Values that
             // differ are rendered as "Multiple Values" by the property rows.
             objectNameField.setValue(name);
+            enabledCheckbox.value = enabled;
             rebuildInspectorComponents(components == null ? [] : components);
             inspectorContentMask.visible = true;
             selectionStatusValue = selectedObjectIds.length > 1
@@ -2160,23 +2177,27 @@ class EditorShell {
         if (entry == null) return;
         var actionIds = selectedObjectIds.indexOf(id) >= 0
             ? selectedObjectIds.copy() : [id];
-        var primitiveItems = primitiveMenuItems(id);
-        primitiveItems.push({
-            label: "Empty Object",
+        var createItems:Array<MenuItem> = [{
+            label: "Empty Game Object",
             onClick: function() {
                 hierarchyExpanded.set(id, true);
                 if (onCreateChildObject != null) onCreateChildObject(id, true);
             }
-        });
+        }, {
+            label: "Primitives",
+            submenu: primitiveMenuItems(id)
+        }];
+        // Grouped by intent: create, edit, structure, destroy. Entries that
+        // cannot apply to the current object or clipboard are omitted.
         var items:Array<MenuItem> = [{
-            label: "Create Child",
-            submenu: primitiveItems
+            label: "Create New...",
+            submenu: createItems
         }, {
             label: "Create Empty Parent",
             onClick: function() {
                 if (onCreateEmptyParent != null) onCreateEmptyParent(actionIds);
             }
-        }, {
+        }, { label: "", separator: true }, {
             label: "Rename",
             onClick: function() beginRenameFor(id)
         }, {
@@ -2189,58 +2210,80 @@ class EditorShell {
             onClick: function() {
                 if (onCopyObjects != null) onCopyObjects(actionIds);
             }
-        }, {
-            label: "Paste as Child",
-            onClick: function() {
-                hierarchyExpanded.set(id, true);
-                if (onPasteObjects != null) onPasteObjects(id);
+        }];
+        if (hasObjectClipboard()) {
+            items.push({
+                label: "Paste as Child",
+                onClick: function() {
+                    hierarchyExpanded.set(id, true);
+                    if (onPasteObjects != null) onPasteObjects(id);
+                }
+            });
+        }
+        if (entry.parentId >= 0 || entry.hasChildren) {
+            items.push({ label: "", separator: true });
+            if (entry.parentId >= 0) {
+                items.push({
+                    label: "Unparent",
+                    onClick: function() {
+                        if (onUnparentObjects != null) onUnparentObjects(actionIds);
+                    }
+                });
             }
-        }, {
-            label: "Unparent",
-            onClick: function() {
-                if (onUnparentObjects != null) onUnparentObjects(actionIds);
+            if (entry.hasChildren) {
+                items.push({
+                    label: "Select Subtree",
+                    onClick: function() {
+                        if (onSelectSubtree != null) onSelectSubtree(id);
+                    }
+                });
+                items.push({
+                    label: hierarchyExpanded.get(id) == false ? "Expand" : "Collapse",
+                    onClick: function() toggleHierarchyEntry(id)
+                });
             }
-        }, {
-            label: "Select Subtree",
-            onClick: function() {
-                if (onSelectSubtree != null) onSelectSubtree(id);
-            }
-        }, {
-            label: hierarchyExpanded.get(id) == false ? "Expand" : "Collapse",
-            onClick: function() toggleHierarchyEntry(id)
-        }, {
+        }
+        items.push({ label: "", separator: true });
+        items.push({
             label: "Delete",
             onClick: function() {
                 if (onDeleteObjects != null) onDeleteObjects(actionIds);
             }
-        }];
+        });
         closeFovPopup();
         menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
+    inline function hasObjectClipboard():Bool {
+        return onQueryObjectClipboard != null && onQueryObjectClipboard();
+    }
+
     function openHierarchyRootContextMenu():Void {
-        var primitiveItems = primitiveMenuItems(-1);
-        primitiveItems.push({
-            label: "Empty Object",
+        var createItems:Array<MenuItem> = [{
+            label: "Empty Game Object",
             onClick: function() {
                 if (onCreateChildObject != null) onCreateChildObject(-1, true);
             }
-        });
-        var items:Array<MenuItem> = [{
-            label: "Create",
-            submenu: primitiveItems
         }, {
-            label: "Paste at Root",
-            onClick: function() {
-                if (onPasteObjects != null) onPasteObjects(-1);
-            }
-        }, {
-            label: "Expand All",
-            onClick: expandAllHierarchy
-        }, {
-            label: "Collapse All",
-            onClick: collapseAllHierarchy
+            label: "Primitives",
+            submenu: primitiveMenuItems(-1)
         }];
+        var items:Array<MenuItem> = [{
+            label: "Create New...",
+            submenu: createItems
+        }];
+        if (hasObjectClipboard()) {
+            items.push({ label: "", separator: true });
+            items.push({
+                label: "Paste at Root",
+                onClick: function() {
+                    if (onPasteObjects != null) onPasteObjects(-1);
+                }
+            });
+        }
+        items.push({ label: "", separator: true });
+        items.push({ label: "Expand All", onClick: expandAllHierarchy });
+        items.push({ label: "Collapse All", onClick: collapseAllHierarchy });
         closeFovPopup();
         menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }

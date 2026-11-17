@@ -7,6 +7,7 @@ import boltspark.editor.commands.DeleteObjectsCommand;
 import boltspark.editor.commands.DuplicateObjectsCommand;
 import boltspark.editor.commands.EditorCommand;
 import boltspark.editor.commands.RenameObjectCommand;
+import boltspark.editor.commands.SetObjectFlagCommand;
 import boltspark.editor.commands.ReparentObjectsCommand;
 import boltspark.editor.commands.AddComponentCommand;
 import boltspark.editor.commands.RemoveComponentCommand;
@@ -42,7 +43,8 @@ class EditorSession {
 
     public function addInitialObject(name:String, ?transform:EditorTransform,
             ?persistentId:String, ?components:Array<Component>,
-            parentId:Int = -1, siblingIndex:Int = -1):EditorObject {
+            parentId:Int = -1, siblingIndex:Int = -1,
+            visible:Bool = true, enabled:Bool = true):EditorObject {
         // Resolve every fallible relationship before mutating the registry so
         // an invalid parent cannot leave an unreachable half-created object.
         var parent = parentId < 0 ? null : requireObject(parentId);
@@ -54,7 +56,7 @@ class EditorSession {
         }
         var object = new EditorObject(nextObjectId, durableId,
             name, transform == null ? new EditorTransform() : transform,
-            cloneComponents(components), this);
+            cloneComponents(components), this, visible, enabled);
         nextObjectId++;
         registerObject(object, objects.length);
         var siblings = parent == null ? hierarchy.roots : parent.children;
@@ -206,6 +208,9 @@ class EditorSession {
         return executeClone(source, rootIds, -2, "Duplicate Objects");
     }
 
+    /** Whether an object copy is available for Paste actions. */
+    public inline function hasClipboard():Bool return clipboardObjects.length > 0;
+
     /** Copy complete selected subtrees into the session clipboard. */
     public function copyObjects(ids:Array<Int>):Bool {
         var roots = selectedTopLevel(ids);
@@ -317,6 +322,26 @@ class EditorSession {
         if (object.name == normalized) return false;
         history.execute(new RenameObjectCommand(this, object.persistentId,
             object.name, normalized));
+        notifyChanged();
+        return true;
+    }
+
+    /** Toggle hierarchy/viewport visibility through history. */
+    public function setObjectVisible(id:Int, value:Bool):Bool {
+        var object = findObject(id);
+        if (object == null || object.visible == value) return false;
+        history.execute(new SetObjectFlagCommand(this, object.persistentId,
+            SetObjectFlagCommand.VISIBLE, object.visible, value));
+        notifyChanged();
+        return true;
+    }
+
+    /** Toggle the OBJECT > Enabled checkbox through history. */
+    public function setObjectEnabled(id:Int, value:Bool):Bool {
+        var object = findObject(id);
+        if (object == null || object.enabled == value) return false;
+        history.execute(new SetObjectFlagCommand(this, object.persistentId,
+            SetObjectFlagCommand.ENABLED, object.enabled, value));
         notifyChanged();
         return true;
     }
@@ -641,6 +666,13 @@ class EditorSession {
     @:noCompletion public function commandRenameObject(
             persistentId:String, name:String):Void {
         requirePersistentObject(persistentId).name = EditorObject.requireName(name);
+    }
+
+    @:noCompletion public function commandSetObjectFlag(
+            persistentId:String, flag:Int, value:Bool):Void {
+        var object = requirePersistentObject(persistentId);
+        if (flag == SetObjectFlagCommand.VISIBLE) object.visible = value;
+        else object.enabled = value;
     }
 
     @:noCompletion public function commandTransformObject(

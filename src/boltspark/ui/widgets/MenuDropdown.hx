@@ -3,7 +3,6 @@ package boltspark.ui.widgets;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons;
-import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
 
@@ -12,21 +11,39 @@ typedef MenuItem = {
     label:String,
     ?onClick:Void->Void,
     ?submenu:Array<MenuItem>,
+    /** Non-interactive divider used to group actions. */
+    ?separator:Bool,
     /** Draws an accent checkmark and tints the row as the active choice. */
     ?selected:Bool,
     /** Draws a muted dash when the choice differs across a multi-selection. */
     ?mixed:Bool
 };
 
+/** One open cascade level. Level 0 is the menu opened at the cursor position. */
+private class MenuLevel {
+    public var object:h2d.Object;
+    public var surface:UiSurface;
+    public var hitCatch:h2d.Interactive;
+    public var rows:Array<h2d.Object> = [];
+    public var parent:Null<MenuLevel> = null;
+    public var index:Int = 0;
+    public var rowY:Float = 0;
+    public var width:Float = 0;
+    public var height:Float = 0;
+
+    public function new() {}
+}
+
 /**
- * Native dropdown menu for the editor title bar, with one level of cascade
- * submenus (File > Editor Settings > Editor Keybindings). Built from the
- * same retained-H2D popup patterns as the object palette: UiSurface chrome,
- * per-row interactives, and manual row layout. Rows are rebuilt into fresh
- * row containers on every open so the menu always reflects live state.
+ * Native dropdown menu for the editor. Built from the same retained-H2D popup
+ * patterns as the object palette: UiSurface chrome, per-row interactives, and
+ * manual row layout. Cascades may nest to any depth (Scene Hierarchy > Create
+ * New... > Primitives); rows are rebuilt on every open so the menu reflects
+ * live state.
  */
 class MenuDropdown extends h2d.Object {
     static inline var ROW_HEIGHT:Int = 22;
+    static inline var SEPARATOR_HEIGHT:Int = 9;
     static inline var PADDING:Int = 3;
     static inline var MIN_WIDTH:Int = 168;
     /** Left gutter reserved for the state mark of a selection-style menu. */
@@ -35,18 +52,7 @@ class MenuDropdown extends h2d.Object {
     final context:UiContext;
     /** Full-window catch behind the rows: any outside left-click dismisses. */
     final dismissCatch:h2d.Interactive;
-    final panel:h2d.Object;
-    final panelSurface:UiSurface;
-    final panelCatch:h2d.Interactive;
-    final submenu:h2d.Object;
-    final submenuSurface:UiSurface;
-    final submenuCatch:h2d.Interactive;
-    /** Row containers rebuilt per open; only these are ever removed. */
-    final panelRows:Array<h2d.Object> = [];
-    final submenuRows:Array<h2d.Object> = [];
-    var panelWidth:Float = MIN_WIDTH;
-    var panelHeight:Float = 0;
-    var submenuOpen:Bool = false;
+    final levels:Array<MenuLevel> = [];
 
     public var isOpen(default, null):Bool = false;
 
@@ -63,61 +69,16 @@ class MenuDropdown extends h2d.Object {
             close();
         };
         dismissCatch.visible = false;
-
-        panel = new h2d.Object(this);
-        panelSurface = new UiSurface(context, panel);
-        panelSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
-        panelCatch = new h2d.Interactive(1, 1, panel);
-        panelCatch.backgroundColor = 0;
-        panelCatch.cursor = hxd.Cursor.Default;
-        // Swallow presses on the menu body so they cannot fall through to the
-        // viewport or the chrome underneath.
-        panelCatch.onPush = function(event) event.propagate = false;
-
-        submenu = new h2d.Object(this);
-        submenuSurface = new UiSurface(context, submenu);
-        submenuSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
-        submenuCatch = new h2d.Interactive(1, 1, submenu);
-        submenuCatch.backgroundColor = 0;
-        submenuCatch.cursor = hxd.Cursor.Default;
-        submenuCatch.onPush = function(event) event.propagate = false;
-        submenu.visible = false;
     }
 
     /** Open the dropdown at window coordinates (x, y) with these items. */
     public function open(x:Float, y:Float, items:Array<MenuItem>):Void {
-        clearRows(panelRows);
-        closeSubmenu();
-
-        var hasStates = hasSelectionState(items);
-        panelWidth = MIN_WIDTH;
-        for (item in items) {
-            panelWidth = Math.max(panelWidth, measureLabel(item.label) + 44
-                + (hasStates ? STATE_GUTTER : 0));
-        }
-        panelHeight = items.length * ROW_HEIGHT + PADDING * 2;
-        panelSurface.setSize(panelWidth, panelHeight);
-        panelCatch.width = panelWidth;
-        panelCatch.height = panelHeight;
-
-        for (index in 0...items.length) {
-            var item = items[index];
-            var rowY = PADDING + index * ROW_HEIGHT;
-            var row = new h2d.Object(panel);
-            panelRows.push(row);
-            addRowContent(row, item, rowY, panelWidth,
-                item.submenu != null
-                    ? function() openSubmenu(item, rowY)
-                    : function() {
-                        close();
-                        if (item.onClick != null) item.onClick();
-                    },
-                item.submenu != null, true, hasStates);
-        }
-
+        closeLevelsFrom(0);
+        var width = measureItems(items);
+        var height = measureHeight(items);
         // Clamp inside the window frame.
-        this.x = Math.max(4, Math.min(x, context.width - panelWidth - 4));
-        this.y = Math.max(4, Math.min(y, context.height - panelHeight - 4));
+        this.x = Math.max(4, Math.min(x, context.width - width - 4));
+        this.y = Math.max(4, Math.min(y, context.height - height - 4));
         // The menu object itself is offset to the popup position; pull the
         // catch back so it covers the whole window in screen coordinates.
         dismissCatch.x = -this.x;
@@ -125,6 +86,8 @@ class MenuDropdown extends h2d.Object {
         dismissCatch.width = context.width;
         dismissCatch.height = context.height;
         dismissCatch.visible = true;
+
+        buildLevel(items, null, 0);
         visible = true;
         isOpen = true;
         Sys.println('[probe] menu open');
@@ -132,63 +95,123 @@ class MenuDropdown extends h2d.Object {
 
     public function close():Void {
         if (!isOpen) return;
-        clearRows(panelRows);
-        closeSubmenu();
+        closeLevelsFrom(0);
         dismissCatch.visible = false;
         visible = false;
         isOpen = false;
         Sys.println('[probe] menu close');
     }
 
-    function closeSubmenu():Void {
-        clearRows(submenuRows);
-        submenu.visible = false;
-        submenuOpen = false;
-    }
-
-    function openSubmenu(item:MenuItem, rowY:Float):Void {
-        closeSubmenu();
-        var items = item.submenu;
+    function measureItems(items:Array<MenuItem>):Float {
         var hasStates = hasSelectionState(items);
         var width:Float = MIN_WIDTH;
-        for (sub in items) {
-            width = Math.max(width, measureLabel(sub.label) + 44
+        for (item in items) {
+            if (item.separator) continue;
+            width = Math.max(width, measureLabel(item.label) + 44
                 + (hasStates ? STATE_GUTTER : 0));
         }
-        var height = items.length * ROW_HEIGHT + PADDING * 2;
-        submenuSurface.setSize(width, height);
-        submenuCatch.width = width;
-        submenuCatch.height = height;
-
-        for (index in 0...items.length) {
-            var sub = items[index];
-            var subRowY = PADDING + index * ROW_HEIGHT;
-            var row = new h2d.Object(submenu);
-            submenuRows.push(row);
-            addRowContent(row, sub, subRowY, width, function() {
-                close();
-                if (sub.onClick != null) sub.onClick();
-            }, false, false, hasStates);
-        }
-        // Prefer a right-opening cascade, but flip left and vertically clamp
-        // when the parent menu is near a window edge.
-        submenu.x = this.x + panelWidth + width <= context.width - 4
-            ? panelWidth - 2
-            : -width + 2;
-        var minLocalY = 4 - this.y;
-        var maxLocalY = context.height - this.y - height - 4;
-        submenu.y = Math.max(minLocalY, Math.min(rowY, maxLocalY));
-        submenu.visible = true;
-        submenuOpen = true;
+        return width;
     }
 
-    function clearRows(rows:Array<h2d.Object>):Void {
-        for (row in rows) row.remove();
-        rows.resize(0);
+    function measureHeight(items:Array<MenuItem>):Float {
+        var height = PADDING * 2;
+        for (item in items) {
+            height += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
+        }
+        return height;
+    }
+
+    function buildLevel(items:Array<MenuItem>, parent:Null<MenuLevel>,
+            rowY:Float):MenuLevel {
+        var level = new MenuLevel();
+        level.parent = parent;
+        level.rowY = rowY;
+        level.index = levels.length;
+        level.object = new h2d.Object(this);
+        level.surface = new UiSurface(context, level.object);
+        level.surface.setStyle(Theme.PANEL_ALT, Theme.BORDER_STRONG, 0.36);
+        level.hitCatch = new h2d.Interactive(1, 1, level.object);
+        level.hitCatch.backgroundColor = 0;
+        level.hitCatch.cursor = hxd.Cursor.Default;
+        // Swallow presses on the menu body so they cannot fall through to the
+        // viewport or the chrome underneath.
+        level.hitCatch.onPush = function(event) event.propagate = false;
+
+        var hasStates = hasSelectionState(items);
+        level.width = measureItems(items);
+        level.height = measureHeight(items);
+        level.surface.setSize(level.width, level.height);
+        level.hitCatch.width = level.width;
+        level.hitCatch.height = level.height;
+
+        var cursor = PADDING;
+        for (index in 0...items.length) {
+            var item = items[index];
+            var itemRowY = cursor;
+            cursor += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
+            var row = new h2d.Object(level.object);
+            level.rows.push(row);
+            row.y = itemRowY;
+            if (item.separator) {
+                var line = new UiSurface(context, row);
+                line.x = PADDING;
+                line.setStyle(Theme.BORDER, Theme.BORDER, 0, 0);
+                line.setSize(level.width - PADDING * 2, 1);
+                line.y = Math.floor(SEPARATOR_HEIGHT * 0.5);
+                continue;
+            }
+            var captured = item;
+            var activate = function() {
+                if (captured.submenu != null) {
+                    openSubmenuFrom(level, captured, itemRowY);
+                } else {
+                    close();
+                    if (captured.onClick != null) captured.onClick();
+                }
+            };
+            addRowContent(row, item, itemRowY, level.width, activate,
+                item.submenu != null, level, hasStates);
+        }
+        positionLevel(level);
+        levels.push(level);
+        return level;
+    }
+
+    function positionLevel(level:MenuLevel):Void {
+        if (level.parent == null) {
+            level.object.x = 0;
+            level.object.y = 0;
+            return;
+        }
+        var parent = level.parent;
+        // Prefer a right-opening cascade, flipping left near the window edge.
+        var parentScreenX = this.x + parent.object.x;
+        var rightX = parent.object.x + parent.width - 2;
+        var leftX = parent.object.x - level.width + 2;
+        level.object.x = parentScreenX + rightX + level.width <= context.width - 4
+            ? rightX : leftX;
+        var desiredY = parent.object.y + level.rowY;
+        var minY = 4 - this.y;
+        var maxY = context.height - this.y - level.height - 4;
+        level.object.y = Math.max(minY, Math.min(desiredY, maxY));
+    }
+
+    function openSubmenuFrom(parent:MenuLevel, item:MenuItem, rowY:Float):Void {
+        closeLevelsFrom(parent.index + 1);
+        buildLevel(item.submenu, parent, rowY);
+    }
+
+    function closeLevelsFrom(index:Int):Void {
+        while (levels.length > index) {
+            var level = levels.pop();
+            for (row in level.rows) row.remove();
+            level.rows.resize(0);
+            level.object.remove();
+        }
     }
 
     function addRowContent(row:h2d.Object, item:MenuItem, rowY:Float, width:Float,
-            activate:Void->Void, hasSubmenu:Bool, panelRow:Bool,
+            activate:Void->Void, hasSubmenu:Bool, level:MenuLevel,
             showStates:Bool):Void {
         // The wrapper is positioned at the row's Y; all content is relative.
         row.y = rowY;
@@ -196,20 +219,23 @@ class MenuDropdown extends h2d.Object {
         // The active choice gets the same restrained teal the hierarchy uses
         // for selected objects; plain rows stay on the panel surface.
         var normalFill = selected ? Theme.ACCENT_MUTED : Theme.PANEL_ALT;
+        // Rows start after the panel padding. Painting them at x=0 covered the
+        // panel's left border and made every menu look clipped on that side.
         var rowSurface = new UiSurface(context, row);
+        rowSurface.x = PADDING;
         rowSurface.setSize(width - PADDING * 2, ROW_HEIGHT - 1);
         rowSurface.setStyle(normalFill, normalFill, 0);
         var rowHit = new h2d.Interactive(width - PADDING * 2, ROW_HEIGHT - 1, row);
+        rowHit.x = PADDING;
         rowHit.backgroundColor = 0;
         rowHit.cursor = hxd.Cursor.Default;
         rowHit.onOver = function(_) {
             rowSurface.setStyle(
                 selected ? Theme.ACCENT_MUTED : Theme.SURFACE_3,
                 Theme.ACCENT, 0);
-            // Cascade parents open their submenu on hover; plain rows close
-            // an open cascade only when they belong to the parent panel. A
-            // leaf inside the submenu must not close the submenu containing it.
-            if (hasSubmenu) activate() else if (panelRow) closeSubmenu();
+            // Cascade parents open their submenu on hover; a plain row closes
+            // only levels deeper than its own, leaving the containing cascade.
+            if (hasSubmenu) activate() else closeLevelsFrom(level.index + 1);
         };
         rowHit.onOut = function(_) rowSurface.setStyle(normalFill, normalFill, 0);
         rowHit.onPush = function(event) {

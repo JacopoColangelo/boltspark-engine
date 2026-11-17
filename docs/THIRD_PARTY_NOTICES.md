@@ -25,8 +25,9 @@ Exact file hashes are recorded in `docs/TOOLCHAIN_VERSIONS.md`.
 
 BoltUI embeds selected **Tabler Icons 3.52.0** glyphs by Paweł Kuna and the
 Tabler Icons contributors. The official SVG-derived PNGs are pre-rasterized at
-the editor's exact 6–16px sizes into `src/res/icons/tabler_ui.png`; no Tabler
-package or network access is required at runtime.
+the editor's exact 6–16px sizes into `src/res/icons/tabler_ui.png`, plus a 64px
+`outline/photo` mask at `src/res/icons/scene_thumb.png` for asset-browser scene
+thumbnails; no Tabler package or network access is required at runtime.
 
 - Project: <https://tabler.io/icons>
 - Source: <https://github.com/tabler/tabler-icons/tree/v3.52.0>

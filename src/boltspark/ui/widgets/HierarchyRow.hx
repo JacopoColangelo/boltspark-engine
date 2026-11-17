@@ -22,6 +22,7 @@ class HierarchyRow extends h2d.Object {
     public var onWheel:Null<Float->Void>;
     public var onSelect:Null<Int->Bool->Bool->Void>;
     public var onToggle:Null<Int->Void>;
+    public var onToggleVisibility:Null<Int->Void>;
     public var onContextMenu:Null<Int->Void>;
     public var onRename:Null<Int->String->Void>;
     public var onDragStart:Null<Int->Void>;
@@ -35,12 +36,16 @@ class HierarchyRow extends h2d.Object {
     final disclosure:h2d.Graphics;
     final disclosureHit:h2d.Interactive;
     final objectIcon:h2d.Graphics;
+    final visibilityIcon:h2d.Graphics;
+    final visibilityHit:h2d.Interactive;
     final label:h2d.Text;
     final renameSurface:UiSurface;
     final renameInput:UiTextInput;
     final dropFeedback:h2d.Graphics;
     var fullName:String;
     var renderable:Bool = false;
+    var visibleFlag:Bool = true;
+    var enabledFlag:Bool = true;
     var expanded:Bool = true;
     var selected:Bool = false;
     var hovered:Bool = false;
@@ -109,6 +114,15 @@ class HierarchyRow extends h2d.Object {
         };
         objectIcon = new h2d.Graphics(this);
 
+        visibilityIcon = new h2d.Graphics(this);
+        visibilityHit = new h2d.Interactive(18, 22, this);
+        visibilityHit.backgroundColor = 0;
+        visibilityHit.cursor = hxd.Cursor.Default;
+        visibilityHit.onPush = function(event) {
+            if (onToggleVisibility != null) onToggleVisibility(this.objectId);
+            event.propagate = false;
+        };
+
         label = new UiText(ctx.font, this);
         label.textColor = Theme.TEXT;
         label.lineBreak = false;
@@ -153,6 +167,8 @@ class HierarchyRow extends h2d.Object {
         depth = entry.depth;
         hasChildren = entry.hasChildren;
         renderable = entry.renderable;
+        visibleFlag = entry.visible;
+        enabledFlag = entry.enabled;
         this.expanded = expanded;
         setName(entry.name);
         refreshEntryVisuals();
@@ -309,11 +325,16 @@ class HierarchyRow extends h2d.Object {
                 0, 0, 11, Theme.MUTED);
         }
         objectIcon.clear();
+        var iconColor = !enabledFlag ? Theme.DISABLED
+            : renderable ? Theme.CUBE_ORANGE : Theme.TEXT_SECONDARY;
         UiIcons.draw(objectIcon,
-            renderable ? Cube : Hierarchy,
-            0, 0, 13,
-            renderable ? Theme.CUBE_ORANGE : Theme.TEXT_SECONDARY);
+            renderable ? Cube : Box,
+            0, 0, 13, iconColor);
+        visibilityIcon.clear();
+        UiIcons.draw(visibilityIcon, visibleFlag ? Eye : EyeOff,
+            0, 0, 13, visibleFlag ? Theme.MUTED : Theme.DISABLED);
         disclosureHit.visible = hasChildren;
+        updateStyle();
         layoutContents();
     }
 
@@ -325,14 +346,19 @@ class HierarchyRow extends h2d.Object {
         disclosureHit.y = 0;
         objectIcon.x = indent + 16;
         objectIcon.y = 5;
+        var reserved = 28;
         label.x = indent + 36;
-        fitLabel(rowWidth - label.x - 8);
+        fitLabel(rowWidth - label.x - reserved);
+        visibilityIcon.x = Math.max(label.x + 4, rowWidth - 22);
+        visibilityIcon.y = 5;
+        visibilityHit.x = Math.max(label.x, rowWidth - 26);
+        visibilityHit.y = 0;
         renameSurface.x = label.x - 3;
         renameSurface.y = 2;
-        renameSurface.setSize(Math.max(0, rowWidth - label.x - 3), 18);
+        renameSurface.setSize(Math.max(0, rowWidth - label.x - 4), 18);
         renameInput.x = label.x;
         renameInput.y = 0;
-        renameInput.inputWidth = Std.int(Math.max(0, rowWidth - label.x - 8));
+        renameInput.inputWidth = Std.int(Math.max(0, rowWidth - label.x - reserved));
     }
 
     function updateStyle():Void {
@@ -342,7 +368,9 @@ class HierarchyRow extends h2d.Object {
         } else if (hovered) {
             surface.setStyle(Theme.SURFACE_2, Theme.SURFACE_2, 0, 0);
         }
-        label.textColor = selected ? 0xF3F7FF : Theme.TEXT;
+        label.textColor = !visibleFlag || !enabledFlag
+            ? Theme.DISABLED
+            : selected ? 0xF3F7FF : Theme.TEXT;
         selectionEdge.clear();
         if (selected) {
             selectionEdge.beginFill(Theme.ACCENT);

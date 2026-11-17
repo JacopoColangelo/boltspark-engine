@@ -8,9 +8,13 @@ $version = '3.52.0'
 $cellSize = 16
 $minimumSize = 6
 $maximumSize = 16
-$expectedAtlasSha256 = '775B63C2E56AC7693A1C7EBD5FBA54F5D485E702169BB8B9631A7BA1B11AAA52'
+$expectedAtlasSha256 = 'BDAB756B0648A7E1BCF05F5EA8D44148FF7451B266A3513248F5650F78A01322'
 $sourceRoot = Join-Path $repoRoot "src\res\.tmp\tabler-icons\$version"
 $outputPath = Join-Path $repoRoot 'src\res\icons\tabler_ui.png'
+# A separate, larger alpha mask for asset-browser scene thumbnails: the UI
+# atlas only rasterizes 6-16px, which is too small for a preview tile.
+$sceneThumbPath = Join-Path $repoRoot 'src\res\icons\scene_thumb.png'
+$expectedSceneThumbSha256 = 'BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722682CC8AD6B0C2'
 
 # Columns deliberately match UiIconKind's integer values. Column zero is the
 # transparent `None` entry. Every other entry comes from the official Tabler
@@ -40,14 +44,27 @@ $icons = @(
     @{ Column = 22; Variant = 'outline'; Name = 'unlink' },
     @{ Column = 23; Variant = 'outline'; Name = 'restore' },
     @{ Column = 24; Variant = 'outline'; Name = 'folder' },
-    @{ Column = 25; Variant = 'outline'; Name = 'file-description' }
+    @{ Column = 25; Variant = 'outline'; Name = 'file-description' },
+    @{ Column = 26; Variant = 'outline'; Name = 'arrows-sort' },
+    @{ Column = 27; Variant = 'outline'; Name = 'filter' },
+    @{ Column = 28; Variant = 'outline'; Name = 'settings' },
+    @{ Column = 29; Variant = 'outline'; Name = 'list' },
+    @{ Column = 30; Variant = 'outline'; Name = 'table' },
+    @{ Column = 31; Variant = 'outline'; Name = 'file' },
+    @{ Column = 32; Variant = 'outline'; Name = 'box' },
+    @{ Column = 33; Variant = 'outline'; Name = 'star' },
+    @{ Column = 34; Variant = 'outline'; Name = 'arrow-left' },
+    @{ Column = 35; Variant = 'outline'; Name = 'arrow-right' },
+    @{ Column = 36; Variant = 'outline'; Name = 'arrow-up' },
+    @{ Column = 37; Variant = 'outline'; Name = 'eye' },
+    @{ Column = 38; Variant = 'outline'; Name = 'eye-off' }
 )
 
 Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Force $sourceRoot | Out-Null
 New-Item -ItemType Directory -Force (Split-Path -Parent $outputPath) | Out-Null
 
-$width = 26 * $cellSize
+$width = 39 * $cellSize
 $height = ($maximumSize - $minimumSize + 1) * $cellSize
 $pixelFormat = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
 $atlas = New-Object System.Drawing.Bitmap($width, $height, $pixelFormat)
@@ -137,4 +154,72 @@ if ($actualAtlasSha256 -ne $expectedAtlasSha256) {
     throw "Generated Tabler atlas hash mismatch: expected $expectedAtlasSha256, got $actualAtlasSha256."
 }
 Move-Item -LiteralPath $temporaryOutput -Destination $outputPath -Force
-Write-Host "Generated $outputPath from Tabler Icons v$version." -ForegroundColor Green
+
+# Dedicated 64px scene thumbnail from Tabler `outline/photo` (a framed
+# landscape, the closest analog to an Unreal-style level thumbnail).
+$sceneSourceName = 'outline-photo.png'
+$sceneSourcePath = Join-Path $sourceRoot $sceneSourceName
+if ($Refresh -or -not (Test-Path $sceneSourcePath)) {
+    $sceneMirrors = @(
+        "https://cdn.jsdelivr.net/npm/@tabler/icons-png@$version/icons/outline/photo.png",
+        "https://unpkg.com/@tabler/icons-png@$version/icons/outline/photo.png"
+    )
+    $sceneDownloaded = $false
+    foreach ($uri in $sceneMirrors) {
+        try {
+            Invoke-WebRequest -Uri $uri -OutFile $sceneSourcePath -TimeoutSec 30
+            $sceneDownloaded = $true
+            break
+        } catch {
+            Write-Host "[tabler] Mirror failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            if (Test-Path $sceneSourcePath) { Remove-Item -LiteralPath $sceneSourcePath -Force }
+        }
+    }
+    if (-not $sceneDownloaded) {
+        throw "Could not download Tabler source outline/photo."
+    }
+}
+$sceneThumbSize = 64
+$sceneThumb = New-Object System.Drawing.Bitmap(
+    $sceneThumbSize, $sceneThumbSize, $pixelFormat)
+$sceneGraphics = [System.Drawing.Graphics]::FromImage($sceneThumb)
+try {
+    $sceneGraphics.Clear([System.Drawing.Color]::Transparent)
+    $sceneGraphics.InterpolationMode =
+        [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $sceneGraphics.PixelOffsetMode =
+        [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $sceneSource = [System.Drawing.Image]::FromFile($sceneSourcePath)
+    try {
+        if ($sceneSource.Width -ne 240 -or $sceneSource.Height -ne 240) {
+            throw "Unexpected Tabler source dimensions for ${sceneSourceName}: $($sceneSource.Width)x$($sceneSource.Height)."
+        }
+        $sceneGraphics.DrawImage($sceneSource,
+            (New-Object System.Drawing.Rectangle(0, 0, $sceneThumbSize, $sceneThumbSize)),
+            (New-Object System.Drawing.Rectangle(0, 0, $sceneSource.Width, $sceneSource.Height)),
+            [System.Drawing.GraphicsUnit]::Pixel)
+    }
+    finally { $sceneSource.Dispose() }
+}
+finally { $sceneGraphics.Dispose() }
+for ($y = 0; $y -lt $sceneThumbSize; $y++) {
+    for ($x = 0; $x -lt $sceneThumbSize; $x++) {
+        $pixel = $sceneThumb.GetPixel($x, $y)
+        if ($pixel.A -ne 0) {
+            $sceneThumb.SetPixel($x, $y,
+                [System.Drawing.Color]::FromArgb($pixel.A, 255, 255, 255))
+        }
+    }
+}
+$sceneTemporaryOutput = "$sceneThumbPath.tmp"
+try {
+    $sceneThumb.Save($sceneTemporaryOutput, [System.Drawing.Imaging.ImageFormat]::Png)
+}
+finally { $sceneThumb.Dispose() }
+$actualSceneThumbSha256 = (Get-FileHash $sceneTemporaryOutput -Algorithm SHA256).Hash
+if ($actualSceneThumbSha256 -ne $expectedSceneThumbSha256) {
+    Remove-Item -LiteralPath $sceneTemporaryOutput -Force
+    throw "Generated scene thumbnail hash mismatch: expected $expectedSceneThumbSha256, got $actualSceneThumbSha256."
+}
+Move-Item -LiteralPath $sceneTemporaryOutput -Destination $sceneThumbPath -Force
+Write-Host "Generated $outputPath and $sceneThumbPath from Tabler Icons v$version." -ForegroundColor Green

@@ -11,11 +11,14 @@ class HierarchyEntry {
     public final childCount:Int;
     public final siblingIndex:Int;
     public final renderable:Bool;
+    public final visible:Bool;
+    public final enabled:Bool;
 
     public function new(id:Int, name:String, persistentId:String = "",
             parentId:Int = -1, depth:Int = 0, hasChildren:Bool = false,
             renderable:Bool = false, childCount:Int = 0,
-            siblingIndex:Int = 0) {
+            siblingIndex:Int = 0, visible:Bool = true,
+            enabled:Bool = true) {
         this.id = id;
         this.persistentId = persistentId;
         this.name = name;
@@ -25,5 +28,7 @@ class HierarchyEntry {
         this.childCount = childCount;
         this.siblingIndex = siblingIndex;
         this.renderable = renderable;
+        this.visible = visible;
+        this.enabled = enabled;
     }
 }

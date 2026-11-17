@@ -25,6 +25,9 @@ class UiButton extends h2d.Object {
     var danger:Bool = false;
     var quiet:Bool = false;
     var selected:Bool = false;
+    /** Optional fixed icon size. Toolbars with short controls use this to keep
+     *  icons legible instead of shrinking them to `height - 10`. */
+    var iconSizeOverride:Int = 0;
 
     public function new(ctx:UiContext, text:String, w:Float, h:Float, ?parent:h2d.Object) {
         super(parent);
@@ -77,6 +80,20 @@ class UiButton extends h2d.Object {
         return this;
     }
 
+    /** Render the icon at a fixed pixel size (the atlas supports 6-16 px). */
+    public function setIconSize(size:Int):UiButton {
+        iconSizeOverride = size;
+        redrawIcon();
+        center();
+        return this;
+    }
+
+    inline function iconSize():Float {
+        return iconSizeOverride > 0
+            ? iconSizeOverride
+            : Math.min(16, heightValue - 10);
+    }
+
     public function setPrimary(value:Bool = true):UiButton {
         primary = value;
         redraw();
@@ -117,7 +134,7 @@ class UiButton extends h2d.Object {
     }
 
     public function center():Void {
-        var iconSize = iconKind == None ? 0.0 : Math.min(16, heightValue - 10);
+        var iconSize = iconKind == None ? 0.0 : iconSize();
         var gap = iconSize > 0 && label.text.length > 0 ? 7.0 : 0.0;
         var contentWidth = iconSize + gap + label.textWidth;
         var contentX = Math.round(Math.max(0, (widthValue - contentWidth) * 0.5));
@@ -173,7 +190,7 @@ class UiButton extends h2d.Object {
     function redrawIcon(?color:Int):Void {
         icon.clear();
         if (iconKind == None) return;
-        UiIcons.draw(icon, iconKind, 0, 0, Math.min(16, heightValue - 10),
+        UiIcons.draw(icon, iconKind, 0, 0, iconSize(),
             color == null ? label.textColor : color);
         fitLabel();
         center();

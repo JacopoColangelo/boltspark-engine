@@ -18,7 +18,7 @@ class AssetBrowserStore {
     public var favorites:Array<String> = [];
     public var recent:Array<String> = [];
     public var viewMode:Int = 0;
-    public var thumbnailSize:Int = 88;
+    public var thumbnailSize:Int = 104;
     public var sortKey:Int = 0;
     public var sortAsc:Bool = true;
     public var typeFilter:String = "all";
@@ -89,7 +89,7 @@ class AssetBrowserStore {
         favorites = stringArray(Reflect.field(data, "favorites"));
         recent = stringArray(Reflect.field(data, "recent"));
         viewMode = clampInt(Reflect.field(data, "viewMode"), 0, 2, 0);
-        thumbnailSize = clampInt(Reflect.field(data, "thumbnailSize"), 64, 192, 88);
+        thumbnailSize = clampInt(Reflect.field(data, "thumbnailSize"), 64, 192, 104);
         sortKey = clampInt(Reflect.field(data, "sortKey"), 0, 3, 0);
         sortAsc = boolValue(Reflect.field(data, "sortAsc"), true);
         typeFilter = Reflect.field(data, "typeFilter") is String

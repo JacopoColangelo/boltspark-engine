@@ -45,7 +45,10 @@ class BoltUI {
     public var onDuplicateObjects:Null<Array<Int>->Void>;
     public var onCopyObjects:Null<Array<Int>->Void>;
     public var onPasteObjects:Null<Int->Void>;
+    public var onQueryObjectClipboard:Null<Void->Bool>;
     public var onUnparentObjects:Null<Array<Int>->Void>;
+    public var onToggleObjectVisibility:Null<Int->Void>;
+    public var onSetObjectEnabled:Null<Int->Bool->Void>;
     public var onSelectSubtree:Null<Int->Void>;
     public var onCanHierarchyDrop:Null<Array<Int>->Int->Bool>;
     public var onHierarchyDrop:Null<Array<Int>->Int->Int->Bool->Void>;
@@ -159,8 +162,17 @@ class BoltUI {
         shell.onPasteObjects = function(parentId) {
             if (onPasteObjects != null) onPasteObjects(parentId);
         };
+        shell.onQueryObjectClipboard = function() {
+            return onQueryObjectClipboard != null && onQueryObjectClipboard();
+        };
         shell.onUnparentObjects = function(ids) {
             if (onUnparentObjects != null) onUnparentObjects(ids);
+        };
+        shell.onToggleObjectVisibility = function(id) {
+            if (onToggleObjectVisibility != null) onToggleObjectVisibility(id);
+        };
+        shell.onSetObjectEnabled = function(id, value) {
+            if (onSetObjectEnabled != null) onSetObjectEnabled(id, value);
         };
         shell.onSelectSubtree = function(id) {
             if (onSelectSubtree != null) onSelectSubtree(id);
@@ -384,8 +396,8 @@ class BoltUI {
 
     public function setSelectedObjects(ids:Array<Int>, primaryId:Int,
             name:String, ?components:Array<ComponentInspectorData>,
-            ?availableTypes:Array<ComponentTypeInfo>):Void {
-        shell.setSelectedObjects(ids, primaryId, name, components, availableTypes);
+            ?availableTypes:Array<ComponentTypeInfo>, enabled:Bool = true):Void {
+        shell.setSelectedObjects(ids, primaryId, name, components, availableTypes, enabled);
     }
 
     public function setObjectName(name:String):Void {

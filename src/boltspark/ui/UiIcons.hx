@@ -27,6 +27,19 @@ enum abstract UiIconKind(Int) from Int to Int {
     var Reset = 23;
     var Folder = 24;
     var Scene = 25;
+    var Sort = 26;
+    var Filter = 27;
+    var Settings = 28;
+    var List = 29;
+    var Table = 30;
+    var Document = 31;
+    var Box = 32;
+    var Star = 33;
+    var ArrowLeft = 34;
+    var ArrowRight = 35;
+    var ArrowUp = 36;
+    var Eye = 37;
+    var EyeOff = 38;
 }
 
 /**
@@ -40,11 +53,28 @@ enum abstract UiIconKind(Int) from Int to Int {
  */
 class UiIcons {
     static inline var CELL_SIZE:Int = 16;
-    static inline var ICON_COLUMNS:Int = 26;
+    static inline var ICON_COLUMNS:Int = 39;
     static inline var MIN_SIZE:Int = 6;
     static inline var MAX_SIZE:Int = 16;
 
     static var atlas:h2d.Tile;
+    static var sceneThumb:h2d.Tile;
+
+    /** Large tinted Tabler `outline/photo` glyph for asset-browser scene
+     *  thumbnails; the exact-size atlas tops out at 16px. */
+    public static function drawSceneThumb(target:h2d.Graphics, x:Float, y:Float,
+            size:Float, color:Int, alpha:Float = 1):Void {
+        target.removeChildren();
+        if (sceneThumb == null) sceneThumb = hxd.Res.icons.scene_thumb.toTile();
+        var bitmap = new h2d.Bitmap(sceneThumb, target);
+        bitmap.x = Math.round(x);
+        bitmap.y = Math.round(y);
+        bitmap.width = size;
+        bitmap.height = size;
+        bitmap.smooth = true;
+        bitmap.color.setColor(color);
+        bitmap.color.a = Math.max(0, Math.min(1, alpha));
+    }
 
     public static function draw(target:h2d.Graphics, kind:UiIconKind, x:Float, y:Float,
             size:Float, color:Int, alpha:Float = 1):Void {

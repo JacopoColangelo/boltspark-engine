@@ -260,8 +260,16 @@ class Main extends hxd.App {
         boltUI.onDuplicateObjects = function(ids) editorSession.duplicateObjects(ids);
         boltUI.onCopyObjects = function(ids) editorSession.copyObjects(ids);
         boltUI.onPasteObjects = function(parentId) editorSession.pasteObjects(parentId);
+        boltUI.onQueryObjectClipboard = function() return editorSession.hasClipboard();
         boltUI.onUnparentObjects = function(ids) {
             editorSession.unparentObjects(ids, true);
+        };
+        boltUI.onToggleObjectVisibility = function(id) {
+            var object = editorSession.findObject(id);
+            if (object != null) editorSession.setObjectVisible(id, !object.visible);
+        };
+        boltUI.onSetObjectEnabled = function(id, value) {
+            editorSession.setObjectEnabled(id, value);
         };
         boltUI.onSelectSubtree = editorSession.selectSubtree;
         boltUI.onCanHierarchyDrop = function(ids, parentId) {
@@ -2080,6 +2088,9 @@ class Main extends hxd.App {
                 desiredParent.addChildAt(sceneObject.mesh, object.siblingIndex);
             }
             sceneObject.name = object.name;
+            // Hidden/disabled objects leave the scene graph intact but stop
+            // contributing geometry to the viewport.
+            sceneObject.mesh.visible = object.visible && object.enabled;
             sceneObject.synchronizeComponents(object);
             sceneObject.applyTransform(object.transform.value);
             refreshScaleRendering(sceneObject);
@@ -2236,13 +2247,15 @@ class Main extends hxd.App {
                 model.components[index].inspectorData(index)];
             overrideInspectorRotation(components, selected);
             boltUI.setSelectedObjects(ids, selected.id,
-                selected.name, components, ComponentRegistry.addableTypes());
+                selected.name, components, ComponentRegistry.addableTypes(),
+                model.enabled);
             return;
         }
         // Build an Inspector projection shared by every selected object:
         // common components/properties only, with per-axis mixed-value flags.
         var allData:Array<Array<ComponentInspectorData>> = [];
         var primaryData:Null<Array<ComponentInspectorData>> = null;
+        var primaryEnabled = true;
         for (id in ids) {
             var model = editorSession.findObject(id);
             if (model == null) continue;
@@ -2251,7 +2264,10 @@ class Main extends hxd.App {
                 model.components[index].inspectorData(index)];
             if (sceneObject != null) overrideInspectorRotation(data, sceneObject);
             allData.push(data);
-            if (id == editorSession.selectedObjectId) primaryData = data;
+            if (id == editorSession.selectedObjectId) {
+                primaryData = data;
+                primaryEnabled = model.enabled;
+            }
         }
         if (primaryData == null) {
             boltUI.setSelectedObjects([], -1, "", [], ComponentRegistry.addableTypes());
@@ -2260,7 +2276,7 @@ class Main extends hxd.App {
         var merged = MultiInspectorData.build(primaryData, allData);
         boltUI.setSelectedObjects(ids, editorSession.selectedObjectId,
             '${ids.length} objects selected', merged,
-            ComponentRegistry.addableTypes());
+            ComponentRegistry.addableTypes(), primaryEnabled);
     }
 
     /** Replace authored rotation hints with the live normalized Rotator. */
@@ -2378,7 +2394,8 @@ class Main extends hxd.App {
                 object.persistentId, parentId,
                 depth, object.children.length > 0,
                 object.getComponent(MeshRenderer) != null,
-                object.children.length, siblingIndex));
+                object.children.length, siblingIndex,
+                object.visible, object.enabled));
         }
         boltUI.setHierarchyEntries(entries);
     }

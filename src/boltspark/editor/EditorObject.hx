@@ -12,6 +12,10 @@ class EditorObject extends GameObject {
     public var parent(default, null):Null<EditorObject>;
     /** Ordered immediate children. Mutations are owned by SceneHierarchy. */
     public final children:Array<EditorObject> = [];
+    /** Editor-only visibility and component-enable flags. Mutated only through
+     *  EditorSession commands so they participate in undo/redo. */
+    public var visible:Bool = true;
+    public var enabled:Bool = true;
 
     // Lazy world-cache state. SceneHierarchy is the only writer.
     @:noCompletion public var worldCacheInitialized:Bool = false;
@@ -25,13 +29,15 @@ class EditorObject extends GameObject {
 
     public function new(id:Int, persistentId:String, name:String,
             transform:EditorTransform, ?components:Array<Component>,
-            ?scene:EditorSession) {
+            ?scene:EditorSession, visible:Bool = true, enabled:Bool = true) {
         if (id < 1) throw "Editor object runtime ID must be positive";
         super(name, transform == null ? new EditorTransform() : transform);
         this.id = id;
         this.persistentId = StableId.require(persistentId,
             "editorObject.persistentId");
         this.scene = scene;
+        this.visible = visible;
+        this.enabled = enabled;
         if (components != null) {
             for (component in components) addComponent(component);
         }
