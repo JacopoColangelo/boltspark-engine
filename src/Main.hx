@@ -221,6 +221,7 @@ class Main extends hxd.App {
             function() return boltUI.getViewportRect(), gridRenderer, axisGizmo);
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreatePrimitive = createPrimitive;
+        boltUI.onAddEmptyObjectInFront = createEmptyObjectInFront;
         boltUI.onDropPrimitive = createPrimitiveAtViewport;
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
@@ -492,6 +493,7 @@ class Main extends hxd.App {
                 default:
                     boltUI.log('inspector: unsupported numeric property ${propertyId}');
             }
+            if (row >= 0) refreshGizmoFromSelection();
             return;
         }
         if (editorSession.selectedObjectIds.length > 1) {
@@ -962,16 +964,62 @@ class Main extends hxd.App {
     // shared history entry instead of one command per object.
     // ------------------------------------------------------------------
 
+    static function containsObject(objects:Array<SceneObject>, id:Int):Bool {
+        for (sceneObject in objects) if (sceneObject.id == id) return true;
+        return false;
+    }
+
+    function gestureStartTransform(id:Int):Null<EditorTransform> {
+        for (index in 0...inspectorEditIds.length) {
+            if (inspectorEditIds[index] == id) return inspectorEditBefores[index];
+        }
+        return null;
+    }
+
+    static function transformRotationDegrees(t:EditorTransform):h3d.Vector {
+        var quat = new h3d.Quat();
+        quat.set(t.rotationX, t.rotationY, t.rotationZ, t.rotationW);
+        var reference = t.rotationHintValid
+            ? new h3d.Vector(t.rotationHintX, t.rotationHintY, t.rotationHintZ)
+            : null;
+        return RotationEuler.normalized(RotationEuler.degrees(quat, reference));
+    }
+
+    static function transformAxisValue(t:EditorTransform, row:Int,
+            axis:Int):Float {
+        return switch (row) {
+            case 0: axis == 0 ? t.positionX : axis == 1 ? t.positionY : t.positionZ;
+            case 1:
+                var euler = transformRotationDegrees(t);
+                axis == 0 ? euler.x : axis == 1 ? euler.y : euler.z;
+            default: axis == 0 ? t.scaleX : axis == 1 ? t.scaleY : t.scaleZ;
+        };
+    }
+
     function multiTransformEdit(row:Int, axis:Int, value:Float):Void {
         var objects = selectedSceneObjects();
         if (objects.length == 0) return;
+        // The Inspector edits the primary object's displayed value. Apply that
+        // edit as a delta from each object's gesture-start transform, exactly
+        // like a shared gizmo drag, so relative offsets are preserved.
+        // The displayed base value comes from the active object, which need
+        // not be first in selection order after a Ctrl/shift-click.
+        var primary = getSelectedObject();
+        if (primary == null || !containsObject(objects, primary.id)) primary = objects[0];
+        var primaryBefore = gestureStartTransform(primary.id);
+        if (primaryBefore == null) primaryBefore = primary.captureTransform();
+        var delta = value - transformAxisValue(primaryBefore, row, axis);
         for (sceneObject in objects) {
+            var before = gestureStartTransform(sceneObject.id);
+            if (before == null) before = sceneObject.captureTransform();
+            var target = transformAxisValue(before, row, axis) + delta;
             switch (row) {
-                case 0: applyMultiPosition(sceneObject, axis, value);
-                case 1: applyMultiRotation(sceneObject, axis, value);
-                default: applyMultiScale(sceneObject, axis, value);
+                case 0: applyMultiPosition(sceneObject, axis, target);
+                case 1: applyMultiRotation(sceneObject, axis, target, before);
+                default: applyMultiScale(sceneObject, axis, target, before);
             }
         }
+        refreshGizmoFromSelection();
         pushSelectionInspectorTransform();
     }
 
@@ -989,9 +1037,9 @@ class Main extends hxd.App {
     }
 
     function applyMultiRotation(sceneObject:SceneObject, axis:Int,
-            degrees:Float):Void {
+            degrees:Float, before:EditorTransform):Void {
         var previous = sceneObject.captureTransform();
-        var current = rotationDegrees(sceneObject);
+        var current = transformRotationDegrees(before);
         switch (axis) {
             case 0: current.x = degrees;
             case 1: current.y = degrees;
@@ -1013,18 +1061,18 @@ class Main extends hxd.App {
     }
 
     function applyMultiScale(sceneObject:SceneObject, axis:Int,
-            value:Float):Void {
-        var previous = switch (axis) {
-            case 0: sceneObject.mesh.scaleX;
-            case 1: sceneObject.mesh.scaleY;
-            default: sceneObject.mesh.scaleZ;
+            value:Float, before:EditorTransform):Void {
+        var previousScale = switch (axis) {
+            case 0: before.scaleX;
+            case 1: before.scaleY;
+            default: before.scaleZ;
         };
-        var clamped = clampedScale(value, previous);
-        var targetX = sceneObject.mesh.scaleX;
-        var targetY = sceneObject.mesh.scaleY;
-        var targetZ = sceneObject.mesh.scaleZ;
+        var clamped = clampedScale(value, previousScale);
+        var targetX = before.scaleX;
+        var targetY = before.scaleY;
+        var targetZ = before.scaleZ;
         if (scaleProportionsLinked) {
-            var ratio = clamped / ScalePolicy.nonZero(previous, clamped);
+            var ratio = clamped / ScalePolicy.nonZero(previousScale, clamped);
             targetX = clampedScale(targetX * ratio, targetX);
             targetY = clampedScale(targetY * ratio, targetY);
             targetZ = clampedScale(targetZ * ratio, targetZ);
@@ -2170,8 +2218,41 @@ class Main extends hxd.App {
             ? label.substr("Primitive ".length) : label;
     }
 
+    /** Distance from the editor camera used by the Add menu's click action. */
+    static inline var ADD_IN_FRONT_DISTANCE:Float = 6.0;
+
     function createPrimitive(meshId:String):Void {
-        createPrimitiveAtPosition(meshId, editorSession.nextRuntimeId * 1.5, 0);
+        var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
+        createPrimitiveAtWorld(meshId, spot.x, spot.y, spot.z);
+    }
+
+    function createEmptyObjectInFront():Void {
+        var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
+        var limit = WorldBounds.HALF_EXTENT - 0.5;
+        var name = "GameObject" + editorSession.nextRuntimeId;
+        var transform = new EditorTransform(
+            Math.max(-limit, Math.min(limit, spot.x)),
+            Math.max(-limit, Math.min(limit, spot.y)),
+            Math.max(-limit, Math.min(limit, spot.z)));
+        editorSession.createObject(name, transform, -1, []);
+        logActivity("scene: created " + name);
+    }
+
+    /** A point directly along the viewport camera's view direction. */
+    function pointInFrontOfCamera(distance:Float):{ x:Float, y:Float, z:Float } {
+        var camera = s3d.camera;
+        var dx = camera.target.x - camera.pos.x;
+        var dy = camera.target.y - camera.pos.y;
+        var dz = camera.target.z - camera.pos.z;
+        var length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (length <= 0.0001) {
+            return { x: camera.pos.x, y: camera.pos.y, z: camera.pos.z - distance };
+        }
+        return {
+            x: camera.pos.x + dx / length * distance,
+            y: camera.pos.y + dy / length * distance,
+            z: camera.pos.z + dz / length * distance
+        };
     }
 
     function createPrimitiveAtViewport(meshId:String, viewX:Float,
@@ -2190,13 +2271,19 @@ class Main extends hxd.App {
     }
 
     function createPrimitiveAtPosition(meshId:String, x:Float, z:Float):Void {
+        createPrimitiveAtWorld(meshId, x, 0, z);
+    }
+
+    function createPrimitiveAtWorld(meshId:String, x:Float, y:Float,
+            z:Float):Void {
         var runtimeId = editorSession.nextRuntimeId;
         var name = primitiveName(meshId) + runtimeId;
-        // Palette objects get identity rotation/scale; constrain their pivot
-        // before they enter session history.
+        // Newly added objects keep identity rotation/scale; constrain their
+        // pivot before they enter session history.
         var pivotLimit = WorldBounds.HALF_EXTENT - 0.5;
         var transform = new EditorTransform(
-            Math.max(-pivotLimit, Math.min(pivotLimit, x)), 0,
+            Math.max(-pivotLimit, Math.min(pivotLimit, x)),
+            Math.max(-pivotLimit, Math.min(pivotLimit, y)),
             Math.max(-pivotLimit, Math.min(pivotLimit, z)));
         editorSession.createObject(name, transform, -1,
             PrimitiveGameObjects.primitiveComponents(meshId));
@@ -2339,6 +2426,51 @@ class Main extends hxd.App {
         pivot.positionY = y / count;
         pivot.positionZ = z / count;
         return pivot;
+    }
+
+    /**
+     * Live pivot from the renderer transforms, used while an Inspector edit is
+     * still in progress (the session model is only updated on history commit).
+     */
+    function liveSelectionPivotWorld():Null<EditorTransform> {
+        var primary = getSelectedObject();
+        if (primary == null) return null;
+        var primaryModel = editorSession.findObject(primary.id);
+        if (primaryModel == null) return primary.captureTransform();
+        var pivot = worldTransformForLocal(primaryModel, primary.captureTransform());
+        var ids = editorSession.selectedObjectIds;
+        if (ids.length <= 1) return pivot;
+        var count = 0;
+        var x = 0.0;
+        var y = 0.0;
+        var z = 0.0;
+        for (id in ids) {
+            var model = editorSession.findObject(id);
+            var view = findSceneObject(id);
+            if (model == null || view == null) continue;
+            var world = worldTransformForLocal(model, view.captureTransform());
+            x += world.positionX;
+            y += world.positionY;
+            z += world.positionZ;
+            count++;
+        }
+        if (count > 0) {
+            pivot.positionX = x / count;
+            pivot.positionY = y / count;
+            pivot.positionZ = z / count;
+        }
+        return pivot;
+    }
+
+    /** Move the attached gizmo with live Inspector edits, before commit. */
+    function refreshGizmoFromSelection():Void {
+        if (gizmoDragging) return;
+        var pivot = liveSelectionPivotWorld();
+        if (pivot == null) {
+            gizmo.attach(null);
+            return;
+        }
+        applyGizmoProxy(pivot);
     }
 
     function attachGizmo(selected:Null<SceneObject>):Void {

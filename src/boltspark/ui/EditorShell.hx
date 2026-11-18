@@ -63,7 +63,6 @@ class EditorShell {
     final hierarchyTitle:h2d.Text;
     final hierarchyCount:h2d.Text;
     final hierarchySearch:SearchField;
-    final hierarchyAddButton:UiButton;
     final hierarchyHit:h2d.Interactive;
     final hierarchyRows:Array<HierarchyRow> = [];
     final allHierarchyEntries:Array<HierarchyEntry> = [];
@@ -71,6 +70,8 @@ class EditorShell {
     final hierarchyScrollBar:ScrollBar;
     final hierarchyDropFeedback:h2d.Graphics;
     final hierarchyExpanded:Map<Int, Bool> = [];
+    /** Last known parent for each id, used to detect reparents. */
+    final hierarchyParentById:Map<Int, Int> = [];
 
     // Details panel.
     final rightContentMask:h2d.Mask;
@@ -150,9 +151,11 @@ class EditorShell {
     final menuDropdown:MenuDropdown;
     final assetBrowser:AssetBrowser;
 
-    /** Create a primitive by mesh asset id (palette click). */
+    /** Create a primitive in front of the viewport camera (Add menu click). */
     public var onCreatePrimitive:Null<String->Void>;
-    /** Create a primitive by mesh asset id at viewport coordinates (palette drop). */
+    /** Add an empty object in front of the viewport camera. */
+    public var onAddEmptyObjectInFront:Null<Void->Void>;
+    /** Create a primitive by mesh asset id at viewport coordinates (menu drag/drop). */
     public var onDropPrimitive:Null<String->Float->Float->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
@@ -494,11 +497,7 @@ class EditorShell {
         // Main toolbar.
         addObjectButton = new UiButton(ctx, "Add", 78, 28, root);
         addObjectButton.setIcon(Add).setPrimary();
-        addObjectButton.onClick = function() {
-            if (viewportRect != null) {
-                palette.toggleAt(addObjectButton.x, addObjectButton.y + 31, viewportRect);
-            }
-        };
+        addObjectButton.onClick = openAddObjectMenu;
         var transformKinds:Array<UiIconKind> = [Move, Rotate, Scale];
         for (index in 0...transformKinds.length) {
             var modeButton = new UiButton(ctx, "", 28, 28, root);
@@ -530,14 +529,6 @@ class EditorShell {
         hierarchyCount = new UiText(ctx.captionFont, leftContentMask);
         hierarchyCount.textColor = Theme.MUTED;
         hierarchyCount.lineBreak = false;
-        hierarchyAddButton = new UiButton(ctx, "", 24, 24, leftContentMask);
-        hierarchyAddButton.setIcon(Add).setQuiet();
-        hierarchyAddButton.onClick = function() {
-            if (viewportRect != null) {
-                palette.toggleAt(hierarchyAddButton.x,
-                    hierarchyAddButton.y + Theme.CONTROL_HEIGHT + 3, viewportRect);
-            }
-        };
         hierarchySearch = new SearchField(ctx, "Search Entities", 100, 24, leftContentMask);
         hierarchySearch.onChange = function(value) applyHierarchyFilter(value);
 
@@ -961,19 +952,19 @@ class EditorShell {
         // top of panel content.
         leftSplitter = new DockSplitter(ctx, true, root);
         leftSplitter.onDrag = function(delta) {
-            dockLayout.leftPanelWidth += delta;
+            dockLayout.preferredLeftPanelWidth += delta;
             resize();
         };
         leftSplitter.onDragEnd = saveLayout;
         rightSplitter = new DockSplitter(ctx, true, root);
         rightSplitter.onDrag = function(delta) {
-            dockLayout.rightPanelWidth -= delta;
+            dockLayout.preferredRightPanelWidth -= delta;
             resize();
         };
         rightSplitter.onDragEnd = saveLayout;
         consoleSplitter = new DockSplitter(ctx, false, root);
         consoleSplitter.onDrag = function(delta) {
-            dockLayout.consoleHeight -= delta;
+            dockLayout.preferredConsoleHeight -= delta;
             resize();
         };
         consoleSplitter.onDragEnd = saveLayout;
@@ -1373,10 +1364,29 @@ class EditorShell {
         var tabHeight:Float = 24;
         bottomTabs.x = geometry.console.x;
         bottomTabs.y = geometry.console.y;
+        // Shrink and elide tabs so both stay inside a narrow bottom dock
+        // instead of spilling over the neighbouring panel.
+        var tabSpace = Math.max(0, geometry.console.width);
+        var tabGap = 2.0;
+        var naturalAssets = 108.0;
+        var naturalLog = 92.0;
+        var tabScale = tabSpace >= naturalAssets + naturalLog + tabGap ? 1.0
+            : Math.max(0, (tabSpace - tabGap) / (naturalAssets + naturalLog));
+        var assetsTabWidth = Math.max(14, Math.round(naturalAssets * tabScale));
+        var logTabWidth = Math.max(14, Math.round(naturalLog * tabScale));
+        var tabsOver = assetsTabWidth + logTabWidth + tabGap - tabSpace;
+        if (tabsOver > 0) {
+            if (assetsTabWidth >= logTabWidth)
+                assetsTabWidth = Math.max(14, assetsTabWidth - tabsOver);
+            else
+                logTabWidth = Math.max(14, logTabWidth - tabsOver);
+        }
         assetsTab.x = 0;
         assetsTab.y = 0;
-        logTab.x = 110;
+        assetsTab.setWidth(assetsTabWidth);
+        logTab.x = assetsTabWidth + tabGap;
         logTab.y = 0;
+        logTab.setWidth(logTabWidth);
         var contentY = geometry.console.y + tabHeight;
         var contentHeight = Math.max(0, geometry.console.height - tabHeight);
         console.x = geometry.console.x;
@@ -1424,7 +1434,8 @@ class EditorShell {
     }
 
     function drawChrome(width:Float, height:Float, geometry:DockLayoutGeometry):Void {
-        chromeRenderer.draw(chrome, width, height, geometry);
+        chromeRenderer.draw(chrome, width, height, geometry,
+            inspectorContentMask.visible);
     }
 
     function layoutTopBars(width:Float):Void {
@@ -1455,8 +1466,10 @@ class EditorShell {
 
         var toolRects = BoxLayout.row(
             new LayoutRect(94, toolbarY, 90, 28), [28, 28, 28], 3);
+        var toolsFit = width >= 94 + 90 + 8;
         for (index in 0...transformButtons.length) {
             var button = transformButtons[index];
+            button.visible = toolsFit;
             button.x = toolRects[index].x;
             button.y = toolRects[index].y;
         }
@@ -1524,12 +1537,9 @@ class EditorShell {
         hierarchyCount.x = Math.max(42, leftWidth - hierarchyCount.textWidth - 9);
         hierarchyCount.y = bodyTop + 8;
 
-        hierarchySearch.x = 34;
+        hierarchySearch.x = 8;
         hierarchySearch.y = bodyTop + 37;
-        hierarchySearch.setWidth(Math.max(0, leftWidth - 40));
-        hierarchyAddButton.x = 6;
-        hierarchyAddButton.y = bodyTop + 37;
-        hierarchyAddButton.visible = leftWidth >= 180;
+        hierarchySearch.setWidth(Math.max(0, leftWidth - 16));
         hierarchyHit.x = 0;
         hierarchyHit.y = bodyTop + 66;
         hierarchyHit.width = Math.max(0, leftWidth - 7);
@@ -1545,17 +1555,20 @@ class EditorShell {
         inspectorTitleIcon.y = bodyTop + 9;
         inspectorTitle.x = 29;
         inspectorTitle.y = bodyTop + 6;
-        selectionStatus.x = 8;
-        selectionStatus.y = bodyTop + 35;
+        // A selection adds a meta row with the object type; with none, the
+        // header stays short and the hint is centered in the panel body.
+        var expanded = inspectorContentMask.visible;
+        selectionStatus.visible = true;
         fitText(selectionStatus, selectionStatusValue, Math.max(0, rightWidth - 16));
-        if (!inspectorContentMask.visible && rightWidth > 220) {
-            // Unreal-style empty state: centered hint inside the panel body.
-            selectionStatus.x = Math.round((rightWidth - selectionStatus.textWidth) * 0.5);
-            selectionStatus.y = bodyTop + Math.round((rightContentMask.height - bodyTop) * 0.35);
-        }
+        selectionStatus.x = expanded ? 8
+            : Math.round((rightWidth - selectionStatus.textWidth) * 0.5);
+        selectionStatus.y = expanded ? bodyTop + 35
+            : bodyTop + Math.round((rightContentMask.height - bodyTop
+                - selectionStatus.textHeight) * 0.5);
 
         inspectorContentMask.x = 0;
-        inspectorContentMask.y = bodyTop + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT;
+        inspectorContentMask.y = bodyTop + Theme.PANEL_HEADER_HEIGHT
+            + (expanded ? Theme.PANEL_META_HEIGHT : 0);
         inspectorContentMask.width = Std.int(Math.max(0, rightWidth - 7));
         inspectorContentMask.height = Std.int(Math.max(0,
             rightContentMask.height - inspectorContentMask.y - 4));
@@ -1629,13 +1642,21 @@ class EditorShell {
         for (entry in entries) {
             allHierarchyEntries.push(entry);
             live.set(entry.id, true);
-            if (!hierarchyExpanded.exists(entry.id)) {
+            var reparented = hierarchyParentById.exists(entry.id)
+                && hierarchyParentById.get(entry.id) != entry.parentId;
+            if (!entry.hasChildren) {
+                // A leaf must not keep a fold flag. If a reparent later gives
+                // it children it should start expanded, not stay collapsed.
+                hierarchyExpanded.remove(entry.id);
+            } else if (reparented || !hierarchyExpanded.exists(entry.id)) {
                 hierarchyExpanded.set(entry.id, true);
             }
+            hierarchyParentById.set(entry.id, entry.parentId);
         }
         var stale:Array<Int> = [];
         for (id in hierarchyExpanded.keys()) if (!live.exists(id)) stale.push(id);
         for (id in stale) hierarchyExpanded.remove(id);
+        for (id in hierarchyParentById.keys()) if (!live.exists(id)) hierarchyParentById.remove(id);
         if (selectionAnchorId >= 0 && !live.exists(selectionAnchorId)) {
             selectionAnchorId = -1;
         }
@@ -1669,9 +1690,11 @@ class EditorShell {
             }
         }
         for (entry in allHierarchyEntries) {
-            var visible = hierarchyFilter.length > 0
-                ? included.exists(entry.id)
-                : ancestorsExpanded(entry, byId);
+            // Search must still respect fold state: a match under a collapsed
+            // parent stays hidden, and toggling that parent's chevron really
+            // collapses/expands it instead of only swapping the glyph.
+            var matches = hierarchyFilter.length == 0 || included.exists(entry.id);
+            var visible = matches && ancestorsExpanded(entry, byId);
             if (visible) {
                 visibleHierarchyEntries.push(entry);
             }
@@ -1781,9 +1804,10 @@ class EditorShell {
             enabledCheckbox.value = enabled;
             rebuildInspectorComponents(components == null ? [] : components);
             inspectorContentMask.visible = true;
+            // The Name field already shows the object's name; the header meta
+            // line carries the type instead.
             selectionStatusValue = selectedObjectIds.length > 1
-                ? name
-                : name + "  ·  Game Object";
+                ? "Multiple Game Objects" : "Game Object";
         }
         selectionStatus.text = selectionStatusValue;
         inspectorScrollValue = 0;
@@ -2013,6 +2037,12 @@ class EditorShell {
         if (mouseX < hierarchyHit.x || mouseX > hierarchyHit.x + hierarchyHit.width
                 || mouseY < hierarchyHit.y
                 || mouseY > hierarchyHit.y + hierarchyHit.height) {
+            // Never keep a stale target from an earlier move: releasing outside
+            // the hierarchy must not reparent into a row we no longer hover.
+            hierarchyDropParentId = -1;
+            hierarchyDropSiblingIndex = -1;
+            hierarchyDropMode = HierarchyRow.DROP_NONE;
+            hierarchyDropValid = false;
             return;
         }
 
@@ -2154,16 +2184,20 @@ class EditorShell {
         return true;
     }
 
-    /** Primitive choices shared by the child and root creation menus. */
-    function primitiveMenuItems(parentId:Int):Array<MenuItem> {
+    /** Primitive choices shared by the child, root, and toolbar Add menus. */
+    function primitiveMenuItems(parentId:Int, ?palettePlacement:Bool):Array<MenuItem> {
         var items:Array<MenuItem> = [];
         for (mesh in PrimitiveMeshes.all()) {
             var meshId = mesh.id;
             items.push({
                 label: mesh.name,
+                dragMeshId: meshId,
                 onClick: function() {
                     if (parentId >= 0) hierarchyExpanded.set(parentId, true);
-                    if (onCreateChildPrimitive != null) {
+                    if (palettePlacement && onCreatePrimitive != null) {
+                        // Same staggered placement the old toolbar palette used.
+                        onCreatePrimitive(meshId);
+                    } else if (onCreateChildPrimitive != null) {
                         onCreateChildPrimitive(parentId, meshId);
                     }
                 }
@@ -2251,11 +2285,37 @@ class EditorShell {
             }
         });
         closeFovPopup();
+        menuDropdown.dropViewport = null;
+        menuDropdown.onDropPrimitive = null;
         menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
     inline function hasObjectClipboard():Bool {
         return onQueryObjectClipboard != null && onQueryObjectClipboard();
+    }
+
+    /** Toolbar Add: a searchable creation menu covering every object kind. */
+    function openAddObjectMenu():Void {
+        closeFovPopup();
+        snapBar.closePopup();
+        if (palette.visible) palette.close();
+        var items:Array<MenuItem> = [{
+            label: "Empty Game Object",
+            onClick: function() {
+                if (onAddEmptyObjectInFront != null) onAddEmptyObjectInFront();
+            }
+        }, {
+            label: "Primitives",
+            submenu: primitiveMenuItems(-1, true)
+        }];
+        // Primitive rows can be dragged out of the menu and dropped into the
+        // viewport; a plain click creates the object in front of the camera.
+        menuDropdown.dropViewport = viewportRect;
+        menuDropdown.onDropPrimitive = function(meshId, x, y) {
+            if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
+        };
+        menuDropdown.open(addObjectButton.x + 4, addObjectButton.y + 31,
+            items, "Search objects...");
     }
 
     function openHierarchyRootContextMenu():Void {
@@ -2285,6 +2345,8 @@ class EditorShell {
         items.push({ label: "Expand All", onClick: expandAllHierarchy });
         items.push({ label: "Collapse All", onClick: collapseAllHierarchy });
         closeFovPopup();
+        menuDropdown.dropViewport = null;
+        menuDropdown.onDropPrimitive = null;
         menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 

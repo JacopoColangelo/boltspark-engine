@@ -165,7 +165,9 @@ class HierarchyRow extends h2d.Object {
         objectId = entry.id;
         parentId = entry.parentId;
         depth = entry.depth;
-        hasChildren = entry.hasChildren;
+        // Both flags come from the same model snapshot; trust the count so a
+        // stale "has children" hint can never draw a chevron on a leaf row.
+        hasChildren = entry.hasChildren && entry.childCount > 0;
         renderable = entry.renderable;
         visibleFlag = entry.visible;
         enabledFlag = entry.enabled;
@@ -319,6 +321,10 @@ class HierarchyRow extends h2d.Object {
     }
 
     function refreshEntryVisuals():Void {
+        // UiIcons.draw() attaches an h2d.Bitmap child; Graphics.clear() only
+        // drops vector commands. Remove the old chevron bitmap too, or a row
+        // that stops having children keeps showing a stale disclosure arrow.
+        disclosure.removeChildren();
         disclosure.clear();
         if (hasChildren) {
             UiIcons.draw(disclosure, expanded ? ChevronDown : ChevronRight,

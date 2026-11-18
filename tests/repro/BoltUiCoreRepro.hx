@@ -1,5 +1,6 @@
 import boltspark.ui.core.UiFrame;
 import boltspark.ui.layout.BoxLayout;
+import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.render.UiDrawList;
 import boltspark.diagnostics.FrameStats;
@@ -52,6 +53,19 @@ class BoltUiCoreRepro {
         draw.reset();
         draw.line(0, 0, 1, 1, 0);
         assertTrue(draw.get(0) == pooled, "draw command was allocated instead of reused");
+
+        // A quick shrink/grow must not permanently squeeze the panels: clamps
+        // apply to the current geometry only, never to the remembered sizes.
+        var dock = new DockLayout(300, 340, 180);
+        var wide = dock.calculate(1600, 900);
+        assertNear(wide.leftPanel.width, 300, "initial left panel width");
+        assertNear(wide.rightPanel.width, 340, "initial right panel width");
+        assertNear(wide.console.height, 180, "initial console height");
+        dock.calculate(760, 420); // clamps every panel to a smaller window
+        var restored = dock.calculate(1600, 900);
+        assertNear(restored.leftPanel.width, 300, "left panel lost after shrink/grow");
+        assertNear(restored.rightPanel.width, 340, "right panel lost after shrink/grow");
+        assertNear(restored.console.height, 180, "console lost after shrink/grow");
 
         var stats = new FrameStats(0.03);
         assertTrue(stats.sample(0.01) == null, "frame report flushed too early");

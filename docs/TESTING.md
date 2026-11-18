@@ -51,7 +51,7 @@ To rebuild everything first:
 Optional switches add real-window checks:
 
 ```powershell
-.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -ComponentRemoval -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
+.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -ComponentRemoval -RotationHandoff -WindowLifecycle -SplitterCapture -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
 ```
 
 | Switch | Coverage |
@@ -61,6 +61,7 @@ Optional switches add real-window checks:
 | `-ComponentRemoval` | Clicks the MeshRenderer header remove action on the starter cube and verifies the component detaches, then that Ctrl+Z/Ctrl+Y restore/remove it through command history. |
 | `-RotationHandoff` | Window-scoped center arcball followed by a snapped world-axis torus drag; verifies that the ring changes only its captured axis after an arbitrary freeform orientation. |
 | `-WindowLifecycle` | Small/large/baseline resize, maximize/restore, minimize/restore, splitter persistence, empty-space deselection, and cube picking after splitter movement. |
+| `-SplitterCapture` | A splitter drag takes Win32 mouse capture and releases it on drag end, so a button release outside the editor window still reaches Heaps instead of leaving the splitter stuck. |
 | `-DpiProbe` | Current-monitor Win32 process awareness, `GetDpiForWindow`, and agreement with hldx's per-window display scale. |
 | `-DeviceReset` | Heaps DX12's public forced context-loss path, device/context recreation, resource restoration callback, and post-reset HWND responsiveness. |
 | `-FocusSelection` | Presses F while the pointer hovers the hierarchy panel instead of the viewport; verifies the selection-based focus command is not gated by viewport focus. |

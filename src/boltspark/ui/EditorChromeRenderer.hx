@@ -12,8 +12,9 @@ class EditorChromeRenderer {
 
     public function new() {}
 
+    /** With no selection the meta row under the title is omitted. */
     public function draw(target:h2d.Graphics, width:Float, height:Float,
-            geometry:DockLayoutGeometry):Void {
+            geometry:DockLayoutGeometry, inspectorExpanded:Bool = true):Void {
         commands.reset();
         commands.fillRect(new LayoutRect(0, 0, width,
             Theme.TITLE_BAR_HEIGHT), Theme.TITLE_BAR);
@@ -25,9 +26,11 @@ class EditorChromeRenderer {
         commands.fillRect(new LayoutRect(geometry.leftPanel.x,
             geometry.leftPanel.y, geometry.leftPanel.width,
             Theme.PANEL_HEADER_HEIGHT), Theme.PANEL_HEADER);
+        var inspectorHeaderHeight = Theme.PANEL_HEADER_HEIGHT
+            + (inspectorExpanded ? Theme.PANEL_META_HEIGHT : 0);
         commands.fillRect(new LayoutRect(geometry.rightPanel.x,
             geometry.rightPanel.y, geometry.rightPanel.width,
-            Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT), Theme.PANEL_HEADER);
+            inspectorHeaderHeight), Theme.PANEL_HEADER);
 
         // Restrained top markers identify active dock tabs without floating cards.
         commands.fillRect(new LayoutRect(geometry.leftPanel.x,
@@ -49,9 +52,9 @@ class EditorChromeRenderer {
             geometry.leftPanel.x + geometry.leftPanel.width,
             geometry.leftPanel.y + Theme.PANEL_HEADER_HEIGHT - 0.5, Theme.BORDER);
         commands.line(geometry.rightPanel.x,
-            geometry.rightPanel.y + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT - 0.5,
+            geometry.rightPanel.y + inspectorHeaderHeight - 0.5,
             geometry.rightPanel.x + geometry.rightPanel.width,
-            geometry.rightPanel.y + Theme.PANEL_HEADER_HEIGHT + Theme.PANEL_META_HEIGHT - 0.5,
+            geometry.rightPanel.y + inspectorHeaderHeight - 0.5,
             Theme.BORDER);
         commands.line(0, height - Theme.STATUS_BAR_HEIGHT, width,
             height - Theme.STATUS_BAR_HEIGHT, Theme.BORDER);

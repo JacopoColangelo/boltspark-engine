@@ -59,6 +59,7 @@ class DockLayoutStore {
             return 'Panel layout at ${filePath} contains invalid dimensions; using defaults.';
         }
 
+        layout.setPreferred(leftWidth, rightWidth, consoleHeight);
         layout.leftPanelWidth = leftWidth;
         layout.rightPanelWidth = rightWidth;
         layout.consoleHeight = consoleHeight;
@@ -76,9 +77,9 @@ class DockLayoutStore {
             if (!FileSystem.exists(directory)) FileSystem.createDirectory(directory);
             File.saveContent(filePath, haxe.Json.stringify({
                 version: SCHEMA_VERSION,
-                leftPanelWidth: layout.leftPanelWidth,
-                rightPanelWidth: layout.rightPanelWidth,
-                consoleHeight: layout.consoleHeight,
+                leftPanelWidth: layout.preferredLeftPanelWidth,
+                rightPanelWidth: layout.preferredRightPanelWidth,
+                consoleHeight: layout.preferredConsoleHeight,
                 bottomTab: layout.bottomTab
             }));
         } catch (error:Dynamic) {

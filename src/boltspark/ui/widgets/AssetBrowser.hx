@@ -57,6 +57,14 @@ class AssetBrowser extends h2d.Object {
     public var onCopyAssetPath:Null<String->Void>;
 
     static inline var TOOLBAR_HEIGHT:Float = 26;
+    /** The three navigation hits occupy x=4..74 inside the toolbar. */
+    static inline var NAV_CLUSTER_END:Float = 76;
+    static inline var TOOLBAR_EDGE:Float = 4;
+    static inline var TOOLBAR_GAP:Float = 4;
+    /** Icon-only toolbar control width (UiButton elides its label below 39 px). */
+    static inline var ICON_CONTROL_WIDTH:Float = 26;
+    static inline var SEARCH_MIN_WIDTH:Float = 64;
+    static inline var SEARCH_MAX_WIDTH:Float = 240;
 
     static inline var ROW_HEIGHT:Float = 22;
     static inline var LIST_ROW_HEIGHT:Float = 20;
@@ -132,6 +140,7 @@ class AssetBrowser extends h2d.Object {
     var folderHistoryIndex:Int = 0;
 
     var searchText:String = "";
+    var statusMessage:String = "";
     var typeFilter:String = "all";
     var sortKey:Int = 0;
     var sortAsc:Bool = true;
@@ -157,6 +166,9 @@ class AssetBrowser extends h2d.Object {
     var widthValue:Float = 0;
     var heightValue:Float = 0;
     var folderWidth:Float = 118;
+    /** Remembered user width; `folderWidth` is the clamped on-screen value. */
+    var preferredFolderWidth:Float = 118;
+    var toolbarSettingsHidden:Bool = false;
     var dropTargetFolder:Null<String> = null;
     var folderDragSource:String = "";
 
@@ -173,7 +185,7 @@ class AssetBrowser extends h2d.Object {
         sortAsc = store.sortAsc;
         typeFilter = store.typeFilter;
         foldersFirst = store.foldersFirst;
-        folderWidth = store.folderWidth;
+        preferredFolderWidth = folderWidth = store.folderWidth;
 
         background = new UiSurface(ctx, this);
         background.setStyle(Theme.PANEL, Theme.BORDER, 0);
@@ -586,6 +598,10 @@ class AssetBrowser extends h2d.Object {
         this.y = y;
         widthValue = Math.max(0, width);
         heightValue = Math.max(0, height);
+        // A folder width saved while the dock was wide must not push the folder
+        // column (and its rows) past the panel when the window is shrunk. Keep
+        // the preference untouched so it returns when there is room again.
+        folderWidth = Math.min(preferredFolderWidth, maxFolderWidth());
         refreshLayout();
     }
 
@@ -605,6 +621,7 @@ class AssetBrowser extends h2d.Object {
         folderSurface.setSize(folderWidth, Math.max(0, heightValue - TOOLBAR_HEIGHT));
         folderTitle.x = 8;
         folderTitle.y = TOOLBAR_HEIGHT + 6;
+        fitText(folderTitle, "FOLDERS", Math.max(0, folderWidth - 12));
 
         var centerWidth = Math.max(0, widthValue - folderWidth);
         listSurface.x = folderWidth;
@@ -627,16 +644,28 @@ class AssetBrowser extends h2d.Object {
         positionRenameOverlay();
     }
 
+    static inline var MIN_FOLDER_WIDTH:Float = 60;
+
+    function maxFolderWidth():Float {
+        if (widthValue <= MIN_FOLDER_WIDTH * 2) {
+            return Math.max(16, widthValue - TOOLBAR_EDGE * 2);
+        }
+        return Math.max(MIN_FOLDER_WIDTH, widthValue - MIN_FOLDER_WIDTH);
+    }
+
     function beginFolderSplitterDrag():Void {
         var startX = ctx.window.mouseX;
-        var startWidth = folderWidth;
-        var maxWidth = Math.max(90, widthValue - 280);
+        var startWidth = preferredFolderWidth;
+        var maxWidth = maxFolderWidth();
+        var minWidth = Math.min(MIN_FOLDER_WIDTH, maxWidth);
         folderSplitter.startCapture(function(event) {
             switch (event.kind) {
                 case EMove:
-                    folderWidth = Math.max(90, Math.min(maxWidth,
-                        startWidth + (ctx.window.mouseX - startX)));
-                    store.folderWidth = folderWidth;
+                    preferredFolderWidth = Math.max(minWidth,
+                        Math.min(maxWidth,
+                            startWidth + (ctx.window.mouseX - startX)));
+                    folderWidth = preferredFolderWidth;
+                    store.folderWidth = preferredFolderWidth;
                     refreshLayout();
                     event.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
@@ -650,25 +679,93 @@ class AssetBrowser extends h2d.Object {
     }
 
     function layoutToolbar():Void {
-        var addX = widthValue - 64;
-        addButton.x = addX;
-        addButton.y = 3;
-        addButton.setWidth(54);
+        // Lay the right-aligned cluster out from the panel edge. Every tier is
+        // chosen so the cluster never crosses the left nav buttons; in a narrow
+        // dock the old fixed widths pushed controls over the neighbouring panel.
+        var available = widthValue - NAV_CLUSTER_END - TOOLBAR_EDGE * 2;
+        var showNav = true;
+        var showSettings = true;
+        var showFilters = true;
+        var showAdd = true;
+        var addWidth = 54.0;
+        var settingsWidth = ICON_CONTROL_WIDTH;
+        var filterWidth = 90.0;
+        var sortWidth = 96.0;
+        var searchWidth = Math.min(SEARCH_MAX_WIDTH,
+            Math.max(130, widthValue * 0.26));
 
-        var cursor = addX - 6;
+        function clusterWidth():Float {
+            var result = searchWidth;
+            if (showAdd) result += addWidth + TOOLBAR_GAP;
+            if (showSettings) result += settingsWidth + TOOLBAR_GAP;
+            if (showFilters) result += filterWidth + sortWidth + TOOLBAR_GAP * 2;
+            return result;
+        }
+
+        // Full labels, then icon-only filter/sort, then a compact Add with the
+        // minimum search field, then drop nav, and finally the filter/sort icons.
+        if (clusterWidth() > available) {
+            filterWidth = ICON_CONTROL_WIDTH;
+            sortWidth = ICON_CONTROL_WIDTH;
+            searchWidth = Math.min(150,
+                Math.max(SEARCH_MIN_WIDTH, widthValue * 0.26));
+        }
+        if (clusterWidth() > available) {
+            showSettings = false;
+            addWidth = ICON_CONTROL_WIDTH;
+            searchWidth = SEARCH_MIN_WIDTH;
+        }
+        if (clusterWidth() > available) {
+            showNav = false;
+            available = widthValue - TOOLBAR_EDGE * 2;
+        }
+        if (clusterWidth() > available) showFilters = false;
+        if (clusterWidth() > available) {
+            // Extreme narrow: keep the search field and drop Add; asset creation
+            // remains available from the empty-area context menu.
+            showAdd = false;
+            searchWidth = Math.min(SEARCH_MIN_WIDTH,
+                Math.max(32, available - TOOLBAR_EDGE));
+        }
+        // Hand any remaining deficit to the search field so the cluster ends
+        // exactly at the panel edge instead of spilling into the neighbour.
+        var overflow = clusterWidth() - available;
+        if (overflow > 0) searchWidth = Math.max(16, searchWidth - overflow);
+
+        backButton.visible = forwardButton.visible = upButton.visible = showNav;
+        backGlyph.visible = forwardGlyph.visible = upGlyph.visible = showNav;
+        settingsButton.visible = showSettings;
+        toolbarSettingsHidden = !showSettings;
+        filterButton.visible = showFilters;
+        sortButton.visible = showFilters;
+        addButton.visible = showAdd;
+
+        var cursor = widthValue - TOOLBAR_EDGE;
         function place(w:Float):Float {
             cursor -= w;
             var result = cursor;
-            cursor -= 4;
+            cursor -= TOOLBAR_GAP;
             return result;
         }
-        settingsButton.x = place(26);
-        sortButton.x = place(96);
-        sortButton.setWidth(96);
-        filterButton.x = place(90);
-        filterButton.setWidth(90);
-        var searchWidth = Math.min(240, Math.max(130, widthValue * 0.26));
+        if (showAdd) {
+            addButton.x = place(addWidth);
+            addButton.y = 3;
+            addButton.setWidth(addWidth);
+        }
+        if (showSettings) {
+            settingsButton.x = place(settingsWidth);
+            settingsButton.y = 3;
+        }
+        if (showFilters) {
+            sortButton.x = place(sortWidth);
+            sortButton.y = 3;
+            sortButton.setWidth(sortWidth);
+            filterButton.x = place(filterWidth);
+            filterButton.y = 3;
+            filterButton.setWidth(filterWidth);
+        }
         searchField.x = place(searchWidth);
+        searchField.y = 3;
         searchField.setWidth(searchWidth);
 
         backButton.x = 4;
@@ -678,10 +775,6 @@ class AssetBrowser extends h2d.Object {
         forwardButton.y = 3;
         upButton.y = 3;
         redrawNavGlyphs();
-        for (button in [settingsButton, sortButton, filterButton]) {
-            button.y = 3;
-        }
-        searchField.y = 3;
 
         favoriteHeaderStar.x = folderWidth - 20;
         favoriteHeaderStar.y = TOOLBAR_HEIGHT + 4;
@@ -694,6 +787,7 @@ class AssetBrowser extends h2d.Object {
         rebuildBreadcrumbs(Math.max(80, breadcrumbEnd));
         statusText.x = Math.max(118, folderWidth + 8);
         statusText.y = heightValue - 16;
+        fitStatusText();
         folderText.x = Math.max(80, breadcrumbEnd - 4);
         folderText.y = 6;
         folderText.visible = false;
@@ -765,7 +859,11 @@ class AssetBrowser extends h2d.Object {
         settingsCatch.width = ctx.width;
         settingsCatch.height = ctx.height;
         settingsCatch.visible = true;
-        var px = this.x + settingsButton.x - 96;
+        // The toolbar button is hidden on narrow docks; anchor the popover to
+        // the invoking pointer instead of a stale offscreen button position.
+        var px = toolbarSettingsHidden
+            ? ctx.window.mouseX - SETTINGS_WIDTH * 0.5
+            : this.x + settingsButton.x - 96;
         var py = this.y + TOOLBAR_HEIGHT;
         settingsPanel.x = Math.max(4, Math.min(px, ctx.width - SETTINGS_WIDTH - 4));
         settingsPanel.y = Math.max(4, Math.min(py, ctx.height - SETTINGS_HEIGHT - 4));
@@ -921,14 +1019,14 @@ class AssetBrowser extends h2d.Object {
         var prefix = "";
         var x = 82.0;
         for (index in 0...parts.length) {
+            var slash:Null<UiText> = null;
             if (index > 0) {
-                var slash = new UiText(ctx.captionFont, this);
+                slash = new UiText(ctx.captionFont, this);
                 slash.text = "/";
                 slash.textColor = Theme.DISABLED;
                 slash.lineBreak = false;
                 slash.x = x;
                 slash.y = 6;
-                breadcrumbObjects.push(slash);
                 x += 8;
             }
             if (index > 0) prefix = prefix == "" ? parts[index] : prefix + "/" + parts[index];
@@ -940,7 +1038,15 @@ class AssetBrowser extends h2d.Object {
             label.lineBreak = false;
             label.x = x;
             label.y = 6;
-            if (x + label.textWidth > availableWidth) break;
+            // A label that does not fit must be removed, not just skipped:
+            // h2d objects are attached on construction and would otherwise
+            // stay visible and leak on every narrow-layout rebuild.
+            if (x + label.textWidth > availableWidth) {
+                label.remove();
+                if (slash != null) slash.remove();
+                break;
+            }
+            if (slash != null) breadcrumbObjects.push(slash);
             var hit = new h2d.Interactive(label.textWidth + 2, 16, this);
             hit.x = x;
             hit.y = 3;
@@ -1087,11 +1193,6 @@ class AssetBrowser extends h2d.Object {
         return expandedFolders.exists(path) ? expandedFolders.get(path) : true;
     }
 
-    function folderLabelChars(depth:Int):Int {
-        var chars:Int = Std.int((folderWidth - 34 - depth * 14) / 6);
-        return chars < 5 ? 5 : chars;
-    }
-
     function buildFolders():Void {
         clearRows(folderRows);
         folderRowPaths.resize(0);
@@ -1107,7 +1208,7 @@ class AssetBrowser extends h2d.Object {
         var hasChildren = node.children.length > 0;
         var maxRows = Std.int(Math.max(1, (heightValue - TOOLBAR_HEIGHT - 26) / ROW_HEIGHT));
         if (index > maxRows) return index;
-        var row = makeFolderRow(shorten(node.name, folderLabelChars(depth)),
+        var row = makeFolderRow(node.name,
             node.path, selectedFolder == node.path, depth, hasChildren);
         row.y = TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT;
         folderRows.push(row);
@@ -1155,22 +1256,26 @@ class AssetBrowser extends h2d.Object {
         };
 
         // The chevron lives in a fixed gutter, so every depth level shifts the
-        // folder icon and label by the same amount. Child folders are always
-        // visibly indented, whether or not they have children of their own.
+        // folder icon and label by the same amount. On a very narrow folder
+        // column the icon gutter is dropped so the label still fits.
+        var compactRow = folderWidth < 90;
         var iconX = 20 + depth * 14;
-        var icon = new h2d.Graphics(row);
-        UiIcons.draw(icon, Folder, iconX, 3, 14,
-            selected ? Theme.ACCENT : Theme.MUTED);
+        if (!compactRow) {
+            var icon = new h2d.Graphics(row);
+            UiIcons.draw(icon, Folder, iconX, 3, 14,
+                selected ? Theme.ACCENT : Theme.MUTED);
+        }
         var probeName = path == "" ? "All" : path.split("/")[path.split("/").length - 1];
         Sys.println('[probe] asset browser folder row=${probeName} depth=${depth}');
+        var labelX = compactRow ? 6 : iconX + 18;
         var label = new UiText(ctx.font, row);
-        label.text = display;
+        fitText(label, display, Math.max(0, folderWidth - labelX - 6));
         label.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
         label.lineBreak = false;
-        label.x = iconX + 18;
+        label.x = labelX;
         label.y = 3;
 
-        if (hasChildren && path != "") {
+        if (hasChildren && path != "" && !compactRow) {
             var chevron = new h2d.Graphics(row);
             UiIcons.draw(chevron, isExpanded(path) ? ChevronDown : ChevronRight,
                 4, 6, 9, Theme.MUTED);
@@ -1283,7 +1388,7 @@ class AssetBrowser extends h2d.Object {
             drawPreview(preview, entry, 4, 2, width - 8, previewHeight, selected);
 
             var name = new UiText(ctx.captionFont, tile);
-            name.text = shorten(entry.name, Std.int(Math.max(8, (width - 8) / 6.2)));
+            fitText(name, entry.name, Math.max(0, width - 8));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
             name.lineBreak = false;
             name.x = Math.max(2, Math.round((width - name.textWidth) * 0.5));
@@ -1366,18 +1471,18 @@ class AssetBrowser extends h2d.Object {
             var icon = new h2d.Graphics(row);
             UiIcons.draw(icon, iconFor(entry), 5, 3, 14,
                 selected ? Theme.ACCENT : entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
-            var name = new UiText(ctx.font, row);
-            name.text = entry.name;
-            name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
-            name.lineBreak = false;
-            name.x = 24;
-            name.y = 2;
             var type = new UiText(ctx.captionFont, row);
             type.text = entry.kindLabel;
             type.textColor = Theme.MUTED;
             type.lineBreak = false;
-            type.x = width - type.textWidth - 8;
+            type.x = Math.max(0, width - type.textWidth - 8);
             type.y = 3;
+            var name = new UiText(ctx.font, row);
+            fitText(name, entry.name, Math.max(0, type.x - 24 - 4));
+            name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
+            name.lineBreak = false;
+            name.x = 24;
+            name.y = 2;
             attachItemHit(row, entry, width, LIST_ROW_HEIGHT);
         }
     }
@@ -1416,7 +1521,7 @@ class AssetBrowser extends h2d.Object {
             UiIcons.draw(icon, iconFor(entry), 4, 3, 14,
                 selected ? Theme.ACCENT : entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
             var name = new UiText(ctx.font, row);
-            name.text = shorten(entry.name, 26);
+            fitText(name, entry.name, Math.max(0, columnsX[0] - 22 - 4));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
             name.lineBreak = false;
             name.x = 22;
@@ -1788,6 +1893,15 @@ class AssetBrowser extends h2d.Object {
             label: "Refresh",
             onClick: refresh
         });
+        // The settings gear is elided on narrow docks; keep view modes and
+        // thumbnail size reachable from the context menu in that layout.
+        if (toolbarSettingsHidden) {
+            items.push({ label: "", separator: true });
+            items.push({
+                label: "Settings...",
+                onClick: openSettings
+            });
+        }
         contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, items);
     }
 
@@ -2022,8 +2136,20 @@ class AssetBrowser extends h2d.Object {
         rows.resize(0);
     }
 
-    static function shorten(value:String, max:Int):String {
-        return value.length <= max ? value : value.substr(0, max - 1) + "\u2026";
+    /** Pixel-accurate elision: no label may cross its panel or cell edge. */
+    static function fitText(target:UiText, value:String, available:Float):Void {
+        if (available <= 0) {
+            target.text = "";
+            return;
+        }
+        target.text = value;
+        if (target.calcTextWidth(value) <= available) return;
+        target.text = "";
+        for (i in 0...value.length) {
+            var candidate = value.substr(0, i + 1) + "\u2026";
+            if (target.calcTextWidth(candidate) > available) break;
+            target.text = candidate;
+        }
     }
 
     static function shade(color:Int, factor:Float):Int {
@@ -2035,11 +2161,17 @@ class AssetBrowser extends h2d.Object {
 
     /** Brief, self-hiding message for errors that have no other UI surface. */
     function showStatus(message:String):Void {
-        statusText.text = message;
+        statusMessage = message;
+        fitStatusText();
         statusText.visible = true;
         haxe.Timer.delay(function() {
-            if (statusText.text == message) statusText.visible = false;
+            if (statusMessage == message) statusText.visible = false;
         }, 2400);
+    }
+
+    function fitStatusText():Void {
+        fitText(statusText, statusMessage,
+            Math.max(0, widthValue - statusText.x - TOOLBAR_EDGE));
     }
 
     static function formatSize(bytes:Int):String {

@@ -6,6 +6,7 @@ param(
     [switch]$ComponentRemoval,
     [switch]$RotationHandoff,
     [switch]$WindowLifecycle,
+    [switch]$SplitterCapture,
     [switch]$DpiProbe,
     [switch]$DeviceReset,
     [switch]$FocusSelection,
@@ -214,6 +215,10 @@ try {
     if ($WindowLifecycle) {
         & (Join-Path $repoRoot 'tests\native\Test-WindowLifecycle.ps1')
         Assert-LastExitCode 'Window/layout lifecycle test'
+    }
+    if ($SplitterCapture) {
+        & (Join-Path $repoRoot 'tests\native\Test-SplitterCapture.ps1')
+        Assert-LastExitCode 'Splitter mouse-capture test'
     }
     if ($DpiProbe) {
         & (Join-Path $repoRoot 'tests\native\Test-DpiAwareness.ps1')

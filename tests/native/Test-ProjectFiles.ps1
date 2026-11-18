@@ -73,6 +73,13 @@ function Send-Click([IntPtr]$window, [int]$x, [int]$y) {
     Start-Sleep -Milliseconds 200
 }
 
+function Send-Text([IntPtr]$window, [string]$text) {
+    foreach ($char in $text.ToCharArray()) {
+        Send-Message $window 0x0102 ([IntPtr][int]$char) ([IntPtr]1)
+        Start-Sleep -Milliseconds 30
+    }
+}
+
 function Send-SaveChord([IntPtr]$window, [int]$virtualKey, [int]$scanCode,
         [bool]$withShift) {
     Send-Message $window 0x0100 ([IntPtr]0x11) ([IntPtr](1 -bor (0x1D -shl 16)))
@@ -117,9 +124,11 @@ try {
         $window, [IntPtr]::Zero, 40, 40, 1440, 900, 0x0004)
     Start-Sleep -Seconds 1
 
-    # Add palette -> first primitive, so the saved scene has real content.
+    # Toolbar Add -> search "cube" -> primitive, so the saved scene has content.
     Send-Click $window 47 48
-    Send-Click $window 50 115
+    Send-Text $window 'cube'
+    Start-Sleep -Milliseconds 150
+    Send-Click $window 60 105
     Start-Sleep -Milliseconds 300
 
     # File (60,15) -> Save Project As... (menu row 3, center y=110).

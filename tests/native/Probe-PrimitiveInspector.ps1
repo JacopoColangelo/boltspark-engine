@@ -150,13 +150,16 @@ try {
     # Screenshot pixel positions run ~32px lower because PrintWindow includes
     # the title bar; subtract ~32 from measured window pixels for clicks.
 
-    # 1. Open the Add palette and create a Cylinder.
+    # 1. Use the searchable toolbar Add menu to create a Cylinder.
     Send-Click $window 47 48
-    Send-Click $window 50 180
+    Send-Type $window 'cylinder'
+    Start-Sleep -Milliseconds 150
+    Send-Click $window 60 105
 
-    # 2. Type 2 into the Radius field (window row ~435 -> client ~403) and
-    #    commit with Enter. This must create a history entry.
-    Send-Click $window 1298 403
+    # 2. Type 2 into the Radius field (window row ~463 -> client ~431; the
+    #    Enabled checkbox adds one 28px row above Transform) and commit with
+    #    Enter. This must create a history entry.
+    Send-Click $window 1298 431
     Send-Type $window '2'
     Send-Key $window 0x0D $true
     Send-Key $window 0x0D $false

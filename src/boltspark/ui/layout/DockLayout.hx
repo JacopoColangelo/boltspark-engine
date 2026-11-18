@@ -13,9 +13,14 @@ typedef DockLayoutGeometry = {
 }
 
 class DockLayout {
+    /** Effective sizes for the current window, clamped by `calculate()`. */
     public var leftPanelWidth:Float;
     public var rightPanelWidth:Float;
     public var consoleHeight:Float;
+    /** Remembered sizes; a temporary small window must never destroy these. */
+    public var preferredLeftPanelWidth:Float;
+    public var preferredRightPanelWidth:Float;
+    public var preferredConsoleHeight:Float;
     /** Active bottom dock tab: 0 = Output Log, 1 = Asset Browser. */
     public var bottomTab:Int = 0;
 
@@ -24,9 +29,19 @@ class DockLayout {
         rightPanelWidth:Float = Theme.RIGHT_PANEL_WIDTH,
         consoleHeight:Float = Theme.CONSOLE_HEIGHT
     ) {
+        preferredLeftPanelWidth = leftPanelWidth;
+        preferredRightPanelWidth = rightPanelWidth;
+        preferredConsoleHeight = consoleHeight;
         this.leftPanelWidth = leftPanelWidth;
         this.rightPanelWidth = rightPanelWidth;
         this.consoleHeight = consoleHeight;
+    }
+
+    /** Restore persisted dimensions as the new user preference. */
+    public function setPreferred(left:Float, right:Float, console:Float):Void {
+        preferredLeftPanelWidth = left;
+        preferredRightPanelWidth = right;
+        preferredConsoleHeight = console;
     }
 
     public function calculate(width:Float, height:Float):DockLayoutGeometry {
@@ -40,9 +55,9 @@ class DockLayout {
         var viewportWidth:Float;
         if (panelSpace >= Theme.MIN_LEFT_PANEL_WIDTH + Theme.MIN_CENTER_PANEL_WIDTH + Theme.MIN_RIGHT_PANEL_WIDTH) {
             var maxLeft = panelSpace - Theme.MIN_CENTER_PANEL_WIDTH - Theme.MIN_RIGHT_PANEL_WIDTH;
-            leftPanelWidth = clamp(leftPanelWidth, Theme.MIN_LEFT_PANEL_WIDTH, maxLeft);
+            leftPanelWidth = clamp(preferredLeftPanelWidth, Theme.MIN_LEFT_PANEL_WIDTH, maxLeft);
             var maxRight = panelSpace - leftPanelWidth - Theme.MIN_CENTER_PANEL_WIDTH;
-            rightPanelWidth = clamp(rightPanelWidth, Theme.MIN_RIGHT_PANEL_WIDTH, maxRight);
+            rightPanelWidth = clamp(preferredRightPanelWidth, Theme.MIN_RIGHT_PANEL_WIDTH, maxRight);
             leftWidth = leftPanelWidth;
             rightWidth = rightPanelWidth;
             viewportWidth = Math.max(0, panelSpace - leftWidth - rightWidth);
@@ -57,7 +72,7 @@ class DockLayout {
         var consoleHeight:Float;
         var viewportHeight:Float;
         if (bodyHeight >= 168 + splitterSize + 96) {
-            this.consoleHeight = clamp(this.consoleHeight, 140, bodyHeight - 168 - splitterSize);
+            this.consoleHeight = clamp(preferredConsoleHeight, 140, bodyHeight - 168 - splitterSize);
             consoleHeight = this.consoleHeight;
             viewportHeight = bodyHeight - consoleHeight - splitterSize;
         } else {

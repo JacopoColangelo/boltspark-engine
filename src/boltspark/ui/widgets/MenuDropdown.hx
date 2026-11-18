@@ -2,7 +2,10 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
+import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.UiIcons;
+import boltspark.ui.UiIcons.UiIconKind;
+import boltspark.ui.widgets.SearchField;
 import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
 
@@ -16,7 +19,9 @@ typedef MenuItem = {
     /** Draws an accent checkmark and tints the row as the active choice. */
     ?selected:Bool,
     /** Draws a muted dash when the choice differs across a multi-selection. */
-    ?mixed:Bool
+    ?mixed:Bool,
+    /** Makes the row draggable into the viewport as this primitive asset. */
+    ?dragMeshId:String
 };
 
 /** One open cascade level. Level 0 is the menu opened at the cursor position. */
@@ -30,6 +35,10 @@ private class MenuLevel {
     public var rowY:Float = 0;
     public var width:Float = 0;
     public var height:Float = 0;
+    public var items:Array<MenuItem> = [];
+    public var hasSearch:Bool = false;
+    public var searchQuery:String = "";
+    public var searchField:Null<SearchField> = null;
 
     public function new() {}
 }
@@ -48,18 +57,42 @@ class MenuDropdown extends h2d.Object {
     static inline var MIN_WIDTH:Int = 168;
     /** Left gutter reserved for the state mark of a selection-style menu. */
     static inline var STATE_GUTTER:Float = 20;
+    static inline var SEARCH_HEIGHT:Float = 24;
 
     final context:UiContext;
     /** Full-window catch behind the rows: any outside left-click dismisses. */
     final dismissCatch:h2d.Interactive;
     final levels:Array<MenuLevel> = [];
+    var activeQuery:String = "";
+    var rootSearchPlaceholder:String = "";
 
     public var isOpen(default, null):Bool = false;
+    /** Viewport in window coordinates; draggable rows can drop into it. */
+    public var dropViewport:Null<LayoutRect> = null;
+    public var onDropPrimitive:Null<String->Float->Float->Void>;
+
+    final dragBackground:UiSurface;
+    final dragIcon:h2d.Graphics;
+    final dragLabel:UiText;
+    var dragNativeCapture:Bool = false;
 
     public function new(context:UiContext, ?parent:h2d.Object) {
         super(parent);
         this.context = context;
         visible = false;
+
+        // Drag ghost belongs to the same layer as the menu so it can follow the
+        // cursor in window coordinates, outside the popup's own bounds.
+        var ghostParent = parent == null ? this : parent;
+        dragBackground = new UiSurface(context, ghostParent);
+        dragBackground.setSize(78, 26);
+        dragBackground.setStyle(Theme.ACCENT_MUTED, Theme.ACCENT, 0.30);
+        dragIcon = new h2d.Graphics(ghostParent);
+        UiIcons.draw(dragIcon, Cube, 0, 0, 15, Theme.CUBE_ORANGE);
+        dragLabel = new UiText(context.semiboldFont, ghostParent);
+        dragLabel.textColor = Theme.TEXT;
+        dragLabel.lineBreak = false;
+        hideDragGhost();
 
         dismissCatch = new h2d.Interactive(1, 1, this);
         dismissCatch.backgroundColor = 0;
@@ -71,11 +104,17 @@ class MenuDropdown extends h2d.Object {
         dismissCatch.visible = false;
     }
 
-    /** Open the dropdown at window coordinates (x, y) with these items. */
-    public function open(x:Float, y:Float, items:Array<MenuItem>):Void {
+    /** Open the dropdown at window coordinates (x, y) with these items.
+     *  Passing a placeholder adds a search field that filters menu entries. */
+    public function open(x:Float, y:Float, items:Array<MenuItem>,
+            ?searchPlaceholder:String):Void {
         closeLevelsFrom(0);
-        var width = measureItems(items);
-        var height = measureHeight(items);
+        activeQuery = "";
+        rootSearchPlaceholder = searchPlaceholder == null ? "" : searchPlaceholder;
+        var withSearch = rootSearchPlaceholder != "";
+        var width = Math.max(measureItems(items),
+            withSearch ? Math.max(MIN_WIDTH, measureLabel(rootSearchPlaceholder) + 60) : 0);
+        var height = measureHeight(items) + (withSearch ? SEARCH_HEIGHT + PADDING : 0);
         // Clamp inside the window frame.
         this.x = Math.max(4, Math.min(x, context.width - width - 4));
         this.y = Math.max(4, Math.min(y, context.height - height - 4));
@@ -87,7 +126,7 @@ class MenuDropdown extends h2d.Object {
         dismissCatch.height = context.height;
         dismissCatch.visible = true;
 
-        buildLevel(items, null, 0);
+        buildLevel(items, null, 0, withSearch);
         visible = true;
         isOpen = true;
         Sys.println('[probe] menu open');
@@ -97,9 +136,97 @@ class MenuDropdown extends h2d.Object {
         if (!isOpen) return;
         closeLevelsFrom(0);
         dismissCatch.visible = false;
+        hideDragGhost();
         visible = false;
         isOpen = false;
         Sys.println('[probe] menu close');
+    }
+
+    function hideDragGhost():Void {
+        dragBackground.visible = false;
+        dragIcon.visible = false;
+        dragLabel.visible = false;
+    }
+
+    function releaseDragCapture():Void {
+        if (!dragNativeCapture) return;
+        dragNativeCapture = false;
+        context.setMouseCapture(false);
+    }
+
+    /** Drag a primitive row into the viewport; a plain click just activates it. */
+    function beginRowDrag(item:MenuItem, hit:h2d.Interactive,
+            activate:Void->Void):Void {
+        var meshId = item.dragMeshId;
+        if (meshId == null || dropViewport == null || onDropPrimitive == null) {
+            activate();
+            return;
+        }
+        var startX = context.window.mouseX;
+        var startY = context.window.mouseY;
+        hideDragGhost();
+        hit.startCapture(function(event) {
+            switch (event.kind) {
+                case EMove:
+                    var mouseX = context.window.mouseX;
+                    var mouseY = context.window.mouseY;
+                    if (!dragBackground.visible
+                        && Math.abs(mouseX - startX) + Math.abs(mouseY - startY) > 5) {
+                        dragBackground.visible = true;
+                        dragIcon.visible = true;
+                        dragLabel.visible = true;
+                        // Keep the object-type label ("Primitive Plane"); the
+                        // frame grows to enclose it instead of clipping it.
+                        dragLabel.text = item.label;
+                        // Frame the icon plus the whole label with a small pad.
+                        dragBackground.setSize(
+                            Math.max(78, dragLabel.textWidth + 42), 26);
+                        context.setMouseCapture(true);
+                        dragNativeCapture = true;
+                    }
+                    if (dragBackground.visible) {
+                        dragBackground.x = mouseX + 8;
+                        dragBackground.y = mouseY + 6;
+                        dragIcon.x = mouseX + 15;
+                        dragIcon.y = mouseY + 12;
+                        dragLabel.x = mouseX + 34;
+                        dragLabel.y = mouseY + 9;
+                    }
+                    event.propagate = false;
+                case ERelease, EReleaseOutside:
+                    var dragged = dragBackground.visible;
+                    var mouseX = context.window.mouseX;
+                    var mouseY = context.window.mouseY;
+                    hit.stopCapture();
+                    releaseDragCapture();
+                    hideDragGhost();
+                    close();
+                    if (dragged) {
+                        var viewport = dropViewport;
+                        if (viewport != null
+                            && mouseX >= viewport.x && mouseX < viewport.x + viewport.width
+                            && mouseY >= viewport.y && mouseY < viewport.y + viewport.height
+                            && onDropPrimitive != null) {
+                            onDropPrimitive(meshId,
+                                mouseX - viewport.x, mouseY - viewport.y);
+                        }
+                    } else {
+                        activate();
+                    }
+                    event.propagate = false;
+                case EFocusLost:
+                    hit.stopCapture();
+                    releaseDragCapture();
+                    hideDragGhost();
+                    close();
+                    event.propagate = false;
+                case _:
+                    event.propagate = false;
+            }
+        }, function() {
+            releaseDragCapture();
+            hideDragGhost();
+        });
     }
 
     function measureItems(items:Array<MenuItem>):Float {
@@ -122,7 +249,7 @@ class MenuDropdown extends h2d.Object {
     }
 
     function buildLevel(items:Array<MenuItem>, parent:Null<MenuLevel>,
-            rowY:Float):MenuLevel {
+            rowY:Float, withSearch:Bool = false):MenuLevel {
         var level = new MenuLevel();
         level.parent = parent;
         level.rowY = rowY;
@@ -137,16 +264,47 @@ class MenuDropdown extends h2d.Object {
         // viewport or the chrome underneath.
         level.hitCatch.onPush = function(event) event.propagate = false;
 
-        var hasStates = hasSelectionState(items);
-        level.width = measureItems(items);
-        level.height = measureHeight(items);
+        level.items = items;
+        level.hasSearch = withSearch;
+        level.width = withSearch
+            ? Math.max(measureItems(items),
+                Math.max(MIN_WIDTH, measureLabel(rootSearchPlaceholder) + 60))
+            : measureItems(items);
+        if (withSearch) {
+            level.searchField = new SearchField(context, rootSearchPlaceholder,
+                level.width - PADDING * 2, 20, level.object);
+            level.searchField.x = PADDING;
+            level.searchField.y = PADDING;
+            level.searchField.onChange = function(value) {
+                activeQuery = StringTools.trim(value.toLowerCase());
+                level.searchQuery = activeQuery;
+                closeLevelsFrom(1);
+                populateRows(level);
+            };
+            // Typing right after opening filters immediately.
+            level.searchField.focusInput();
+        }
+        populateRows(level);
+        levels.push(level);
+        return level;
+    }
+
+    function populateRows(level:MenuLevel):Void {
+        for (row in level.rows) row.remove();
+        level.rows.resize(0);
+
+        var shown = filteredItems(level.items,
+            level.hasSearch ? level.searchQuery : activeQuery);
+        level.height = measureHeight(shown) + PADDING * 2
+            + (level.hasSearch ? SEARCH_HEIGHT + PADDING : 0);
         level.surface.setSize(level.width, level.height);
         level.hitCatch.width = level.width;
         level.hitCatch.height = level.height;
 
-        var cursor = PADDING;
-        for (index in 0...items.length) {
-            var item = items[index];
+        var cursor = PADDING + (level.hasSearch ? SEARCH_HEIGHT + PADDING : 0);
+        var hasStates = hasSelectionState(shown);
+        for (index in 0...shown.length) {
+            var item = shown[index];
             var itemRowY = cursor;
             cursor += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
             var row = new h2d.Object(level.object);
@@ -173,8 +331,25 @@ class MenuDropdown extends h2d.Object {
                 item.submenu != null, level, hasStates);
         }
         positionLevel(level);
-        levels.push(level);
-        return level;
+    }
+
+    static function filteredItems(items:Array<MenuItem>, query:String):Array<MenuItem> {
+        if (query == "") return items;
+        // Search flattens cascades: matching actions appear directly so a
+        // primitive can be created without walking into its submenu first.
+        var shown:Array<MenuItem> = [];
+        for (item in items) collectMatches(item, query, shown);
+        return shown;
+    }
+
+    static function collectMatches(item:MenuItem, query:String,
+            out:Array<MenuItem>):Void {
+        if (item.separator) return;
+        if (item.submenu != null) {
+            for (child in item.submenu) collectMatches(child, query, out);
+        } else if (item.label.toLowerCase().indexOf(query) >= 0) {
+            out.push(item);
+        }
     }
 
     function positionLevel(level:MenuLevel):Void {
@@ -240,8 +415,12 @@ class MenuDropdown extends h2d.Object {
         rowHit.onOut = function(_) rowSurface.setStyle(normalFill, normalFill, 0);
         rowHit.onPush = function(event) {
             event.propagate = false;
-            activate();
+            if (item.dragMeshId != null) beginRowDrag(item, rowHit, activate);
+            else activate();
         };
+        if (item.dragMeshId != null && dropViewport != null && onDropPrimitive != null) {
+            rowHit.cursor = hxd.Cursor.Move;
+        }
         if (showStates) drawStateMark(row, selected, item.mixed == true);
         var label = new UiText(context.font, row);
         label.text = item.label;

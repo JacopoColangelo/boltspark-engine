@@ -17,6 +17,7 @@ class DockSplitter extends h2d.Object {
     var dragging:Bool = false;
     var hovered:Bool = false;
     var lastPointer:Float = 0;
+    var nativeCaptureActive:Bool = false;
 
     public function new(context:UiContext, vertical:Bool, ?parent:h2d.Object) {
         super(parent);
@@ -67,13 +68,26 @@ class DockSplitter extends h2d.Object {
                     event.propagate = true;
             }
         }, finishDrag);
+        // h2d capture only redirects events that actually reach Heaps. Win32
+        // capture is required so a release after the cursor leaves the client
+        // area is still delivered; otherwise the h2d capture above never ends
+        // and the splitter keeps following the pointer with no button held.
+        context.setMouseCapture(true);
+        nativeCaptureActive = true;
     }
 
     function finishDrag():Void {
         dragging = false;
+        releaseNativeCapture();
         if (!hovered) context.restoreArrowCursor();
         redraw(hit.width, hit.height);
         if (onDragEnd != null) onDragEnd();
+    }
+
+    function releaseNativeCapture():Void {
+        if (!nativeCaptureActive) return;
+        nativeCaptureActive = false;
+        context.setMouseCapture(false);
     }
 
     function redraw(width:Float, height:Float):Void {

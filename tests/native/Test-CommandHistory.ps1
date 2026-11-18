@@ -68,6 +68,13 @@ function Send-Key([IntPtr]$window, [int]$virtualKey, [int]$scanCode,
     Send-Message $window $message ([IntPtr]$virtualKey) ([IntPtr]$flags)
 }
 
+function Send-Text([IntPtr]$window, [string]$text) {
+    foreach ($char in $text.ToCharArray()) {
+        Send-Message $window 0x0102 ([IntPtr][int]$char) ([IntPtr]1)
+        Start-Sleep -Milliseconds 30
+    }
+}
+
 function Send-CtrlChord([IntPtr]$window, [int]$virtualKey, [int]$scanCode) {
     Send-Key $window 0x11 0x1D $true
     Send-Key $window $virtualKey $scanCode $true
@@ -125,7 +132,9 @@ try {
     # brackets this as one transform gesture even though the command is routed
     # through the same callback used by text edits and scrubs.
     $positionXUp = [int][Math]::Round(($width - 318) + 122)
-    $positionRowUp = 205
+    # The Enabled checkbox adds one 28px OBJECT row, so the Transform header
+    # and Position rows sit 28px lower than the old hardcoded 205.
+    $positionRowUp = 233
     Send-Mouse $window 0x0200 $positionXUp $positionRowUp ([IntPtr]::Zero)
     Send-Mouse $window 0x0201 $positionXUp $positionRowUp ([IntPtr]1)
     Send-Mouse $window 0x0202 $positionXUp $positionRowUp ([IntPtr]::Zero)
@@ -133,16 +142,18 @@ try {
     Send-CtrlChord $window 0x5A 0x2C # undo Inspector step
     Send-CtrlChord $window 0x59 0x15 # redo Inspector step
 
-    # Create Cube2 from the native Add palette, undo/redo its structural
-    # command, then delete it and repeat. This verifies renderer-view creation
-    # and disposal in addition to the pure session regression.
+    # Create Cube2 from the searchable toolbar Add menu, undo/redo its
+    # structural command, then delete it and repeat. This verifies
+    # renderer-view creation and disposal in addition to the session regression.
     Send-Mouse $window 0x0200 47 48 ([IntPtr]::Zero)
     Send-Mouse $window 0x0201 47 48 ([IntPtr]1)
     Send-Mouse $window 0x0202 47 48 ([IntPtr]::Zero)
-    Start-Sleep -Milliseconds 300
-    Send-Mouse $window 0x0200 50 115 ([IntPtr]::Zero)
-    Send-Mouse $window 0x0201 50 115 ([IntPtr]1)
-    Send-Mouse $window 0x0202 50 115 ([IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    Send-Text $window 'cube'
+    Start-Sleep -Milliseconds 150
+    Send-Mouse $window 0x0200 60 105 ([IntPtr]::Zero)
+    Send-Mouse $window 0x0201 60 105 ([IntPtr]1)
+    Send-Mouse $window 0x0202 60 105 ([IntPtr]::Zero)
     Start-Sleep -Milliseconds 600
     Send-CtrlChord $window 0x5A 0x2C # undo Create Cube2
     Send-CtrlChord $window 0x59 0x15 # redo Create Cube2
@@ -198,10 +209,12 @@ try {
     if ($log -notmatch '\[history\] undo label=Create Cube2 object=sampleCube') {
         throw 'Create undo did not remove Cube2 and restore the prior selection.'
     }
-    if ($log -notmatch '\[history\] redo label=Create Cube2 object=Cube2 position=\(3, 0, 0\)') {
+    # Placement is camera-relative for Add-menu objects, so assert the command
+    # result and selection rather than a fixed world position.
+    if ($log -notmatch '\[history\] redo label=Create Cube2 object=Cube2 position=\(') {
         throw 'Create redo did not restore and select Cube2.'
     }
-    if ($log -notmatch '\[history\] undo label=Delete Cube2 object=Cube2 position=\(3, 0, 0\)') {
+    if ($log -notmatch '\[history\] undo label=Delete Cube2 object=Cube2 position=\(') {
         throw 'Delete undo did not restore Cube2 and its selection.'
     }
     if ($log -notmatch '\[history\] redo label=Delete Cube2 object=sampleCube') {

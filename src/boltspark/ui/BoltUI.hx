@@ -34,6 +34,8 @@ class BoltUI {
 
     /** Editor commands forwarded to the engine by Main. */
     public var onCreatePrimitive:Null<String->Void>;
+    /** Add an empty object in front of the viewport camera. */
+    public var onAddEmptyObjectInFront:Null<Void->Void>;
     public var onDropPrimitive:Null<String->Float->Float->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
@@ -132,6 +134,9 @@ class BoltUI {
         shell = new EditorShell(parent, ctx, input, snapping);
         shell.onCreatePrimitive = function(meshId) {
             if (onCreatePrimitive != null) onCreatePrimitive(meshId);
+        };
+        shell.onAddEmptyObjectInFront = function() {
+            if (onAddEmptyObjectInFront != null) onAddEmptyObjectInFront();
         };
         shell.onDropPrimitive = function(meshId, x, y) {
             if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
