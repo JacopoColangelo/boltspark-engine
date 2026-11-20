@@ -583,14 +583,19 @@ class EditorShell {
         };
 
         objectSection = new InspectorSection(ctx, "Object", inspectorContentMask);
-        objectNameField = new TextInputField(ctx, "Name", Theme.RIGHT_PANEL_WIDTH - 36,
+        // The enabled box sits immediately left of the name field on a single
+        // compact row; neither control carries a text label.
+        objectNameField = new TextInputField(ctx, "", Theme.RIGHT_PANEL_WIDTH - 36,
             Theme.CONTROL_HEIGHT, "", objectSection.content);
-        objectNameField.setLabelWidth(66);
+        objectNameField.setLabelWidth(0);
         objectNameField.onCommit = function(name:String) {
             if (onObjectNameChanged != null) onObjectNameChanged(name);
         };
         objectNameField.onCancel = function() log("inspector: name edit cancelled");
-        enabledCheckbox = new UiCheckbox(ctx, "Enabled", objectSection.content);
+        enabledCheckbox = new UiCheckbox(ctx, "", objectSection.content);
+        // The name field starts right after the box, so keep the checkbox hit
+        // region on the box only instead of spanning the whole inspector row.
+        enabledCheckbox.setBoxOnlyHit();
         enabledCheckbox.onChanged = function(value) {
             if (onSetObjectEnabled != null) onSetObjectEnabled(selectedObjectId, value);
         };
@@ -599,23 +604,7 @@ class EditorShell {
             Theme.RIGHT_PANEL_WIDTH - 16, Theme.CONTROL_HEIGHT,
             inspectorContentMask);
         addComponentButton.setIcon(Add);
-        addComponentButton.onClick = function() {
-            if (availableComponentTypes.length == 0) return;
-            var items:Array<MenuItem> = [];
-            for (entry in availableComponentTypes) {
-                var captured = entry;
-                items.push({
-                    label: captured.label,
-                    onClick: function() {
-                        if (onAddComponent != null) {
-                            onAddComponent(captured.typeId);
-                        }
-                    }
-                });
-            }
-            closeFovPopup();
-            menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
-        };
+        addComponentButton.onClick = openComponentMenu;
 
         inspectorSections = [objectSection];
         for (section in inspectorSections) {
@@ -635,7 +624,7 @@ class EditorShell {
         viewportModeSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
         viewportModeSurface.setSize(134, 24);
         viewportModeIcon = new h2d.Graphics(viewportHud);
-        UiIcons.draw(viewportModeIcon, Grid, 0, 0, 12, Theme.TEXT_SECONDARY);
+        UiIcons.draw(viewportModeIcon, Camera, 0, 0, 12, Theme.TEXT_SECONDARY);
         viewportModeIcon.x = 7;
         viewportModeIcon.y = 6;
         viewportModeText = new UiText(ctx.captionFont, viewportHud);
@@ -969,10 +958,9 @@ class EditorShell {
         };
         consoleSplitter.onDragEnd = saveLayout;
 
-        // Transient popup layers are created after dock content/splitters so
-        // their surfaces and hit targets cannot end up behind the viewport or
-        // panel interactives. Application windows are separate native HWNDs.
-        menuDropdown = new MenuDropdown(ctx, root);
+        // Dock content is created first; the shared popup layer is created at
+        // the end of this constructor so its full-window dismiss catch and menu
+        // rows stay above every panel interactive.
         assetBrowser = new AssetBrowser(ctx, root, root);
         assetBrowser.visible = activeBottomTab == 0;
         assetBrowser.onQueryAssets = function() {
@@ -1033,6 +1021,11 @@ class EditorShell {
         palette.onDropPrimitive = function(meshId, x, y) {
             if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
         };
+
+        // Created last so the popup/dismiss hit targets are topmost: clicks in
+        // the Asset Browser or palette reach the dismiss catch and close an
+        // open menu instead of being consumed by dock interactives.
+        menuDropdown = new MenuDropdown(ctx, root);
 
         if (layoutError != null) log("layout: " + layoutError);
         selectionStatus.text = selectionStatusValue;
@@ -1583,24 +1576,29 @@ class EditorShell {
     }
 
     function layoutInspectorProperties():Void {
-        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT * 2;
+        // The enabled box and name field share one compact unlabeled row.
+        objectSection.contentHeight = INSPECTOR_ROW_HEIGHT;
 
         var width = Math.max(0, inspectorContentMask.width);
         var y:Float = 0;
-        for (section in inspectorSections) {
+        for (index in 0...inspectorSections.length) {
+            var section = inspectorSections[index];
+            // Give each component its own breathing room instead of stacking
+            // headers and rows into one dense, continuous strip.
+            if (index > 0) y += Theme.SPACING;
             section.x = 0;
             section.y = Math.round(y);
             section.setWidth(width);
             y += section.totalHeight();
         }
 
-        // Object: label-left, field-right row inside the section content.
-        objectNameField.x = 8;
+        // Object: enabled checkbox on the left, name field filling the rest.
+        enabledCheckbox.x = 8;
+        // Center the 22px checkbox body within the 24px name field row at y=2.
+        enabledCheckbox.y = 3;
+        objectNameField.x = 32;
         objectNameField.y = 2;
-        objectNameField.setWidth(Math.max(0, width - 16));
-        enabledCheckbox.x = 10;
-        enabledCheckbox.y = INSPECTOR_ROW_HEIGHT + 4;
-        enabledCheckbox.setWidth(Math.max(0, width - 20));
+        objectNameField.setWidth(Math.max(0, width - 40));
 
         addComponentButton.x = 8;
         addComponentButton.y = Math.round(y + 8);
@@ -1621,6 +1619,10 @@ class EditorShell {
 
     function scrollInspector(delta:Float):Bool {
         if (maxInspectorScroll() <= 0) return false;
+        // A focused TextInput draws its cursor/selection tiles inside this
+        // scrolling mask. Blur first so a fast wheel cannot leave those tiles
+        // with a stale clip transform for a frame (white / oversized flashes).
+        input.clearFocus();
         // HashLink/Windows normalizes a downward wheel step to a positive
         // delta, so increasing the offset must move toward later properties.
         inspectorScrollValue = Math.max(0, Math.min(1,
@@ -2294,6 +2296,34 @@ class EditorShell {
         return onQueryObjectClipboard != null && onQueryObjectClipboard();
     }
 
+    /** Inspector Add Component: a searchable list of every addable component,
+     *  anchored under the button and sized to its width. */
+    function openComponentMenu():Void {
+        if (availableComponentTypes.length == 0) return;
+        var items:Array<MenuItem> = [];
+        for (entry in availableComponentTypes) {
+            var captured = entry;
+            items.push({
+                label: captured.label,
+                onClick: function() {
+                    if (onAddComponent != null) onAddComponent(captured.typeId);
+                }
+            });
+        }
+        closeFovPopup();
+        // This menu has no draggable rows; clear state left by the toolbar menu.
+        menuDropdown.dropViewport = null;
+        menuDropdown.onDropPrimitive = null;
+        // Convert from inspector-mask coordinates to window coordinates: the
+        // mask is a child of the right panel, which carries the panel's X.
+        var buttonTop = rightContentMask.y + inspectorContentMask.y
+            - inspectorContentMask.scrollY + addComponentButton.y;
+        var menuX = rightContentMask.x + inspectorContentMask.x
+            + addComponentButton.x;
+        menuDropdown.open(menuX, buttonTop + addComponentButton.height,
+            items, "Search components...", addComponentButton.width, buttonTop);
+    }
+
     /** Toolbar Add: a searchable creation menu covering every object kind. */
     function openAddObjectMenu():Void {
         closeFovPopup();
@@ -2367,6 +2397,7 @@ class EditorShell {
         if (assetBrowser.isRenaming() || assetBrowser.isSearchFocused()) return true;
         if (fovInput.isEditing()) return true;
         if (objectNameField.isFocused() || hierarchySearch.isFocused()) return true;
+        if (menuDropdown.isSearchFocused()) return true;
         for (row in hierarchyRows) if (row.isRenaming()) return true;
         for (section in componentSections) if (section.isEditing()) return true;
         return false;

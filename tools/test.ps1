@@ -165,6 +165,7 @@ try {
         @{ Name = 'MeshRendererAssetRepro'; Output = 'mesh-renderer-asset-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'SceneHierarchyRepro'; Output = 'scene-hierarchy-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'SceneObjectAffineRepro'; Output = 'scene-object-affine-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
+        @{ Name = 'SelectionOutlineEdgesRepro'; Output = 'selection-outline-edges-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'KeybindingsMigrationRepro'; Output = 'keybindings-migration-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },

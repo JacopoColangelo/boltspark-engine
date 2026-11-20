@@ -8,13 +8,17 @@ $version = '3.52.0'
 $cellSize = 16
 $minimumSize = 6
 $maximumSize = 16
-$expectedAtlasSha256 = 'BDAB756B0648A7E1BCF05F5EA8D44148FF7451B266A3513248F5650F78A01322'
+$expectedAtlasSha256 = '5F51E2AB778DB236866B417FDF6DBF087C09F665D321E807DA96851C755D9DB6'
 $sourceRoot = Join-Path $repoRoot "src\res\.tmp\tabler-icons\$version"
 $outputPath = Join-Path $repoRoot 'src\res\icons\tabler_ui.png'
 # A separate, larger alpha mask for asset-browser scene thumbnails: the UI
 # atlas only rasterizes 6-16px, which is too small for a preview tile.
 $sceneThumbPath = Join-Path $repoRoot 'src\res\icons\scene_thumb.png'
 $expectedSceneThumbSha256 = 'BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722682CC8AD6B0C2'
+# A matching 64px folder mask keeps asset-browser folder tiles crisp; the 16px
+# atlas glyph would have to be upscaled and look blurry.
+$folderThumbPath = Join-Path $repoRoot 'src\res\icons\folder_thumb.png'
+$expectedFolderThumbSha256 = '4BC891ECED4A5B17AA991C3CC82A6D1FF72D6D775534CAE4BEAB515013AB2A3A'
 
 # Columns deliberately match UiIconKind's integer values. Column zero is the
 # transparent `None` entry. Every other entry comes from the official Tabler
@@ -57,14 +61,17 @@ $icons = @(
     @{ Column = 35; Variant = 'outline'; Name = 'arrow-right' },
     @{ Column = 36; Variant = 'outline'; Name = 'arrow-up' },
     @{ Column = 37; Variant = 'outline'; Name = 'eye' },
-    @{ Column = 38; Variant = 'outline'; Name = 'eye-off' }
+    @{ Column = 38; Variant = 'outline'; Name = 'eye-off' },
+    @{ Column = 39; Variant = 'outline'; Name = 'camera' },
+    @{ Column = 40; Variant = 'outline'; Name = 'check' },
+    @{ Column = 41; Variant = 'outline'; Name = 'minus' }
 )
 
 Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Force $sourceRoot | Out-Null
 New-Item -ItemType Directory -Force (Split-Path -Parent $outputPath) | Out-Null
 
-$width = 39 * $cellSize
+$width = 42 * $cellSize
 $height = ($maximumSize - $minimumSize + 1) * $cellSize
 $pixelFormat = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
 $atlas = New-Object System.Drawing.Bitmap($width, $height, $pixelFormat)
@@ -222,4 +229,71 @@ if ($actualSceneThumbSha256 -ne $expectedSceneThumbSha256) {
     throw "Generated scene thumbnail hash mismatch: expected $expectedSceneThumbSha256, got $actualSceneThumbSha256."
 }
 Move-Item -LiteralPath $sceneTemporaryOutput -Destination $sceneThumbPath -Force
-Write-Host "Generated $outputPath and $sceneThumbPath from Tabler Icons v$version." -ForegroundColor Green
+
+# Dedicated 64px folder thumbnail from Tabler `outline/folder`.
+$folderSourceName = 'outline-folder.png'
+$folderSourcePath = Join-Path $sourceRoot $folderSourceName
+if ($Refresh -or -not (Test-Path $folderSourcePath)) {
+    $folderMirrors = @(
+        "https://cdn.jsdelivr.net/npm/@tabler/icons-png@$version/icons/outline/folder.png",
+        "https://unpkg.com/@tabler/icons-png@$version/icons/outline/folder.png"
+    )
+    $folderDownloaded = $false
+    foreach ($uri in $folderMirrors) {
+        try {
+            Invoke-WebRequest -Uri $uri -OutFile $folderSourcePath -TimeoutSec 30
+            $folderDownloaded = $true
+            break
+        } catch {
+            Write-Host "[tabler] Mirror failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            if (Test-Path $folderSourcePath) { Remove-Item -LiteralPath $folderSourcePath -Force }
+        }
+    }
+    if (-not $folderDownloaded) {
+        throw "Could not download Tabler source outline/folder."
+    }
+}
+$folderThumbSize = 64
+$folderThumb = New-Object System.Drawing.Bitmap(
+    $folderThumbSize, $folderThumbSize, $pixelFormat)
+$folderGraphics = [System.Drawing.Graphics]::FromImage($folderThumb)
+try {
+    $folderGraphics.Clear([System.Drawing.Color]::Transparent)
+    $folderGraphics.InterpolationMode =
+        [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $folderGraphics.PixelOffsetMode =
+        [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $folderSource = [System.Drawing.Image]::FromFile($folderSourcePath)
+    try {
+        if ($folderSource.Width -ne 240 -or $folderSource.Height -ne 240) {
+            throw "Unexpected Tabler source dimensions for ${folderSourceName}: $($folderSource.Width)x$($folderSource.Height)."
+        }
+        $folderGraphics.DrawImage($folderSource,
+            (New-Object System.Drawing.Rectangle(0, 0, $folderThumbSize, $folderThumbSize)),
+            (New-Object System.Drawing.Rectangle(0, 0, $folderSource.Width, $folderSource.Height)),
+            [System.Drawing.GraphicsUnit]::Pixel)
+    }
+    finally { $folderSource.Dispose() }
+}
+finally { $folderGraphics.Dispose() }
+for ($y = 0; $y -lt $folderThumbSize; $y++) {
+    for ($x = 0; $x -lt $folderThumbSize; $x++) {
+        $pixel = $folderThumb.GetPixel($x, $y)
+        if ($pixel.A -ne 0) {
+            $folderThumb.SetPixel($x, $y,
+                [System.Drawing.Color]::FromArgb($pixel.A, 255, 255, 255))
+        }
+    }
+}
+$folderTemporaryOutput = "$folderThumbPath.tmp"
+try {
+    $folderThumb.Save($folderTemporaryOutput, [System.Drawing.Imaging.ImageFormat]::Png)
+}
+finally { $folderThumb.Dispose() }
+$actualFolderThumbSha256 = (Get-FileHash $folderTemporaryOutput -Algorithm SHA256).Hash
+if ($actualFolderThumbSha256 -ne $expectedFolderThumbSha256) {
+    Remove-Item -LiteralPath $folderTemporaryOutput -Force
+    throw "Generated folder thumbnail hash mismatch: expected $expectedFolderThumbSha256, got $actualFolderThumbSha256."
+}
+Move-Item -LiteralPath $folderTemporaryOutput -Destination $folderThumbPath -Force
+Write-Host "Generated $outputPath, $sceneThumbPath, and $folderThumbPath from Tabler Icons v$version." -ForegroundColor Green

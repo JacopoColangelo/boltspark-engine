@@ -34,7 +34,15 @@ private class MenuLevel {
     public var index:Int = 0;
     public var rowY:Float = 0;
     public var width:Float = 0;
+    /** Visible height; `items` may be taller and scroll inside `rowMask`. */
     public var height:Float = 0;
+    public var viewHeightLimit:Float = 0;
+    public var rowMask:h2d.Mask;
+    public var scrollBar:ScrollBar;
+    public var scrollY:Float = 0;
+    public var rowsHeight:Float = 0;
+    public var viewportHeight:Float = 0;
+    public var maxScroll:Float = 0;
     public var items:Array<MenuItem> = [];
     public var hasSearch:Bool = false;
     public var searchQuery:String = "";
@@ -58,6 +66,10 @@ class MenuDropdown extends h2d.Object {
     /** Left gutter reserved for the state mark of a selection-style menu. */
     static inline var STATE_GUTTER:Float = 20;
     static inline var SEARCH_HEIGHT:Float = 24;
+    /** Menus taller than this scroll instead of overflowing the window. */
+    static inline var MAX_MENU_HEIGHT:Float = 360;
+    static inline var SCROLLBAR_WIDTH:Float = 3;
+    static inline var WHEEL_STEP:Float = 36;
 
     final context:UiContext;
     /** Full-window catch behind the rows: any outside left-click dismisses. */
@@ -97,24 +109,44 @@ class MenuDropdown extends h2d.Object {
         dismissCatch = new h2d.Interactive(1, 1, this);
         dismissCatch.backgroundColor = 0;
         dismissCatch.cursor = hxd.Cursor.Default;
+        // Any outside mouse button dismisses the menu. Heaps only routes
+        // onPush to the primary button by default, so middle/right clicks
+        // would otherwise leave the popup open while focus was already lost.
+        dismissCatch.enableRightButton = true;
         dismissCatch.onPush = function(event) {
             event.propagate = false;
             close();
         };
+        // While open, swallow wheel events that reach the catch so masked
+        // inspector content cannot scroll underneath the popup.
+        dismissCatch.onWheel = function(event) event.propagate = false;
         dismissCatch.visible = false;
     }
 
     /** Open the dropdown at window coordinates (x, y) with these items.
-     *  Passing a placeholder adds a search field that filters menu entries. */
+     *  Passing a placeholder adds a search field that filters menu entries;
+     *  `fixedWidth` makes the menu match an anchor control instead of sizing
+     *  it from its labels (cascades still size themselves naturally). */
     public function open(x:Float, y:Float, items:Array<MenuItem>,
-            ?searchPlaceholder:String):Void {
+            ?searchPlaceholder:String, ?fixedWidth:Float, ?preferAboveY:Float):Void {
         closeLevelsFrom(0);
         activeQuery = "";
         rootSearchPlaceholder = searchPlaceholder == null ? "" : searchPlaceholder;
         var withSearch = rootSearchPlaceholder != "";
-        var width = Math.max(measureItems(items),
-            withSearch ? Math.max(MIN_WIDTH, measureLabel(rootSearchPlaceholder) + 60) : 0);
-        var height = measureHeight(items) + (withSearch ? SEARCH_HEIGHT + PADDING : 0);
+        var width = fixedWidth != null && fixedWidth > 0
+            ? fixedWidth
+            : Math.max(measureItems(items),
+                withSearch ? Math.max(MIN_WIDTH, measureLabel(rootSearchPlaceholder) + 60) : 0);
+        var maxMenuHeight = maxViewHeight();
+        var height = Math.min(
+            measureHeight(items) + (withSearch ? SEARCH_HEIGHT + PADDING : 0),
+            maxMenuHeight);
+        // An anchored menu (e.g. Add Component) flips above its control when
+        // there is not enough room below, like an editor drop-down.
+        if (preferAboveY != null && y + height > context.height - 4) {
+            var above = preferAboveY - height;
+            if (above >= 4) y = above;
+        }
         // Clamp inside the window frame.
         this.x = Math.max(4, Math.min(x, context.width - width - 4));
         this.y = Math.max(4, Math.min(y, context.height - height - 4));
@@ -126,7 +158,7 @@ class MenuDropdown extends h2d.Object {
         dismissCatch.height = context.height;
         dismissCatch.visible = true;
 
-        buildLevel(items, null, 0, withSearch);
+        buildLevel(items, null, 0, withSearch, width, maxMenuHeight);
         visible = true;
         isOpen = true;
         Sys.println('[probe] menu open');
@@ -134,12 +166,29 @@ class MenuDropdown extends h2d.Object {
 
     public function close():Void {
         if (!isOpen) return;
+        // Release focus before tearing down the search field. Otherwise Heaps
+        // keeps a focused TextInput (with its white cursor/selection tiles)
+        // whose parent was removed, which can render as a white or oversized
+        // overlay when the inspector mask scrolls underneath it.
+        if (isSearchFocused()) {
+            var scene = getScene();
+            var focused = scene == null ? null : scene.getFocus();
+            if (focused != null) focused.blur();
+        }
         closeLevelsFrom(0);
         dismissCatch.visible = false;
         hideDragGhost();
         visible = false;
         isOpen = false;
         Sys.println('[probe] menu close');
+    }
+
+    /** True while the root menu's search field owns keyboard focus, so
+     *  editor shortcuts can be suppressed while the user is typing a query. */
+    public function isSearchFocused():Bool {
+        if (levels.length == 0) return false;
+        var field = levels[0].searchField;
+        return field != null && field.isFocused();
     }
 
     function hideDragGhost():Void {
@@ -248,8 +297,13 @@ class MenuDropdown extends h2d.Object {
         return height;
     }
 
+    function maxViewHeight():Float {
+        return Math.min(MAX_MENU_HEIGHT, Math.max(80, context.height - 16));
+    }
+
     function buildLevel(items:Array<MenuItem>, parent:Null<MenuLevel>,
-            rowY:Float, withSearch:Bool = false):MenuLevel {
+            rowY:Float, withSearch:Bool = false, ?fixedWidth:Float,
+            ?viewHeightLimit:Float):MenuLevel {
         var level = new MenuLevel();
         level.parent = parent;
         level.rowY = rowY;
@@ -263,13 +317,32 @@ class MenuDropdown extends h2d.Object {
         // Swallow presses on the menu body so they cannot fall through to the
         // viewport or the chrome underneath.
         level.hitCatch.onPush = function(event) event.propagate = false;
+        level.viewHeightLimit = viewHeightLimit == null
+            ? maxViewHeight() : viewHeightLimit;
+        level.rowMask = new h2d.Mask(1, 1, level.object);
+        level.scrollBar = new ScrollBar(context, level.object);
+        level.scrollBar.onChange = function(value) {
+            setLevelScroll(level, value * level.maxScroll);
+        };
+        level.scrollBar.onWheel = function(delta) {
+            if (level.maxScroll <= 0) return false;
+            setLevelScroll(level, level.scrollY + delta * WHEEL_STEP);
+            return true;
+        };
+        level.hitCatch.onWheel = function(event) {
+            if (level.maxScroll <= 0) return;
+            setLevelScroll(level, level.scrollY + event.wheelDelta * WHEEL_STEP);
+            event.propagate = false;
+        };
 
         level.items = items;
         level.hasSearch = withSearch;
-        level.width = withSearch
-            ? Math.max(measureItems(items),
-                Math.max(MIN_WIDTH, measureLabel(rootSearchPlaceholder) + 60))
-            : measureItems(items);
+        level.width = fixedWidth != null && fixedWidth > 0
+            ? fixedWidth
+            : withSearch
+                ? Math.max(measureItems(items),
+                    Math.max(MIN_WIDTH, measureLabel(rootSearchPlaceholder) + 60))
+                : measureItems(items);
         if (withSearch) {
             level.searchField = new SearchField(context, rootSearchPlaceholder,
                 level.width - PADDING * 2, 20, level.object);
@@ -292,29 +365,51 @@ class MenuDropdown extends h2d.Object {
     function populateRows(level:MenuLevel):Void {
         for (row in level.rows) row.remove();
         level.rows.resize(0);
+        level.scrollY = 0;
+        level.rowMask.scrollY = 0;
 
         var shown = filteredItems(level.items,
             level.hasSearch ? level.searchQuery : activeQuery);
-        level.height = measureHeight(shown) + PADDING * 2
-            + (level.hasSearch ? SEARCH_HEIGHT + PADDING : 0);
+        var searchArea = level.hasSearch ? SEARCH_HEIGHT + PADDING : PADDING;
+        var rowsSum = 0.0;
+        for (item in shown) {
+            rowsSum += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
+        }
+        level.rowsHeight = PADDING * 2 + rowsSum;
+        level.viewportHeight = Math.min(level.rowsHeight,
+            Math.max(ROW_HEIGHT, level.viewHeightLimit - searchArea - PADDING));
+        level.height = searchArea + level.viewportHeight + PADDING;
+        level.maxScroll = Math.max(0, level.rowsHeight - level.viewportHeight);
+        var hasScroll = level.maxScroll > 0;
+        var innerWidth = Math.max(1,
+            level.width - PADDING * 2 - (hasScroll ? SCROLLBAR_WIDTH : 0));
+
         level.surface.setSize(level.width, level.height);
         level.hitCatch.width = level.width;
         level.hitCatch.height = level.height;
+        level.rowMask.x = PADDING;
+        level.rowMask.y = searchArea;
+        level.rowMask.width = Std.int(Math.ceil(innerWidth));
+        level.rowMask.height = Std.int(Math.ceil(level.viewportHeight));
+        level.scrollBar.setBounds(level.width - PADDING - SCROLLBAR_WIDTH,
+            searchArea, SCROLLBAR_WIDTH, level.viewportHeight);
+        level.scrollBar.setMetrics(level.viewportHeight
+            / Math.max(1, level.rowsHeight), 0);
 
-        var cursor = PADDING + (level.hasSearch ? SEARCH_HEIGHT + PADDING : 0);
+        var cursor = PADDING;
         var hasStates = hasSelectionState(shown);
         for (index in 0...shown.length) {
             var item = shown[index];
             var itemRowY = cursor;
             cursor += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
-            var row = new h2d.Object(level.object);
+            var row = new h2d.Object(level.rowMask);
             level.rows.push(row);
             row.y = itemRowY;
             if (item.separator) {
                 var line = new UiSurface(context, row);
-                line.x = PADDING;
+                line.x = 0;
                 line.setStyle(Theme.BORDER, Theme.BORDER, 0, 0);
-                line.setSize(level.width - PADDING * 2, 1);
+                line.setSize(innerWidth, 1);
                 line.y = Math.floor(SEPARATOR_HEIGHT * 0.5);
                 continue;
             }
@@ -327,10 +422,18 @@ class MenuDropdown extends h2d.Object {
                     if (captured.onClick != null) captured.onClick();
                 }
             };
-            addRowContent(row, item, itemRowY, level.width, activate,
+            addRowContent(row, item, itemRowY, innerWidth, activate,
                 item.submenu != null, level, hasStates);
         }
         positionLevel(level);
+    }
+
+    function setLevelScroll(level:MenuLevel, value:Float):Void {
+        level.scrollY = Math.max(0, Math.min(level.maxScroll, value));
+        level.rowMask.scrollY = level.scrollY;
+        level.scrollBar.setMetrics(level.viewportHeight
+            / Math.max(1, level.rowsHeight),
+            level.maxScroll > 0 ? level.scrollY / level.maxScroll : 0);
     }
 
     static function filteredItems(items:Array<MenuItem>, query:String):Array<MenuItem> {
@@ -365,7 +468,7 @@ class MenuDropdown extends h2d.Object {
         var leftX = parent.object.x - level.width + 2;
         level.object.x = parentScreenX + rightX + level.width <= context.width - 4
             ? rightX : leftX;
-        var desiredY = parent.object.y + level.rowY;
+        var desiredY = parent.object.y + level.rowY - parent.scrollY;
         var minY = 4 - this.y;
         var maxY = context.height - this.y - level.height - 4;
         level.object.y = Math.max(minY, Math.min(desiredY, maxY));
@@ -397,11 +500,11 @@ class MenuDropdown extends h2d.Object {
         // Rows start after the panel padding. Painting them at x=0 covered the
         // panel's left border and made every menu look clipped on that side.
         var rowSurface = new UiSurface(context, row);
-        rowSurface.x = PADDING;
-        rowSurface.setSize(width - PADDING * 2, ROW_HEIGHT - 1);
+        rowSurface.x = 0;
+        rowSurface.setSize(width, ROW_HEIGHT - 1);
         rowSurface.setStyle(normalFill, normalFill, 0);
-        var rowHit = new h2d.Interactive(width - PADDING * 2, ROW_HEIGHT - 1, row);
-        rowHit.x = PADDING;
+        var rowHit = new h2d.Interactive(width, ROW_HEIGHT - 1, row);
+        rowHit.x = 0;
         rowHit.backgroundColor = 0;
         rowHit.cursor = hxd.Cursor.Default;
         rowHit.onOver = function(_) {
@@ -431,7 +534,7 @@ class MenuDropdown extends h2d.Object {
         if (hasSubmenu) {
             var chevron = new h2d.Graphics(row);
             UiIcons.draw(chevron, ChevronRight, 0, 0, 9, Theme.MUTED);
-            chevron.x = width - PADDING - 16;
+            chevron.x = width - 14;
             chevron.y = Math.round((ROW_HEIGHT - 9) * 0.5);
         }
     }
@@ -445,25 +548,18 @@ class MenuDropdown extends h2d.Object {
 
     /**
      * Selection-style menus reserve a left gutter so every label lines up,
-     * whether or not its row is active. An accent check marks the current
-     * choice; a muted dash marks a mixed multi-selection instead of a bullet
-     * glued to one label.
+     * whether or not its row is active. The pinned Tabler `check` glyph marks
+     * the current choice; `minus` marks a mixed multi-selection instead of a
+     * bullet glued to one label.
      */
     static function drawStateMark(row:h2d.Object, selected:Bool, mixed:Bool):Void {
         if (!selected && !mixed) return;
         var mark = new h2d.Graphics(row);
-        var x = 7.0;
-        var y = Math.round((ROW_HEIGHT - 10) * 0.5);
-        if (mixed) {
-            mark.lineStyle(1.6, Theme.MUTED);
-            mark.moveTo(x, y + 5);
-            mark.lineTo(x + 8, y + 5);
-        } else {
-            mark.lineStyle(1.8, Theme.ACCENT_HOVER);
-            mark.moveTo(x, y + 4);
-            mark.lineTo(x + 3.2, y + 7.4);
-            mark.lineTo(x + 9, y + 0.8);
-        }
+        var size = 12;
+        mark.x = 7;
+        mark.y = Math.round((ROW_HEIGHT - size) * 0.5);
+        if (mixed) UiIcons.draw(mark, Minus, 0, 0, size, Theme.MUTED);
+        else UiIcons.draw(mark, Check, 0, 0, size, Theme.ACCENT_HOVER);
     }
 
     function measureLabel(labelText:String):Float {

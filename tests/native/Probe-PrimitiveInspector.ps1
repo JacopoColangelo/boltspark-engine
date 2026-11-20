@@ -156,10 +156,11 @@ try {
     Start-Sleep -Milliseconds 150
     Send-Click $window 60 105
 
-    # 2. Type 2 into the Radius field (window row ~463 -> client ~431; the
-    #    Enabled checkbox adds one 28px row above Transform) and commit with
-    #    Enter. This must create a history entry.
-    Send-Click $window 1298 431
+    # 2. Type 2 into the Radius field (window row ~475 -> client ~443; the
+    #    enabled box shares the name row, two 8px section gaps, and 8px under
+    #    every section banner) and commit with Enter. This must create a
+    #    history entry.
+    Send-Click $window 1298 443
     Send-Type $window '2'
     Send-Key $window 0x0D $true
     Send-Key $window 0x0D $false

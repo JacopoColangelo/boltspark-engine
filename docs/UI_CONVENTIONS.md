@@ -29,9 +29,10 @@ should follow them instead of inventing local variants.
 
 ## Menus and popovers
 
-- `MenuDropdown` rows are 22 px with a 3 px panel padding. Any outside left-click
-  dismisses the menu. Cascading submenus open on hover and flip left when the
-  parent is near the window edge.
+- `MenuDropdown` rows are 22 px with a 3 px panel padding. Any outside mouse
+  press (left, middle, or right) dismisses the menu, and wheel events over the
+  dismiss catch do not scroll content behind an open popup. Cascading submenus
+  open on hover and flip left when the parent is near the window edge.
 - Group menu actions by intent with thin separator rows (`separator: true`):
   create, edit, structure, destroy. Omit entries that cannot apply — for example
   Paste without a clipboard, Unparent on a root object, or Expand on a leaf.
@@ -42,8 +43,18 @@ should follow them instead of inventing local variants.
 - Menus are short by design. When a menu grows, split it into a second labelled
   button rather than adding section headers to an existing one (Asset Browser
   Filter and Sort are the reference).
+- A menu that can grow with registered entries gets a search field: pass a
+  placeholder to `MenuDropdown.open()`. Menus anchored to a button (the toolbar
+  Add menu, inspector Add Component) open just below it and pass the button's
+  width as `fixedWidth` so the popup lines up with its anchor; when there is no
+  room below, they flip above it. Editor shortcuts stay suppressed while the
+  menu search field owns focus.
+- Menus are capped at 360 px (or the window height) and scroll their rows with
+  the wheel or the thin right-edge bar, so long component lists stay usable.
 - A popover has one full-window dismiss catch behind it. The catch is invisible
-  and must use the arrow cursor.
+  and must use the arrow cursor. The shared shell `MenuDropdown` is created last
+  under `root` so its catch and rows stay above dock content; otherwise Asset
+  Browser interactives consume the click before the menu can dismiss.
 
 ## Typography and alignment
 
@@ -73,5 +84,8 @@ should follow them instead of inventing local variants.
   masks (for example `scene_thumb.png`). Reuse an icon only when its meaning
   matches; add a pinned glyph instead of overloading an unrelated one.
 - Object visibility uses `Eye` / `EyeOff` at the right edge of hierarchy rows.
-  The inspector's `Enabled` flag uses the flat `UiCheckbox` (inset field, accent
-  check) directly under the name row.
+  The inspector's `Enabled` flag uses the flat `UiCheckbox` immediately left of
+  the object name field on a single unlabeled row: an inset dark field with a
+  subtle border when off, the same field with an accent border and the pinned
+  Tabler `Check` glyph when on. Menu selection state uses the same `Check`
+  glyph (and `Minus` for mixed values) rather than hand-drawn strokes.

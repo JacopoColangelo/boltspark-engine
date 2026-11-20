@@ -186,6 +186,12 @@ try {
         throw 'Asset Browser did not refresh after creating a scene.'
     }
 
+    # Folders now live in the Asset Panel, so the root shows the Scenes folder
+    # tile first. Enter it before working with the scene assets inside.
+    Send-Click $window $tile0X $tileY
+    Send-Click $window $tile0X $tileY
+    Start-Sleep -Milliseconds 300
+
     # Right-click the new scene tile, choose Rename, type a name, commit.
     Send-RightClick $window $tile1X $tileY
     Start-Sleep -Milliseconds 200
@@ -297,6 +303,11 @@ try {
         throw 'Root folder rows show paths or wrong nesting instead of folder names.'
     }
 
+    # Root lists folder tiles now; enter Scenes before copying one of its assets.
+    Send-Click $window $tile0X $tileY
+    Send-Click $window $tile0X $tileY
+    Start-Sleep -Milliseconds 300
+
     # Copy an asset with Ctrl+C, select the Vault folder, paste with Ctrl+V.
     Send-Click $window $tile0X $tileY
     Start-Sleep -Milliseconds 150
@@ -326,13 +337,19 @@ try {
         throw 'Asset Browser did not enable scrolling for a full grid.'
     }
 
+    # The root now lists folders, so enter Scenes before dragging assets.
+    Send-Click $window $tile0X $tileY
+    Send-Click $window $tile0X $tileY
+    Start-Sleep -Milliseconds 300
+
     # Dragging an asset onto a folder moves it immediately (no context menu).
     $folderRowY = $contentY + 58   # "All" root row (stable target)
     Send-Mouse $window 0x0200 $tile0X $tileY ([IntPtr]::Zero)
-    Start-Sleep -Milliseconds 80
-    Send-Mouse $window 0x0201 $tile0X $tileY ([IntPtr]1)
-    Send-Mouse $window 0x0200 ($consoleX + 60) $folderRowY ([IntPtr]1)
     Start-Sleep -Milliseconds 120
+    Send-Mouse $window 0x0201 $tile0X $tileY ([IntPtr]1)
+    Start-Sleep -Milliseconds 180
+    Send-Mouse $window 0x0200 ($consoleX + 60) $folderRowY ([IntPtr]1)
+    Start-Sleep -Milliseconds 220
     Send-Mouse $window 0x0202 ($consoleX + 60) $folderRowY ([IntPtr]::Zero)
     Start-Sleep -Milliseconds 600
     if ((Get-Content $stdout -Raw) -notmatch
@@ -362,6 +379,10 @@ try {
     if (-not $copyDone) {
         throw 'Ctrl+dragging an asset did not offer a copy.'
     }
+
+    # Collapse Scenes so its assets do not push Vault out of the short tree.
+    Send-Click $window ($consoleX + 10) ($contentY + 81)
+    Start-Sleep -Milliseconds 200
 
     # Nested folders are explicit: right-click Vault -> New... -> Folder.
     $vaultRowY = $contentY + 70 + 22 + 11
@@ -407,6 +428,10 @@ try {
     if (-not (Test-Path (Join-Path $workspace 'Scenes\Vault'))) {
         throw 'Dropped folder is missing from its new parent.'
     }
+    # Vault is nested under the collapsed Scenes folder; expand it again so the
+    # nested New Folder row is visible for the delete probe.
+    Send-Click $window ($consoleX + 10) ($contentY + 81)
+    Start-Sleep -Milliseconds 200
 
     # Right-click empty space opens the Add menu without using the + button.
     Send-RightClick $window ($consoleX + 190) ($contentY + 13)   # empty toolbar space
@@ -440,7 +465,8 @@ try {
     }
 
     # Delete key routes to the Asset Browser for both assets and folders.
-    Send-Click $window $tile0X $tileY
+    # Folders sort first in the panel, so the first asset is the second tile.
+    Send-Click $window $tile1X $tileY
     Start-Sleep -Milliseconds 150
     Send-Key $window 0x2E 0x53   # Delete
     Start-Sleep -Milliseconds 500

@@ -40,6 +40,9 @@ enum abstract UiIconKind(Int) from Int to Int {
     var ArrowUp = 36;
     var Eye = 37;
     var EyeOff = 38;
+    var Camera = 39;
+    var Check = 40;
+    var Minus = 41;
 }
 
 /**
@@ -53,12 +56,13 @@ enum abstract UiIconKind(Int) from Int to Int {
  */
 class UiIcons {
     static inline var CELL_SIZE:Int = 16;
-    static inline var ICON_COLUMNS:Int = 39;
+    static inline var ICON_COLUMNS:Int = 42;
     static inline var MIN_SIZE:Int = 6;
     static inline var MAX_SIZE:Int = 16;
 
     static var atlas:h2d.Tile;
     static var sceneThumb:h2d.Tile;
+    static var folderThumb:h2d.Tile;
 
     /** Large tinted Tabler `outline/photo` glyph for asset-browser scene
      *  thumbnails; the exact-size atlas tops out at 16px. */
@@ -67,6 +71,22 @@ class UiIcons {
         target.removeChildren();
         if (sceneThumb == null) sceneThumb = hxd.Res.icons.scene_thumb.toTile();
         var bitmap = new h2d.Bitmap(sceneThumb, target);
+        bitmap.x = Math.round(x);
+        bitmap.y = Math.round(y);
+        bitmap.width = size;
+        bitmap.height = size;
+        bitmap.smooth = true;
+        bitmap.color.setColor(color);
+        bitmap.color.a = Math.max(0, Math.min(1, alpha));
+    }
+
+    /** Large tinted Tabler `outline/folder` glyph for asset-browser folder
+     *  tiles; the exact-size atlas tops out at 16px and looks blurry scaled up. */
+    public static function drawFolderThumb(target:h2d.Graphics, x:Float, y:Float,
+            size:Float, color:Int, alpha:Float = 1):Void {
+        target.removeChildren();
+        if (folderThumb == null) folderThumb = hxd.Res.icons.folder_thumb.toTile();
+        var bitmap = new h2d.Bitmap(folderThumb, target);
         bitmap.x = Math.round(x);
         bitmap.y = Math.round(y);
         bitmap.width = size;

@@ -15,10 +15,23 @@ import boltspark.ui.widgets.MenuDropdown.MenuItem;
 import boltspark.ui.widgets.UiSlider;
 import hxd.Key;
 
-typedef FolderNode = {
+/** One node in the full project asset tree: a folder or a leaf asset. */
+typedef AssetTreeNode = {
     var name:String;
+    /** Folder path for folders, asset source for leaves. */
     var path:String;
-    var children:Array<FolderNode>;
+    var isFolder:Bool;
+    var entry:Null<AssetFileInfo>;
+    var children:Array<AssetTreeNode>;
+};
+
+/** A folder or asset shown in the main Asset Panel. */
+typedef BrowserItem = {
+    var isFolder:Bool;
+    /** Folder path for folders, asset source for leaves. */
+    var path:String;
+    var name:String;
+    var entry:Null<AssetFileInfo>;
 };
 
 /**
@@ -78,6 +91,8 @@ class AssetBrowser extends h2d.Object {
     final store:AssetBrowserStore;
     final background:UiSurface;
     final emptyAreaHit:h2d.Interactive;
+    /** Wheel catcher over the hierarchy pane, behind the tree rows. */
+    final treeWheelHit:h2d.Interactive;
     final toolbar:UiSurface;
     final titleText:UiText;
     final folderText:UiText;
@@ -87,6 +102,8 @@ class AssetBrowser extends h2d.Object {
     final folderSurface:UiSurface;
     final folderTitle:UiText;
     final folderSplitter:h2d.Interactive;
+    final treeMask:h2d.Mask;
+    final treeScroll:ScrollBar;
     final listSurface:UiSurface;
     final listMask:h2d.Mask;
     final gridScroll:ScrollBar;
@@ -118,6 +135,8 @@ class AssetBrowser extends h2d.Object {
     final sortMenu:MenuDropdown;
     final favoriteMenu:MenuDropdown;
     final contextMenu:MenuDropdown;
+    /** Lists folders hidden by the breadcrumb ellipsis. */
+    final breadcrumbMenu:MenuDropdown;
 
     final renameSurface:UiSurface;
     final renameInput:UiTextInput;
@@ -129,9 +148,19 @@ class AssetBrowser extends h2d.Object {
     var folders:Array<String> = [];
     var folderRows:Array<h2d.Object> = [];
     var folderRowPaths:Array<String> = [];
+    var folderRowIsFolder:Array<Bool> = [];
     final expandedFolders:Map<String, Bool> = [];
     var assetRows:Array<h2d.Object> = [];
     var shownEntries:Array<AssetFileInfo> = [];
+    /** Folders and assets currently shown in the main Asset Panel. */
+    var shownItems:Array<BrowserItem> = [];
+    /** Folder drop targets rendered in the main panel (browser-local coords). */
+    var assetFolderRects:Array<{
+        x:Float, y:Float, width:Float, height:Float, path:String
+    }> = [];
+    var treeScrollValue:Float = 0;
+    /** Full height of the hierarchy rows, before scrolling. */
+    var treeContentHeight:Float = 0;
 
     var selectedSources:Array<String> = [];
     var selectedSource:String = "";
@@ -208,6 +237,14 @@ class AssetBrowser extends h2d.Object {
             }
         };
         emptyAreaHit.onWheel = handleGridWheel;
+
+        // The hierarchy has its own scroll position. This catcher sits behind
+        // the tree rows (created later) so row clicks still work, but wheel
+        // events over the pane always reach the tree instead of the grid.
+        treeWheelHit = new h2d.Interactive(1, 1, this);
+        treeWheelHit.backgroundColor = 0;
+        treeWheelHit.cursor = hxd.Cursor.Default;
+        treeWheelHit.onWheel = handleTreeWheel;
 
         toolbar = new UiSurface(ctx, this);
         toolbar.setStyle(Theme.PANEL_HEADER, Theme.BORDER, 0);
@@ -350,6 +387,7 @@ class AssetBrowser extends h2d.Object {
         sortMenu = new MenuDropdown(ctx, menus);
         favoriteMenu = new MenuDropdown(ctx, menus);
         contextMenu = new MenuDropdown(ctx, menus);
+        breadcrumbMenu = new MenuDropdown(ctx, menus);
 
         folderSurface = new UiSurface(ctx, this);
         folderSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER, 0);
@@ -360,9 +398,23 @@ class AssetBrowser extends h2d.Object {
         folderSplitter.onPush = function(_) beginFolderSplitterDrag();
 
         folderTitle = new UiText(ctx.captionFont, this);
-        folderTitle.text = "FOLDERS";
+        folderTitle.text = "PROJECT";
         folderTitle.textColor = Theme.MUTED;
         folderTitle.lineBreak = false;
+
+        // The left pane is a full, scrollable asset hierarchy (folders and the
+        // assets inside them), not just a folder-only tree.
+        treeMask = new h2d.Mask(1, 1, this);
+        treeScroll = new ScrollBar(ctx, this);
+        treeScroll.onChange = function(value) {
+            treeScrollValue = value;
+            Sys.println('[probe] asset browser tree scroll=${value}');
+            buildFolders();
+        };
+        treeScroll.onWheel = function(delta) {
+            handleTreeWheelDelta(delta);
+            return true;
+        };
 
         listSurface = new UiSurface(ctx, this);
         listSurface.setStyle(Theme.PANEL, Theme.BORDER, 0);
@@ -467,11 +519,12 @@ class AssetBrowser extends h2d.Object {
         sortMenu.close();
         closeSettings();
         favoriteMenu.close();
+        breadcrumbMenu.close();
     }
 
     /** Ctrl+C: remember the selection for a later paste. */
     public function copyToClipboard():Void {
-        if (selectedSource == "") return;
+        if (selectedSource == "" || folderFromSelectionKey(selectedSource) != null) return;
         clipboardSource = selectedSource;
         clipboardIsCut = false;
         Sys.println('[probe] asset browser clipboard copy=${selectedSource}');
@@ -479,7 +532,7 @@ class AssetBrowser extends h2d.Object {
 
     /** Ctrl+X: remember the selection for a move-on-paste. */
     public function cutToClipboard():Void {
-        if (selectedSource == "") return;
+        if (selectedSource == "" || folderFromSelectionKey(selectedSource) != null) return;
         clipboardSource = selectedSource;
         clipboardIsCut = true;
         Sys.println('[probe] asset browser clipboard cut=${selectedSource}');
@@ -494,14 +547,20 @@ class AssetBrowser extends h2d.Object {
         var target = folder == "" ? "Scenes" : folder;
         var source = clipboardSource;
         var isCut = clipboardIsCut;
+        // Folder selection markers are UI-only and must never be copied/pasted
+        // as asset paths.
+        var items:Array<String> = [];
+        for (item in selectedSources) {
+            if (folderFromSelectionKey(item) == null) items.push(item);
+        }
         Sys.println('[probe] asset browser paste source=${source} folder=${target} cut=${isCut}');
         if (isCut) {
             clipboardSource = "";
-            for (item in selectedSources) if (onMoveAsset != null) onMoveAsset(item, target);
-            if (selectedSources.length == 0 && onMoveAsset != null) onMoveAsset(source, target);
+            for (item in items) if (onMoveAsset != null) onMoveAsset(item, target);
+            if (items.length == 0 && onMoveAsset != null) onMoveAsset(source, target);
         } else if (onCopyAsset != null) {
-            for (item in selectedSources) onCopyAsset(item, target);
-            if (selectedSources.length == 0) onCopyAsset(source, target);
+            for (item in items) onCopyAsset(item, target);
+            if (items.length == 0) onCopyAsset(source, target);
         }
     }
 
@@ -621,7 +680,19 @@ class AssetBrowser extends h2d.Object {
         folderSurface.setSize(folderWidth, Math.max(0, heightValue - TOOLBAR_HEIGHT));
         folderTitle.x = 8;
         folderTitle.y = TOOLBAR_HEIGHT + 6;
-        fitText(folderTitle, "FOLDERS", Math.max(0, folderWidth - 12));
+        fitText(folderTitle, "PROJECT", Math.max(0, folderWidth - 12));
+
+        var treeTop = TOOLBAR_HEIGHT + 22;
+        treeMask.x = 0;
+        treeMask.y = Std.int(treeTop);
+        treeMask.width = Std.int(Math.max(1, folderWidth - 12));
+        treeMask.height = Std.int(Math.max(1, heightValue - treeTop - 4));
+        treeWheelHit.x = 0;
+        treeWheelHit.y = Std.int(treeTop);
+        treeWheelHit.width = Std.int(Math.max(1, folderWidth));
+        treeWheelHit.height = treeMask.height;
+        treeScroll.setBounds(Math.max(0, folderWidth - 9), treeTop, 8,
+            Math.max(0, heightValue - treeTop - 4));
 
         var centerWidth = Math.max(0, widthValue - folderWidth);
         listSurface.x = folderWidth;
@@ -1015,8 +1086,42 @@ class AssetBrowser extends h2d.Object {
     function rebuildBreadcrumbs(availableWidth:Float):Void {
         for (object in breadcrumbObjects) object.remove();
         breadcrumbObjects.resize(0);
-        var parts = selectedFolder == "" ? ["Content"] : ["Content"].concat(selectedFolder.split("/"));
-        var prefix = "";
+        var rawParts = selectedFolder == ""
+            ? ["Content"] : ["Content"].concat(selectedFolder.split("/"));
+
+        // Deep paths are elided to "Content / … / parent / current" so they
+        // never crowd out the toolbar. The ellipsis navigates to the ancestor
+        // before the shown tail, revealing more of the path.
+        var parts:Array<String> = [];
+        var targets:Array<String> = [];
+        var hiddenItems:Array<MenuItem> = [];
+        var maxParts = 6;
+        if (rawParts.length > maxParts) {
+            var tailStart = rawParts.length - (maxParts - 2);
+            parts.push(rawParts[0]);
+            targets.push("");
+            parts.push("\u2026");
+            targets.push(tailStart > 1 ? rawParts.slice(1, tailStart).join("/") : "");
+            // Every elided folder becomes a menu entry, so the ellipsis is a
+            // shortcut to any ancestor rather than just the previous one.
+            for (index in 1...tailStart) {
+                var hiddenTarget = rawParts.slice(1, index + 1).join("/");
+                hiddenItems.push({
+                    label: rawParts[index],
+                    onClick: function() navigateTo(hiddenTarget)
+                });
+            }
+            for (index in tailStart...rawParts.length) {
+                parts.push(rawParts[index]);
+                targets.push(rawParts.slice(1, index + 1).join("/"));
+            }
+        } else {
+            for (index in 0...rawParts.length) {
+                parts.push(rawParts[index]);
+                targets.push(index == 0 ? "" : rawParts.slice(1, index + 1).join("/"));
+            }
+        }
+
         var x = 82.0;
         for (index in 0...parts.length) {
             var slash:Null<UiText> = null;
@@ -1026,18 +1131,16 @@ class AssetBrowser extends h2d.Object {
                 slash.textColor = Theme.DISABLED;
                 slash.lineBreak = false;
                 slash.x = x;
-                slash.y = 6;
+                slash.y = Math.round((TOOLBAR_HEIGHT - slash.textHeight) * 0.5);
                 x += 8;
             }
-            if (index > 0) prefix = prefix == "" ? parts[index] : prefix + "/" + parts[index];
-            var target = index == 0 ? "" : prefix;
             var isLast = index == parts.length - 1;
             var label = new UiText(ctx.captionFont, this);
             label.text = parts[index];
             label.textColor = isLast ? Theme.TEXT : Theme.MUTED;
             label.lineBreak = false;
             label.x = x;
-            label.y = 6;
+            label.y = Math.round((TOOLBAR_HEIGHT - label.textHeight) * 0.5);
             // A label that does not fit must be removed, not just skipped:
             // h2d objects are attached on construction and would otherwise
             // stay visible and leak on every narrow-layout rebuild.
@@ -1047,14 +1150,19 @@ class AssetBrowser extends h2d.Object {
                 break;
             }
             if (slash != null) breadcrumbObjects.push(slash);
-            var hit = new h2d.Interactive(label.textWidth + 2, 16, this);
+            var hit = new h2d.Interactive(label.textWidth + 2, 18, this);
             hit.x = x;
             hit.y = 3;
             hit.backgroundColor = 0;
             hit.cursor = hxd.Cursor.Default;
-            var captured = target;
+            var captured = targets[index];
+            var isEllipsis = parts[index] == "\u2026";
             hit.onPush = function(event) {
                 event.propagate = false;
+                if (isEllipsis) {
+                    breadcrumbMenu.open(ctx.window.mouseX, ctx.window.mouseY, hiddenItems);
+                    return;
+                }
                 navigateTo(captured);
             };
             breadcrumbObjects.push(hit);
@@ -1107,6 +1215,25 @@ class AssetBrowser extends h2d.Object {
     }
 
     function visibleEntries():Array<AssetFileInfo> {
+        // Direct child folders are first-class items in the Asset Panel, so
+        // folders can be opened and dragged just like the tiles in the grid.
+        var items:Array<BrowserItem> = [];
+        var prefix = selectedFolder == "" ? "" : selectedFolder + "/";
+        for (folder in folders) {
+            if (selectedFolder == "") {
+                if (folder.indexOf("/") >= 0) continue;
+            } else {
+                if (!StringTools.startsWith(folder, prefix)) continue;
+                var rest = folder.substring(prefix.length);
+                if (rest.indexOf("/") >= 0) continue;
+            }
+            var parts = folder.split("/");
+            items.push({
+                isFolder: true, path: folder,
+                name: parts[parts.length - 1], entry: null
+            });
+        }
+
         var result:Array<AssetFileInfo> = [];
         for (entry in entries) {
             if (selectedFolder != "" && entry.folder != selectedFolder) continue;
@@ -1131,8 +1258,26 @@ class AssetBrowser extends h2d.Object {
             if (comparison == 0) comparison = a.source == b.source ? 0 : (a.source < b.source ? -1 : 1);
             return comparison * direction;
         });
+        for (entry in result) {
+            items.push({
+                isFolder: false, path: entry.source,
+                name: entry.name, entry: entry
+            });
+        }
+        shownItems = items;
         shownEntries = result;
         return result;
+    }
+
+    static inline var FOLDER_KEY_PREFIX:String = "__folder__:";
+
+    static inline function folderSelectionKey(path:String):String {
+        return FOLDER_KEY_PREFIX + path;
+    }
+
+    static inline function folderFromSelectionKey(key:String):Null<String> {
+        return StringTools.startsWith(key, FOLDER_KEY_PREFIX)
+            ? key.substring(FOLDER_KEY_PREFIX.length) : null;
     }
 
     static function compareFloat(a:Float, b:Float):Int {
@@ -1160,127 +1305,203 @@ class AssetBrowser extends h2d.Object {
     // Folder tree
     // ------------------------------------------------------------------
 
-    function buildFolderTree():Array<FolderNode> {
-        var roots:Array<FolderNode> = [];
-        for (path in folders) {
+    /** Build the full project tree: folders plus the assets inside them. */
+    function buildAssetTree():Array<AssetTreeNode> {
+        var roots:Array<AssetTreeNode> = [];
+        var byPath = new Map<String, AssetTreeNode>();
+
+        function folderNode(path:String):AssetTreeNode {
+            var existing = byPath.get(path);
+            if (existing != null) return existing;
             var parts = path.split("/");
-            var level = roots;
-            var prefix = "";
-            for (index in 0...parts.length) {
-                var part = parts[index];
-                prefix = index == 0 ? part : prefix + "/" + part;
-                var node:Null<FolderNode> = null;
-                for (candidate in level) {
-                    if (candidate.name == part) { node = candidate; break; }
-                }
-                if (node == null) {
-                    node = {name: part, path: prefix, children: []};
-                    level.push(node);
-                }
-                level = node.children;
+            var node:AssetTreeNode = {
+                name: parts[parts.length - 1], path: path, isFolder: true,
+                entry: null, children: []
+            };
+            byPath.set(path, node);
+            if (parts.length == 1) {
+                roots.push(node);
+            } else {
+                folderNode(parts.slice(0, parts.length - 1).join("/")).children.push(node);
             }
+            return node;
         }
-        sortFolderNodes(roots);
+
+        for (path in folders) if (path != "") folderNode(path);
+        for (entry in entries) {
+            var leaf:AssetTreeNode = {
+                name: entry.name, path: entry.source, isFolder: false,
+                entry: entry, children: []
+            };
+            if (entry.folder == "") roots.push(leaf);
+            else folderNode(entry.folder).children.push(leaf);
+        }
+        sortTreeNodes(roots);
         return roots;
     }
 
-    static function sortFolderNodes(nodes:Array<FolderNode>):Void {
-        nodes.sort(function(a, b) return a.name < b.name ? -1 : (a.name == b.name ? 0 : 1));
-        for (node in nodes) sortFolderNodes(node.children);
+    static function sortTreeNodes(nodes:Array<AssetTreeNode>):Void {
+        nodes.sort(function(a, b) {
+            if (a.isFolder != b.isFolder) return a.isFolder ? -1 : 1;
+            return a.name < b.name ? -1 : (a.name == b.name ? 0 : 1);
+        });
+        for (node in nodes) sortTreeNodes(node.children);
     }
 
     function isExpanded(path:String):Bool {
         return expandedFolders.exists(path) ? expandedFolders.get(path) : true;
     }
 
+    function treeScrollOffset():Float {
+        return Math.max(0, treeContentHeight - treeMask.height) * treeScrollValue;
+    }
+
+    function countVisibleNodes(node:AssetTreeNode):Int {
+        var count = 1;
+        if (node.isFolder && isExpanded(node.path)) {
+            for (child in node.children) count += countVisibleNodes(child);
+        }
+        return count;
+    }
+
     function buildFolders():Void {
         clearRows(folderRows);
         folderRowPaths.resize(0);
-        var all = makeFolderRow("All", "", selectedFolder == "", 0, false);
-        all.y = TOOLBAR_HEIGHT + 22;
+        folderRowIsFolder.resize(0);
+
+        var nodes = buildAssetTree();
+        var visible = 1; // "All" root row
+        for (node in nodes) visible += countVisibleNodes(node);
+        var content = visible * ROW_HEIGHT;
+        var over = Math.max(0, content - treeMask.height);
+        treeContentHeight = content;
+        treeScrollValue = Math.max(0, Math.min(1, treeScrollValue));
+        treeScroll.setMetrics(over <= 0 ? 1 : treeMask.height / Math.max(1, content),
+            treeScrollValue);
+        // folderRowPaths is cleared above; use the measured content height so
+        // the rebuilt rows actually shift when the tree is scrolled.
+        var offset = over * treeScrollValue;
+
+        var index = 0;
+        var all = makeTreeRow("All", "", selectedFolder == "", 0, false, true, null);
+        // treeMask already starts below the folder header; no extra 22px here.
+        all.y = index * ROW_HEIGHT - offset;
         folderRows.push(all);
         folderRowPaths.push("");
-        var index = 1;
-        for (node in buildFolderTree()) index = renderFolderNode(node, 0, index);
+        folderRowIsFolder.push(true);
+        index++;
+        for (node in nodes) index = renderAssetTreeNode(node, 0, index, offset);
     }
 
-    function renderFolderNode(node:FolderNode, depth:Int, index:Int):Int {
-        var hasChildren = node.children.length > 0;
-        var maxRows = Std.int(Math.max(1, (heightValue - TOOLBAR_HEIGHT - 26) / ROW_HEIGHT));
-        if (index > maxRows) return index;
-        var row = makeFolderRow(node.name,
-            node.path, selectedFolder == node.path, depth, hasChildren);
-        row.y = TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT;
+    function renderAssetTreeNode(node:AssetTreeNode, depth:Int, index:Int,
+            offset:Float):Int {
+        var hasChildren = node.isFolder && node.children.length > 0;
+        // Unreal-style: the hierarchy highlights the current folder only.
+        // Asset selection is shown in the main Asset Panel, not in the tree.
+        var selected = node.isFolder && selectedFolder == node.path;
+        var row = makeTreeRow(node.name, node.path, selected, depth,
+            hasChildren, node.isFolder, node.entry);
+        row.y = index * ROW_HEIGHT - offset;
         folderRows.push(row);
         folderRowPaths.push(node.path);
+        folderRowIsFolder.push(node.isFolder);
         index++;
         if (hasChildren && isExpanded(node.path)) {
-            for (child in node.children) index = renderFolderNode(child, depth + 1, index);
+            for (child in node.children) {
+                index = renderAssetTreeNode(child, depth + 1, index, offset);
+            }
         }
         return index;
     }
 
-    function makeFolderRow(display:String, path:String, selected:Bool,
-            depth:Int, hasChildren:Bool):h2d.Object {
-        var row = new h2d.Object(this);
+    function makeTreeRow(display:String, path:String, selected:Bool, depth:Int,
+            hasChildren:Bool, isFolder:Bool, entry:Null<AssetFileInfo>):h2d.Object {
+        // Selection lives in the Asset Panel only; the hierarchy stays neutral
+        // like Unreal's folder tree, so a folder and its asset never both look
+        // selected at once.
+        selected = false;
+        var row = new h2d.Object(treeMask);
         row.x = 2;
-        var surface = new UiSurface(ctx, row);
-        surface.setSize(folderWidth - 4, ROW_HEIGHT - 2);
-        surface.setStyle(selected ? Theme.ACCENT_MUTED : Theme.PANEL_ALT,
-            selected ? Theme.ACCENT : Theme.BORDER, 0);
-
-        var hit = new h2d.Interactive(folderWidth - 4, ROW_HEIGHT - 2, row);
+        var rowWidth = Math.max(20, folderWidth - 16);
+        // No per-row frame: the hierarchy reads as a plain tree, matching the
+        // scene hierarchy. The invisible hit keeps every row fully clickable.
+        var hit = new h2d.Interactive(rowWidth, ROW_HEIGHT - 2, row);
         hit.backgroundColor = 0;
         hit.cursor = hxd.Cursor.Default;
         hit.enableRightButton = true;
+        var captured = path;
         hit.onPush = function(event) {
             event.propagate = false;
-            // Record navigation (history + breadcrumb) without rebuilding the
-            // rows: the hit that starts capture must stay alive for the drag.
-            setFolderState(path, true);
-            if (event.button != 1) {
-                if (path != "") {
-                    beginFolderDrag(path, hit, event);
-                } else {
-                    buildFolders();
-                    buildAssets();
+            if (event.button == 1) {
+                if (isFolder) openFolderContextMenu(captured);
+                else {
+                    if (!isSelected(captured)) setSelected([captured]);
+                    openContextMenu();
                 }
+                buildFolders();
+                buildAssets();
                 return;
             }
-            buildFolders();
-            buildAssets();
-            openFolderContextMenu(path);
+            var now = haxe.Timer.stamp();
+            var isDouble = captured == lastClickSource && now - lastClickAt <= 0.35;
+            lastClickAt = now;
+            lastClickSource = captured;
+            if (isFolder) {
+                // A single click navigates and keeps folder drag/collapse working.
+                setFolderState(captured, true);
+                if (isDouble && captured != "") expandedFolders.set(captured, true);
+                if (captured != "") beginFolderDrag(captured, hit, event);
+                else { buildFolders(); buildAssets(); }
+                return;
+            }
+            if (hxd.Key.isDown(hxd.Key.CTRL)) toggleSelection(captured);
+            else if (hxd.Key.isDown(hxd.Key.SHIFT)) selectRange(captured);
+            else setSelected([captured]);
+            if (isDouble) {
+                buildAssets();
+                openSelected();
+                return;
+            }
+            beginAssetDrag(captured, hit, event);
         };
-        hit.onWheel = function(event) {
-            handleGridWheel(event);
-        };
+        hit.onWheel = handleTreeWheel;
 
-        // The chevron lives in a fixed gutter, so every depth level shifts the
-        // folder icon and label by the same amount. On a very narrow folder
-        // column the icon gutter is dropped so the label still fits.
         var compactRow = folderWidth < 90;
         var iconX = 20 + depth * 14;
         if (!compactRow) {
             var icon = new h2d.Graphics(row);
-            UiIcons.draw(icon, Folder, iconX, 3, 14,
-                selected ? Theme.ACCENT : Theme.MUTED);
+            var kind = isFolder ? Folder : (entry == null ? Document : iconFor(entry));
+            var iconSize = 14;
+            UiIcons.draw(icon, kind, iconX,
+                Math.round((ROW_HEIGHT - iconSize) * 0.5), iconSize,
+                selected ? Theme.ACCENT : isFolder ? Theme.MUTED
+                    : (entry != null && entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED));
         }
-        var probeName = path == "" ? "All" : path.split("/")[path.split("/").length - 1];
-        Sys.println('[probe] asset browser folder row=${probeName} depth=${depth}');
         var labelX = compactRow ? 6 : iconX + 18;
         var label = new UiText(ctx.font, row);
-        fitText(label, display, Math.max(0, folderWidth - labelX - 6));
+        fitText(label, display, Math.max(0, rowWidth - labelX - 6));
         label.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
         label.lineBreak = false;
         label.x = labelX;
-        label.y = 3;
+        // Center on the icon's vertical middle instead of pinning to the top.
+        label.y = Math.round((ROW_HEIGHT - label.textHeight) * 0.5);
+
+        if (isFolder) {
+            var pathParts = path.split("/");
+            var probeName = path == "" ? "All" : pathParts[pathParts.length - 1];
+            Sys.println('[probe] asset browser folder row=${probeName} depth=${depth}');
+        } else {
+            Sys.println('[probe] asset browser asset row=${display} depth=${depth}');
+        }
 
         if (hasChildren && path != "" && !compactRow) {
             var chevron = new h2d.Graphics(row);
+            // Keep the chevron in the same indent column as this row's icon.
+            var chevronX = 4 + depth * 14;
             UiIcons.draw(chevron, isExpanded(path) ? ChevronDown : ChevronRight,
-                4, 6, 9, Theme.MUTED);
+                chevronX, Math.round((ROW_HEIGHT - 9) * 0.5), 9, Theme.MUTED);
             var chevronHit = new h2d.Interactive(14, ROW_HEIGHT - 2, row);
-            chevronHit.x = 2;
+            chevronHit.x = chevronX - 2;
             chevronHit.backgroundColor = 0;
             chevronHit.cursor = hxd.Cursor.Default;
             chevronHit.onPush = function(event) {
@@ -1292,10 +1513,33 @@ class AssetBrowser extends h2d.Object {
         return row;
     }
 
+    function handleTreeWheel(event:hxd.Event):Void {
+        handleTreeWheelDelta(event.wheelDelta);
+        event.propagate = false;
+    }
+
+    function handleTreeWheelDelta(delta:Float):Void {
+        var over = Math.max(0, treeContentHeight - treeMask.height);
+        if (over <= 0) return;
+        treeScrollValue = Math.max(0, Math.min(1,
+            treeScrollValue + delta * ROW_HEIGHT / over));
+        Sys.println('[probe] asset browser tree scroll=${treeScrollValue}');
+        buildFolders();
+    }
+
+    /** Folder drop target in either the hierarchy pane or the main panel. */
     function folderAt(x:Float, y:Float):Null<String> {
+        for (rect in assetFolderRects) {
+            if (x >= rect.x && x <= rect.x + rect.width
+                    && y >= rect.y && y <= rect.y + rect.height) return rect.path;
+        }
         if (x < 0 || x > folderWidth) return null;
+        var treeTop = TOOLBAR_HEIGHT + 22;
+        if (y < treeTop || y > treeTop + treeMask.height) return null;
+        var offset = treeScrollOffset();
         for (index in 0...folderRowPaths.length) {
-            var rowY = TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT;
+            if (!folderRowIsFolder[index]) continue;
+            var rowY = treeTop + index * ROW_HEIGHT - offset;
             if (y >= rowY && y <= rowY + ROW_HEIGHT - 2) return folderRowPaths[index];
         }
         return null;
@@ -1351,31 +1595,33 @@ class AssetBrowser extends h2d.Object {
 
     function buildAssets():Void {
         clearRows(assetRows);
-        var shown = visibleEntries();
-        var content = contentHeight(shown.length);
+        assetFolderRects.resize(0);
+        visibleEntries();
+        var items = shownItems;
+        var content = contentHeight(items.length);
         var view = gridViewportHeight();
         var ratio = content <= 0 ? 1.0 : Math.min(1.0, view / content);
-        if (ratio < 1) Sys.println('[probe] asset browser scrollable=true tiles=${shown.length}');
+        if (ratio < 1) Sys.println('[probe] asset browser scrollable=true tiles=${items.length}');
         gridScroll.setMetrics(ratio, scrollValue);
         gridScroll.setBounds(Math.max(0, folderWidth + centerWidth() - 10),
             TOOLBAR_HEIGHT + 2, 6, Math.max(0, view - 4));
 
         switch (viewMode) {
-            case 1: buildCompactList(shown);
-            case 2: buildDetailsList(shown);
-            default: buildGrid(shown);
+            case 1: buildCompactList(items);
+            case 2: buildDetailsList(items);
+            default: buildGrid(items);
         }
 
         // No persistent status sentence under the grid: selection is visible on
         // the tiles themselves, and transient messages use showStatus().
     }
 
-    function buildGrid(shown:Array<AssetFileInfo>):Void {
+    function buildGrid(shown:Array<BrowserItem>):Void {
         var width = tileWidth();
         var height = tileHeight();
         var previewHeight = Math.max(30, height - TILE_LABEL_HEIGHT - 6);
         for (index in 0...shown.length) {
-            var entry = shown[index];
+            var item = shown[index];
             var position = tilePosition(index, shown.length);
             if (position.y + height < 0 || position.y > gridViewportHeight()) continue;
             var tile = new h2d.Object(listMask);
@@ -1383,23 +1629,76 @@ class AssetBrowser extends h2d.Object {
             tile.y = position.y;
             assetRows.push(tile);
 
-            var selected = isSelected(entry.source);
+            var selected = isSelected(item.isFolder
+                ? folderSelectionKey(item.path) : item.path);
             var preview = new h2d.Graphics(tile);
-            drawPreview(preview, entry, 4, 2, width - 8, previewHeight, selected);
+            if (item.isFolder) {
+                drawFolderPreview(preview, 4, 2, width - 8, previewHeight, selected);
+                assetFolderRects.push({
+                    x: listMask.x + tile.x, y: listMask.y + tile.y,
+                    width: width, height: height, path: item.path
+                });
+            } else if (item.entry != null) {
+                drawPreview(preview, item.entry, 4, 2, width - 8, previewHeight, selected);
+            }
 
             var name = new UiText(ctx.captionFont, tile);
-            fitText(name, entry.name, Math.max(0, width - 8));
+            fitText(name, item.name, Math.max(0, width - 8));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
             name.lineBreak = false;
             name.x = Math.max(2, Math.round((width - name.textWidth) * 0.5));
             name.y = height - 17;
 
-            if (store.isFavorite(entry.source)) {
+            if (!item.isFolder && item.entry != null && store.isFavorite(item.entry.source)) {
                 var star = new h2d.Graphics(tile);
                 UiIcons.draw(star, Star, width - 19, 3, 12, Theme.WARNING);
             }
-            attachItemHit(tile, entry, width, height);
+            if (item.isFolder) attachFolderHit(tile, item.path, width, height);
+            else if (item.entry != null) attachItemHit(tile, item.entry, width, height);
         }
+    }
+
+    /** Folder tile preview: the pinned Tabler folder glyph on a card. */
+    function drawFolderPreview(g:h2d.Graphics, x:Float, y:Float,
+            w:Float, h:Float, selected:Bool):Void {
+        g.beginFill(selected ? 0x245045 : Theme.SURFACE_1);
+        g.drawRect(x, y, w, h);
+        g.endFill();
+        g.lineStyle(1, selected ? Theme.ACCENT : Theme.SURFACE_3);
+        g.drawRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        g.lineStyle(0);
+        var size = Math.min(w, h) * 0.62;
+        UiIcons.drawFolderThumb(g, x + (w - size) * 0.5, y + (h - size) * 0.5,
+            size, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
+    }
+
+    /** Folder tile interaction: double-click enters, drag moves, right-click
+     *  opens the folder menu, and the tile is a drop target for assets. */
+    function attachFolderHit(target:h2d.Object, path:String,
+            width:Float, height:Float):Void {
+        var hit = new h2d.Interactive(width, height, target);
+        hit.backgroundColor = 0;
+        hit.cursor = hxd.Cursor.Default;
+        hit.enableRightButton = true;
+        var captured = path;
+        hit.onPush = function(event) {
+            event.propagate = false;
+            if (event.button == 1) {
+                openFolderContextMenu(captured);
+                return;
+            }
+            var now = haxe.Timer.stamp();
+            var isDouble = captured == lastClickSource && now - lastClickAt <= 0.35;
+            lastClickAt = now;
+            lastClickSource = captured;
+            setSelected([folderSelectionKey(captured)]);
+            if (isDouble) {
+                navigateTo(captured);
+                return;
+            }
+            beginFolderDrag(captured, hit, event);
+        };
+        hit.onWheel = handleGridWheel;
     }
 
     /** Large preview tile. Scenes use Tabler's `outline/photo` glyph - a framed
@@ -1453,41 +1752,52 @@ class AssetBrowser extends h2d.Object {
         }
     }
 
-    function buildCompactList(shown:Array<AssetFileInfo>):Void {
+    function buildCompactList(shown:Array<BrowserItem>):Void {
         var width = Math.max(100, centerWidth() - 16);
         for (index in 0...shown.length) {
-            var entry = shown[index];
+            var item = shown[index];
             var position = tilePosition(index, shown.length);
             if (position.y + LIST_ROW_HEIGHT < 0 || position.y > gridViewportHeight()) continue;
             var row = new h2d.Object(listMask);
             row.x = position.x;
             row.y = position.y;
             assetRows.push(row);
-            var selected = isSelected(entry.source);
+            var selected = isSelected(item.isFolder
+                ? folderSelectionKey(item.path) : item.path);
             var surface = new UiSurface(ctx, row);
             surface.setSize(width, LIST_ROW_HEIGHT);
             surface.setStyle(selected ? Theme.ACCENT_MUTED : Theme.PANEL,
                 selected ? Theme.ACCENT : Theme.BORDER, 0);
             var icon = new h2d.Graphics(row);
-            UiIcons.draw(icon, iconFor(entry), 5, 3, 14,
-                selected ? Theme.ACCENT : entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
+            UiIcons.draw(icon,
+                item.isFolder ? Folder : (item.entry == null ? Document : iconFor(item.entry)),
+                5, 3, 14, selected ? Theme.ACCENT : item.isFolder ? Theme.TEXT_SECONDARY
+                    : (item.entry != null && item.entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED));
             var type = new UiText(ctx.captionFont, row);
-            type.text = entry.kindLabel;
+            type.text = item.isFolder ? "Folder" : (item.entry == null ? "" : item.entry.kindLabel);
             type.textColor = Theme.MUTED;
             type.lineBreak = false;
             type.x = Math.max(0, width - type.textWidth - 8);
             type.y = 3;
             var name = new UiText(ctx.font, row);
-            fitText(name, entry.name, Math.max(0, type.x - 24 - 4));
+            fitText(name, item.name, Math.max(0, type.x - 24 - 4));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
             name.lineBreak = false;
             name.x = 24;
             name.y = 2;
-            attachItemHit(row, entry, width, LIST_ROW_HEIGHT);
+            if (item.isFolder) {
+                assetFolderRects.push({
+                    x: listMask.x + row.x, y: listMask.y + row.y,
+                    width: width, height: LIST_ROW_HEIGHT, path: item.path
+                });
+                attachFolderHit(row, item.path, width, LIST_ROW_HEIGHT);
+            } else if (item.entry != null) {
+                attachItemHit(row, item.entry, width, LIST_ROW_HEIGHT);
+            }
         }
     }
 
-    function buildDetailsList(shown:Array<AssetFileInfo>):Void {
+    function buildDetailsList(shown:Array<BrowserItem>):Void {
         var width = Math.max(100, centerWidth() - 16);
         var columnsX = [DETAILS_NAME_WIDTH, DETAILS_NAME_WIDTH + DETAILS_COL_WIDTH,
             DETAILS_NAME_WIDTH + DETAILS_COL_WIDTH * 2];
@@ -1504,7 +1814,7 @@ class AssetBrowser extends h2d.Object {
         addHeaderText(header, "Modified", columnsX[2]);
 
         for (index in 0...shown.length) {
-            var entry = shown[index];
+            var item = shown[index];
             var position = tilePosition(index, shown.length);
             var y = position.y + LIST_ROW_HEIGHT + 2;
             if (y + LIST_ROW_HEIGHT < 0 || y > gridViewportHeight()) continue;
@@ -1512,25 +1822,40 @@ class AssetBrowser extends h2d.Object {
             row.x = 8;
             row.y = y;
             assetRows.push(row);
-            var selected = isSelected(entry.source);
+            var selected = isSelected(item.isFolder
+                ? folderSelectionKey(item.path) : item.path);
             var surface = new UiSurface(ctx, row);
             surface.setStyle(selected ? Theme.ACCENT_MUTED : Theme.PANEL,
                 selected ? Theme.ACCENT : Theme.BORDER, 0);
             surface.setSize(width, LIST_ROW_HEIGHT);
             var icon = new h2d.Graphics(row);
-            UiIcons.draw(icon, iconFor(entry), 4, 3, 14,
-                selected ? Theme.ACCENT : entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
+            UiIcons.draw(icon,
+                item.isFolder ? Folder : (item.entry == null ? Document : iconFor(item.entry)),
+                4, 3, 14, selected ? Theme.ACCENT : item.isFolder ? Theme.TEXT_SECONDARY
+                    : (item.entry != null && item.entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED));
             var name = new UiText(ctx.font, row);
-            fitText(name, entry.name, Math.max(0, columnsX[0] - 22 - 4));
+            fitText(name, item.name, Math.max(0, columnsX[0] - 22 - 4));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
             name.lineBreak = false;
             name.x = 22;
             name.y = 2;
-            addCell(row, entry.kindLabel, columnsX[0], selected);
-            var details = detailsFor(entry);
-            addCell(row, details == null ? "\u2014" : formatSize(details.size), columnsX[1], selected);
-            addCell(row, details == null ? "\u2014" : formatDate(details.modified), columnsX[2], selected);
-            attachItemHit(row, entry, width, LIST_ROW_HEIGHT);
+            if (item.isFolder) {
+                addCell(row, "Folder", columnsX[0], selected);
+                addCell(row, "\u2014", columnsX[1], selected);
+                addCell(row, "\u2014", columnsX[2], selected);
+                assetFolderRects.push({
+                    x: listMask.x + row.x, y: listMask.y + row.y,
+                    width: width, height: LIST_ROW_HEIGHT, path: item.path
+                });
+                attachFolderHit(row, item.path, width, LIST_ROW_HEIGHT);
+            } else if (item.entry != null) {
+                var entry = item.entry;
+                addCell(row, entry.kindLabel, columnsX[0], selected);
+                var details = detailsFor(entry);
+                addCell(row, details == null ? "\u2014" : formatSize(details.size), columnsX[1], selected);
+                addCell(row, details == null ? "\u2014" : formatDate(details.modified), columnsX[2], selected);
+                attachItemHit(row, entry, width, LIST_ROW_HEIGHT);
+            }
         }
     }
 
@@ -1646,11 +1971,11 @@ class AssetBrowser extends h2d.Object {
     }
 
     function handleWheelDelta(delta:Float):Void {
-        var over = Math.max(0, contentHeight(shownEntries.length) - gridViewportHeight());
+        var over = Math.max(0, contentHeight(shownItems.length) - gridViewportHeight());
         if (over <= 0) return;
         var rows = viewMode == 0
-            ? Math.max(1, Math.ceil(shownEntries.length / Math.max(1, gridColumns())))
-            : Math.max(1, shownEntries.length);
+            ? Math.max(1, Math.ceil(shownItems.length / Math.max(1, gridColumns())))
+            : Math.max(1, shownItems.length);
         // Windows WM_MOUSEWHEEL: wheel-down is a negative WPARAM. hldx divides
         // by 120 and hxd.Window negates again, so wheel-down arrives here as a
         // positive delta. Adding it moves the viewport toward the end.
@@ -1677,11 +2002,21 @@ class AssetBrowser extends h2d.Object {
             dropHighlight.visible = false;
             return;
         }
+        for (rect in assetFolderRects) {
+            if (rect.path != target) continue;
+            dropHighlight.x = rect.x;
+            dropHighlight.y = rect.y;
+            dropHighlight.setSize(rect.width, rect.height);
+            addChild(dropHighlight);
+            dropHighlight.visible = true;
+            return;
+        }
+        var offset = treeScrollOffset();
         for (index in 0...folderRowPaths.length) {
-            if (folderRowPaths[index] != target) continue;
+            if (!folderRowIsFolder[index] || folderRowPaths[index] != target) continue;
             dropHighlight.x = 2;
-            dropHighlight.y = TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT;
-            dropHighlight.setSize(folderWidth - 4, ROW_HEIGHT - 2);
+            dropHighlight.y = TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT - offset;
+            dropHighlight.setSize(folderWidth - 16, ROW_HEIGHT - 2);
             addChild(dropHighlight);
             dropHighlight.visible = true;
             return;
@@ -1988,12 +2323,22 @@ class AssetBrowser extends h2d.Object {
 
     function deleteSelected():Void {
         if (selectedSources.length == 0) return;
-        var sources = selectedSources.copy();
+        var assets:Array<String> = [];
+        var folders:Array<String> = [];
+        for (key in selectedSources) {
+            var folder = folderFromSelectionKey(key);
+            if (folder == null) assets.push(key);
+            else folders.push(folder);
+        }
+        // Folder keys are UI-only markers: route them to the folder command so
+        // the user never sees "__folder__:" in a confirmation dialog.
+        for (folder in folders) if (onDeleteFolder != null) onDeleteFolder(folder, true);
+        if (assets.length == 0) return;
         if (onDeleteAssets != null) {
-            onDeleteAssets(sources);
+            onDeleteAssets(assets);
             return;
         }
-        for (source in sources) if (onDeleteAsset != null) onDeleteAsset(source);
+        for (source in assets) if (onDeleteAsset != null) onDeleteAsset(source);
     }
 
     // ------------------------------------------------------------------
@@ -2003,6 +2348,11 @@ class AssetBrowser extends h2d.Object {
     /** F2 entry point: rename the primary asset, or the selected folder. */
     public function beginRename():Bool {
         if (renaming) return false;
+        var selectedFolderKey = folderFromSelectionKey(selectedSource);
+        if (selectedFolderKey != null) {
+            beginRenameFolder(selectedFolderKey);
+            return true;
+        }
         if (selectedSource != "") {
             beginRenameSelected();
             return true;
@@ -2035,16 +2385,22 @@ class AssetBrowser extends h2d.Object {
     }
 
     function folderRowRect(folder:String):{ x:Float, y:Float, width:Float, height:Float } {
+        var offset = treeScrollOffset();
         for (index in 0...folderRowPaths.length) {
-            if (folderRowPaths[index] == folder) {
-                return {
-                    x: 2, y: TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT,
-                    width: folderWidth - 4, height: ROW_HEIGHT - 2
-                };
+            if (!folderRowIsFolder[index] || folderRowPaths[index] != folder) continue;
+            return {
+                x: 2, y: TOOLBAR_HEIGHT + 22 + index * ROW_HEIGHT - offset,
+                width: folderWidth - 16, height: ROW_HEIGHT - 2
+            };
+        }
+        // A folder tile in the main panel can also be renamed after selection.
+        for (rect in assetFolderRects) {
+            if (rect.path == folder) {
+                return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
             }
         }
         return {x: 2, y: TOOLBAR_HEIGHT + 22,
-            width: folderWidth - 4, height: ROW_HEIGHT - 2};
+            width: folderWidth - 14, height: ROW_HEIGHT - 2};
     }
 
     function positionRenameOverlay():Void {

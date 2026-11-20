@@ -10,6 +10,9 @@ import boltspark.ui.UiText;
 /** Compact square-edged native editor button with an optional icon. */
 class UiButton extends h2d.Object {
     public var onClick:Null<Void->Void>;
+    /** Current control size, for anchoring popups to this button. */
+    public var width(get, never):Float;
+    public var height(get, never):Float;
 
     final surface:UiSurface;
     final hit:h2d.Interactive;
@@ -124,6 +127,9 @@ class UiButton extends h2d.Object {
         fitLabel();
         center();
     }
+
+    inline function get_width():Float return widthValue;
+    inline function get_height():Float return heightValue;
 
     public function setWidth(w:Float):Void {
         widthValue = Math.max(0, w);

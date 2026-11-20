@@ -8,17 +8,20 @@ BoltUI uses selected icons from **Tabler Icons v3.52.0**, released on
 - Raster source package: `@tabler/icons-png@3.52.0`
 - License: MIT; see [`LICENSE`](LICENSE)
 - Runtime atlas: `src/res/icons/tabler_ui.png`
-- Atlas SHA-256: `BDAB756B0648A7E1BCF05F5EA8D44148FF7451B266A3513248F5650F78A01322`
+- Atlas SHA-256: `5F51E2AB778DB236866B417FDF6DBF087C09F665D321E807DA96851C755D9DB6`
 - Scene thumbnail mask: `src/res/icons/scene_thumb.png` (`outline/photo`, 64px)
 - Scene thumbnail SHA-256: `BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722682CC8AD6B0C2`
+- Folder thumbnail mask: `src/res/icons/folder_thumb.png` (`outline/folder`, 64px)
+- Folder thumbnail SHA-256: `4BC891ECED4A5B17AA991C3CC82A6D1FF72D6D775534CAE4BEAB515013AB2A3A`
 - Regeneration: `tools/generate-tabler-icons.ps1`
 
 The generator downloads the official 240px PNG render of each pinned SVG and
 creates dedicated 6–16px alpha-mask rasters. It also renders `outline/photo`
-at 64px as `scene_thumb.png` because asset-browser thumbnails are larger than
-the atlas's maximum 16px raster. Both images are embedded in the HashLink
-bytecode/native executable, so Boltspark has no package-manager, network,
-browser, or loose icon-file dependency at runtime.
+and `outline/folder` at 64px as `scene_thumb.png` and `folder_thumb.png`,
+because asset-browser tiles are larger than the atlas's maximum 16px raster.
+All images are embedded in the HashLink bytecode/native executable, so
+Boltspark has no package-manager, network, browser, or loose icon-file
+dependency at runtime.
 
 ## BoltUI mapping
 
@@ -62,4 +65,7 @@ browser, or loose icon-file dependency at runtime.
 | `ArrowUp` | `outline/arrow-up` |
 | `Eye` | `outline/eye` |
 | `EyeOff` | `outline/eye-off` |
+| `Camera` | `outline/camera` |
+| `Check` | `outline/check` |
+| `Minus` | `outline/minus` |
 | Scene thumbnail (asset browser) | `outline/photo` |

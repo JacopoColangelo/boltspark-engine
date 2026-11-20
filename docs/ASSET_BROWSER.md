@@ -31,9 +31,11 @@ recreating Unreal/Unity asset infrastructure.
 - Charcoal/graphite dark theme using the existing `Theme` tokens, square
   surfaces, one-pixel borders, restrained teal accent, and no gradients or
   heavy rounding.
-- Two panes: hierarchical folder tree (left) and a full-width asset area
-  (center). There is deliberately no per-asset inspector panel, matching the
-  Unreal/Godot content-browser model; metadata is available in the detail list.
+- Two panes: a full project asset hierarchy (left) and the Asset Panel (center).
+  The left pane mirrors Unreal's Content Browser: folders **and the assets
+  inside them** are shown as one collapsible tree. Direct child folders are
+  also first-class items in the main panel, alongside assets. There is
+  deliberately no per-asset inspector panel; metadata is in the detail list.
 - Responsive toolbar: back / forward / parent, breadcrumb, live search, separate
   labeled **Filter** and **Sort** buttons (each with its own short menu, so
   neither becomes a catch-all as options grow), a Settings popover that holds
@@ -54,15 +56,18 @@ recreating Unreal/Unity asset infrastructure.
   handler adds it to the scroll position; the native probe verifies direction.
 - Hover tooltips were removed as noise. A plain click never shows the floating
   drag label — it only appears once the pointer moves past the drag threshold.
-- The folder column has a draggable splitter, and its width persists alongside
-  the view preferences. Child folders use a fixed chevron gutter and a depth-
-  based indent so nested folders are always visibly deeper than their parents.
+- The hierarchy pane has a draggable splitter, and its width persists alongside
+  the view preferences. Child folders and assets use a fixed chevron gutter and
+  a depth-based indent so nested items are always visibly deeper than parents.
+  The tree scrolls independently with its own thin scrollbar.
 
 ### Folder navigation
-- Expand/collapse with chevrons, selected-folder highlighting, right-click menu
-  (new scene, new subfolder, rename, delete, move-to, copy path, reveal,
-  favorite), drag-and-drop target, and automatic refresh from `scanFolders()`.
-  Folders are draggable onto other folders to nest/reparent them, with a live
+- Expand/collapse with chevrons in the hierarchy and single-click folder rows
+  in the tree; double-click a folder in the Asset Panel to enter it.
+  Selected-folder highlighting, right-click menu (new scene, new subfolder,
+  rename, delete, move-to, copy path, reveal, favorite), drag-and-drop target,
+  and automatic refresh from `scanFolders()` are all preserved. Folders are
+  draggable onto folders in either pane to nest/reparent them, with a live
   drop-target highlight and cycle prevention. `Add → Folder` creates at the
   Content root; nested folders are an explicit right-click choice.
 

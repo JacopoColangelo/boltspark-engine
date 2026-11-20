@@ -338,7 +338,7 @@ class HierarchyRow extends h2d.Object {
             0, 0, 13, iconColor);
         visibilityIcon.clear();
         UiIcons.draw(visibilityIcon, visibleFlag ? Eye : EyeOff,
-            0, 0, 13, visibleFlag ? Theme.MUTED : Theme.DISABLED);
+            0, 0, 13, visibleFlag ? Theme.TEXT_SECONDARY : Theme.DISABLED);
         disclosureHit.visible = hasChildren;
         updateStyle();
         layoutContents();

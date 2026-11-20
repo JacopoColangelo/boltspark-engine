@@ -13,6 +13,7 @@ import boltspark.editor.RotationEuler;
 import boltspark.editor.ScalePolicy;
 import boltspark.editor.SceneObject;
 import boltspark.editor.SelectionClick;
+import boltspark.editor.SelectionOutlineEdges;
 import boltspark.editor.SharedGizmoDelta;
 import boltspark.editor.TransformGizmo;
 import boltspark.editor.WorldBounds;
@@ -59,6 +60,8 @@ class Main extends hxd.App {
     /** Editor free-fly camera navigation (RMB look, WASDQE, pan, orbit). */
     var cameraController:EditorCameraController;
     var selectionOutline:h3d.scene.Graphics;
+    /** Reused inverse world matrix for local-space silhouette classification. */
+    final outlineInverse:h3d.Matrix = new h3d.Matrix();
     /** Heaps render views synchronized from the renderer-independent session. */
     final sceneObjects:Array<SceneObject> = [];
     final sceneObjectsById:Map<Int, SceneObject> = [];
@@ -2992,9 +2995,17 @@ class Main extends hxd.App {
     function refreshSelectionOutline():Void {
         if (selectionOutline == null) return;
         selectionOutline.clear();
-        selectionOutline.lineStyle(2.0, Theme.ACCENT, 1);
+        selectionOutline.lineStyle(2.0, Theme.SELECTION_OUTLINE, 1);
         for (sceneObject in sceneObjects) {
             if (editorSession.selectedObjectIds.indexOf(sceneObject.id) < 0) continue;
+            // The outline is a separate X-ray overlay on its own render layer,
+            // so it does not inherit the scene-graph visibility that hides the
+            // object's geometry. Skip selections whose node (or any ancestor
+            // node) is hidden or disabled, mirroring the mesh.visible mirror in
+            // synchronizeSceneObjects().
+            var node:Null<h3d.scene.Object> = sceneObject.mesh;
+            while (node != null && node.visible) node = node.parent;
+            if (node != null) continue;
             for (renderMesh in sceneObject.allRenderMeshes()) {
                 drawSelectionEdges(selectionOutline, renderMesh);
             }
@@ -3002,43 +3013,29 @@ class Main extends hxd.App {
     }
 
     /**
-     * Trace the renderer primitive's local bounds transformed by its current
-     * transform. This remains exact for box primitives and works for arbitrary
-     * primitive/imported mesh sizes without assuming unit-cube geometry.
+     * Trace only the selected primitive's visible outer contour, transformed
+     * by its current world matrix, instead of a bounding cube or a wireframe.
+     * `SelectionOutlineEdges` classifies front/back faces in local space and
+     * returns just the silhouette edges; its geometry cache is reused per
+     * shared primitive.
      *
      * Edges are drawn at their exact transformed positions. The Graphics line
      * shader supplies the fixed two-pixel screen-space width; no world-space
      * inflation is applied, so scaling an object cannot scale its outline.
      * Segments are clipped to the camera near/far range before they reach the
-     * line shader, avoiding oversized quads when a large edge crosses behind
-     * the camera.
+     * line shader, avoiding oversized quads when an edge crosses behind the
+     * camera.
      */
     function drawSelectionEdges(graphic:h3d.scene.Graphics, mesh:h3d.scene.Mesh):Void {
-        var transform = mesh.getAbsPos();
         if (mesh.primitive == null) return;
-        var bounds = mesh.primitive.getBounds();
-        if (bounds == null) return;
-        inline function corner(x:Float, y:Float, z:Float):h3d.Vector {
-            return new h3d.Vector(x, y, z)
-                .transformed(transform);
-        }
-        var corners = [
-            corner(bounds.xMin, bounds.yMin, bounds.zMin),
-            corner(bounds.xMax, bounds.yMin, bounds.zMin),
-            corner(bounds.xMax, bounds.yMax, bounds.zMin),
-            corner(bounds.xMin, bounds.yMax, bounds.zMin),
-            corner(bounds.xMin, bounds.yMin, bounds.zMax),
-            corner(bounds.xMax, bounds.yMin, bounds.zMax),
-            corner(bounds.xMax, bounds.yMax, bounds.zMax),
-            corner(bounds.xMin, bounds.yMax, bounds.zMax)
-        ];
-        // 12 cube edges as index pairs over the corner list.
-        var edges = [
-            0, 1, 1, 2, 2, 3, 3, 0, // back face
-            4, 5, 5, 6, 6, 7, 7, 4, // front face
-            0, 4, 1, 5, 2, 6, 3, 7  // connecting edges
-        ];
+        var transform = mesh.getAbsPos();
         var camera = s3d.camera;
+        // Evaluate facing in the primitive's local space so non-uniform scale
+        // and reflection cannot skew the front/back classification.
+        outlineInverse.initInverse(transform);
+        var edges = SelectionOutlineEdges.silhouette(mesh.primitive,
+            camera.pos.transformed(outlineInverse));
+        if (edges.length == 0) return;
         var forwardX = camera.target.x - camera.pos.x;
         var forwardY = camera.target.y - camera.pos.y;
         var forwardZ = camera.target.z - camera.pos.z;
@@ -3052,15 +3049,15 @@ class Main extends hxd.App {
         // zero projected depth in Heaps' line shader and cannot retain width.
         var nearDepth = camera.zNear * 1.01;
         var farDepth = camera.zFar * 0.999999;
-        for (index in 0...(edges.length >> 1)) {
-            var a = corners[edges[index * 2]];
-            var b = corners[edges[index * 2 + 1]];
-            var ax = a.x;
-            var ay = a.y;
-            var az = a.z;
-            var bx = b.x;
-            var by = b.y;
-            var bz = b.z;
+        for (edge in edges) {
+            var worldA = edge.a.transformed(transform);
+            var worldB = edge.b.transformed(transform);
+            var ax = worldA.x;
+            var ay = worldA.y;
+            var az = worldA.z;
+            var bx = worldB.x;
+            var by = worldB.y;
+            var bz = worldB.z;
             var aDepth = (ax - camera.pos.x) * forwardX
                 + (ay - camera.pos.y) * forwardY
                 + (az - camera.pos.z) * forwardZ;

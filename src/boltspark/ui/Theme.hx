@@ -61,6 +61,11 @@ class Theme {
     public static inline var ACCENT:Int = 0x45C7A1;
     public static inline var ACCENT_HOVER:Int = 0x61D6B4;
     public static inline var ACCENT_MUTED:Int = 0x285448;
+    // Vivid viewport selection contour: much brighter than the muted UI
+    // accent so the selected object's silhouette reads clearly over both the
+    // dark viewport and bright/default-shaded geometry.
+    public static inline var SELECTION_OUTLINE:Int = 0x9DFFE0;
+
     public static inline var BRAND:Int = 0xF2A14B;
     public static inline var TEXT:Int = 0xE7E8EA;
     public static inline var TEXT_SECONDARY:Int = 0xC0C2C6;

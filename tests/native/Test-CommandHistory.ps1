@@ -132,9 +132,9 @@ try {
     # brackets this as one transform gesture even though the command is routed
     # through the same callback used by text edits and scrubs.
     $positionXUp = [int][Math]::Round(($width - 318) + 122)
-    # The Enabled checkbox adds one 28px OBJECT row, so the Transform header
-    # and Position rows sit 28px lower than the old hardcoded 205.
-    $positionRowUp = 233
+    # The enabled box shares one OBJECT row (205 baseline), plus 8px before
+    # the Transform header and 8px under both the OBJECT and Transform banners.
+    $positionRowUp = 229
     Send-Mouse $window 0x0200 $positionXUp $positionRowUp ([IntPtr]::Zero)
     Send-Mouse $window 0x0201 $positionXUp $positionRowUp ([IntPtr]1)
     Send-Mouse $window 0x0202 $positionXUp $positionRowUp ([IntPtr]::Zero)

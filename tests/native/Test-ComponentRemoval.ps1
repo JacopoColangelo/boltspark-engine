@@ -107,12 +107,13 @@ try {
     }
     $width = $rect.Right - $rect.Left
 
-    # Inspector layout: bodyTop=66, panel header=32, meta=22, Object section=81
-    # (the Enabled checkbox adds one row), Transform section=109, then the
-    # MeshRenderer header starts at +190. The trash button sits 2px into that
-    # 24px header at the right edge (22px wide).
+    # Inspector layout: bodyTop=66, panel header=32, meta=22, Object section=61
+    # (one row + 8px under its banner), 8px section gap, Transform section=117
+    # (109 + 8px under its banner), another 8px gap, then the MeshRenderer
+    # header starts at +194. The trash button sits 2px into that 24px header at
+    # the right edge (22px).
     $removeX = [int][Math]::Round($width - 22)
-    $removeY = 322
+    $removeY = 326
     Send-Click $window $removeX $removeY
     Send-CtrlChord $window 0x5A 0x2C # Ctrl+Z
     Send-CtrlChord $window 0x59 0x15 # Ctrl+Y

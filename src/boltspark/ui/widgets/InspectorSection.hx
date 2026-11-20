@@ -7,10 +7,14 @@ import boltspark.ui.UiIcons;
 import boltspark.ui.UiText;
 
 /**
- * Collapsible full-width property group. Sections are stacked without card
- * gaps so the inspector reads as one dense, continuous editor surface.
+ * Collapsible full-width property group. The inspector shell spaces stacked
+ * sections apart, and every section pads its header banner from the rows
+ * below it, so each group reads as its own block.
  */
 class InspectorSection extends h2d.Object {
+    /** Breathing room between the header banner and the first content row. */
+    static inline var HEADER_GAP:Int = Theme.SPACING;
+
     /** Invoked after the section expands or collapses so the panel re-lays out. */
     public var onToggle:Null<Void->Void>;
 
@@ -39,7 +43,7 @@ class InspectorSection extends h2d.Object {
         title.x = 19;
         title.y = Math.round((Theme.SECTION_HEADER_HEIGHT - title.textHeight) * 0.5);
         content = new h2d.Object(this);
-        content.y = Theme.SECTION_HEADER_HEIGHT;
+        content.y = Theme.SECTION_HEADER_HEIGHT + HEADER_GAP;
         hit = new h2d.Interactive(1, Theme.SECTION_HEADER_HEIGHT, this);
         hit.backgroundColor = 0;
         hit.cursor = hxd.Cursor.Default;
@@ -72,7 +76,7 @@ class InspectorSection extends h2d.Object {
     /** Total vertical space taken by the section at current expand state. */
     public function totalHeight():Float {
         return expanded
-            ? Theme.SECTION_HEADER_HEIGHT + contentHeight + 1
+            ? Theme.SECTION_HEADER_HEIGHT + HEADER_GAP + contentHeight + 1
             : Theme.SECTION_HEADER_HEIGHT + 1;
     }
 
