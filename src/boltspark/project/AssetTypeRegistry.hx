@@ -4,9 +4,10 @@ import haxe.io.Path;
 
 /**
  * The single source of truth for which on-disk asset kinds Boltspark actually
- * understands. The engine currently has exactly one loadable file format
- * (`.boltscene`); mesh and material references come from the built-in primitive
- * catalog and are never loaded from arbitrary files. Everything else under the
+ * understands. The engine has one loadable file format (`.boltscene`) plus a
+ * catalog of engine-provided assets (primitives and built-in materials) shown
+ * by the Asset Browser under the "Engine Asset" kind. Those have no on-disk
+ * files and are built by `EngineAssetCatalog`; everything else under the
  * project root is surfaced as a generic file so users can still see, organize,
  * and reveal it without the browser pretending the engine can import it.
  *
@@ -15,7 +16,7 @@ import haxe.io.Path;
  * between the two.
  */
 typedef AssetTypeInfo = {
-    /** Stable machine kind: "scene" or "file". */
+    /** Stable machine kind: "scene", "engine", or "file". */
     var kind:String;
     /** Human-readable label shown in filters and the inspector. */
     var label:String;
@@ -28,14 +29,22 @@ typedef AssetTypeInfo = {
 class AssetTypeRegistry {
     public static inline var SCENE_EXT:String = "boltscene";
     public static inline var KIND_SCENE:String = "scene";
+    public static inline var KIND_ENGINE:String = "engine";
     public static inline var KIND_FILE:String = "file";
     public static inline var SCENE_INFO_LABEL:String = "Scene";
+    public static inline var ENGINE_INFO_LABEL:String = "Engine Asset";
     public static inline var FILE_INFO_LABEL:String = "File";
 
     static final SCENE_INFO:AssetTypeInfo = {
         kind: KIND_SCENE,
         label: "Scene",
         extension: SCENE_EXT,
+        loadable: true
+    };
+    static final ENGINE_INFO:AssetTypeInfo = {
+        kind: KIND_ENGINE,
+        label: ENGINE_INFO_LABEL,
+        extension: "",
         loadable: true
     };
     static final FILE_INFO:AssetTypeInfo = {
@@ -55,9 +64,12 @@ class AssetTypeRegistry {
         return infoFor(fileName).kind;
     }
 
+    /** Metadata for engine-provided assets such as primitives. */
+    public static function engineInfo():AssetTypeInfo return ENGINE_INFO;
+
     /** Kinds offered by the browser's type filter. Generic files are last. */
     public static function filterKinds():Array<AssetTypeInfo> {
-        return [SCENE_INFO, FILE_INFO];
+        return [SCENE_INFO, ENGINE_INFO, FILE_INFO];
     }
 
     /**

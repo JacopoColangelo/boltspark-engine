@@ -253,6 +253,11 @@ class ViewportSnapBar extends h2d.Object {
             rowHit.onOut = function(_) rowSurface.setStyle(
                 Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
             rowHit.onPush = function(event) {
+                // Keep the popup mounted until release; buttons below act on
+                // release and would otherwise receive the stray event.
+                event.propagate = false;
+            };
+            rowHit.onRelease = function(event) {
                 event.propagate = false;
                 snapping.setPresetIndex(popupMode, rowIndex);
                 var changedMode = popupMode;

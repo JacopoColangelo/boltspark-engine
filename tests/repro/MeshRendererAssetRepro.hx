@@ -1,15 +1,21 @@
 import boltspark.editor.EditorSession;
 import boltspark.editor.EditorTransform;
+import boltspark.editor.EditorMesh3D;
 import boltspark.editor.HeapsMeshFactory;
 import boltspark.editor.SceneObject;
 import boltspark.engine.Material;
 import boltspark.engine.Mesh;
+import boltspark.engine.Mesh3D;
 import boltspark.engine.MeshRenderer;
 import boltspark.engine.PrimitiveGameObjects;
 import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.inspector.AssetType;
 import boltspark.engine.inspector.ComponentPropertyKind;
 import boltspark.engine.inspector.ComponentPropertyData;
+import boltspark.project.EngineAssetCatalog;
+import boltspark.project.ProjectSession.AssetFileInfo;
+import boltspark.ui.AssetDragSession;
+import boltspark.ui.AssetDropTarget;
 
 /**
  * Headless coverage for reusable mesh/material assets, type-aware Inspector
@@ -18,11 +24,13 @@ import boltspark.engine.inspector.ComponentPropertyData;
 class MeshRendererAssetRepro {
     static function main():Void {
         testCatalogs();
+        testMesh3DType();
         testInspectorAssetProperties();
         testPrimitiveSettings();
         testPrimitiveSettingsHistory();
         testAssignmentAndFallback();
         testSharedAssetsDistinctInstances();
+        testEngineAssetDrop();
         Sys.println("[mesh-renderer-assets] primitive/material catalogs, asset "
             + "pickers, primitive settings, history, fallback, and shared-asset "
             + "render instances passed");
@@ -67,6 +75,38 @@ class MeshRendererAssetRepro {
         assertTrue(found, "default material missing from catalog");
     }
 
+    /**
+     * Primitive objects are Mesh3D objects, both as runtime game objects and
+     * as editor scene objects, while empty objects keep the generic type.
+     */
+    static function testMesh3DType():Void {
+        var cube = PrimitiveGameObjects.createCube();
+        assertTrue(Std.isOfType(cube, Mesh3D), "primitive factory did not create a Mesh3D");
+        assertTrue(Mesh3D.is(cube) && cube.objectType == Mesh3D.TYPE,
+            "Mesh3D identity was not reported by the engine object");
+        assertTrue(cube.meshRenderer == cube.getComponent(MeshRenderer),
+            "Mesh3D did not own its MeshRenderer");
+
+        var session = new EditorSession(8);
+        var primitive = session.addInitialObject("Cube", new EditorTransform(),
+            null, PrimitiveGameObjects.cubeComponents());
+        assertTrue(Std.isOfType(primitive, EditorMesh3D),
+            "editor primitive was not projected as an EditorMesh3D");
+        assertTrue(Mesh3D.is(primitive) && primitive.objectType == Mesh3D.TYPE,
+            "editor primitive did not report the Mesh3D type");
+
+        var empty = session.createObject("Empty", new EditorTransform());
+        assertTrue(!Mesh3D.is(empty), "empty object was misidentified as Mesh3D");
+        assertTrue(empty.objectType == "GameObject",
+            "empty object lost its generic type id");
+
+        // Undo/redo restores objects through snapshots; the type must survive.
+        assertTrue(session.undo() && session.redo(), "primitive history edit failed");
+        var restored = session.findObject(primitive.id);
+        assertTrue(restored != null && Mesh3D.is(restored),
+            "Mesh3D type was lost across undo/redo restoration");
+    }
+
     static function testInspectorAssetProperties():Void {
         var renderer:MeshRenderer = PrimitiveGameObjects.createCubeRenderer();
         var data = renderer.inspectorData(1);
@@ -83,7 +123,7 @@ class MeshRendererAssetRepro {
         assertTrue(meshProperty.assetType == AssetType.MeshAsset
             && materialProperty.assetType == AssetType.MaterialAsset,
             "asset properties lost their type-aware identity");
-        assertTrue(meshProperty.textValue == "Primitive Cube"
+        assertTrue(meshProperty.textValue == "Cube"
             && materialProperty.textValue == "Default Material",
             "asset labels did not carry the current value");
         assertTrue(hasOption(meshProperty, "") && hasOption(meshProperty, PrimitiveMeshes.CUBE_ID)
@@ -354,6 +394,76 @@ class MeshRendererAssetRepro {
             "clearing the mesh asset did not detach the runtime instance");
         assertTrue(secondView.allRenderMeshes().length == 1,
             "clearing one mesh asset affected another entity");
+    }
+
+    /**
+     * Engine primitives drag onto matching Inspector slots only. The browser
+     * owns the gesture; the shared session resolves typed, live drop targets.
+     */
+    static function testEngineAssetDrop():Void {
+        var cubeEntry:Null<AssetFileInfo> = null;
+        for (entry in EngineAssetCatalog.all()) {
+            var payload = EngineAssetCatalog.dragPayload(entry);
+            if (payload != null && payload.assetId == PrimitiveMeshes.CUBE_ID) {
+                cubeEntry = entry;
+                break;
+            }
+        }
+        assertTrue(cubeEntry != null, "cube is missing from the engine asset catalog");
+        var cubePayload = EngineAssetCatalog.dragPayload(cubeEntry);
+        assertTrue(cubePayload != null
+                && cubePayload.assetType == AssetType.MeshAsset,
+            "cube engine asset did not produce a typed mesh drag payload");
+
+        var alive = true;
+        var owner = new h2d.Object();
+        var highlights = 0;
+        var drops = 0;
+        var target = new AssetDropTarget(AssetType.MeshAsset, owner,
+            function() return {x: 10, y: 10, width: 100, height: 20},
+            function(active) if (active) highlights++,
+            function(payload) {
+                assertTrue(payload.assetId == PrimitiveMeshes.CUBE_ID,
+                    "drop delivered the wrong asset id");
+                drops++;
+            });
+        target.aliveProvider = function() return alive;
+        AssetDragSession.add(target);
+        AssetDragSession.begin(cubePayload);
+        assertTrue(AssetDragSession.update(15, 15) == target,
+            "matching mesh slot was not highlighted");
+        assertTrue(AssetDragSession.drop(15, 15),
+            "drop on a matching mesh slot was rejected");
+        assertTrue(highlights == 1 && drops == 1,
+            "drop did not highlight and notify its slot exactly once");
+        assertTrue(AssetDragSession.current() == null,
+            "drag session survived its drop");
+
+        // A material drag must not be accepted by a mesh slot.
+        var materialPayload = null;
+        for (entry in EngineAssetCatalog.all()) {
+            var payload = EngineAssetCatalog.dragPayload(entry);
+            if (payload != null && payload.assetType == AssetType.MaterialAsset) {
+                materialPayload = payload;
+                break;
+            }
+        }
+        assertTrue(materialPayload != null, "no material engine asset found");
+        AssetDragSession.begin(materialPayload);
+        assertTrue(AssetDragSession.update(15, 15) == null,
+            "mesh slot highlighted for a material drag");
+        assertTrue(!AssetDragSession.drop(15, 15),
+            "mismatched drop was accepted");
+        assertTrue(drops == 1, "mismatched drop reached the mesh slot");
+        AssetDragSession.cancel();
+
+        // Rebuilt inspector sections leave detached targets behind; they must
+        // be ignored instead of receiving drops at stale coordinates.
+        alive = false;
+        AssetDragSession.begin(cubePayload);
+        assertTrue(AssetDragSession.update(15, 15) == null,
+            "detached drop slot was not pruned");
+        AssetDragSession.cancel();
     }
 
     static function property(

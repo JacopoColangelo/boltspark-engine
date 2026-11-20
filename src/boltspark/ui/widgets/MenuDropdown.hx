@@ -114,6 +114,12 @@ class MenuDropdown extends h2d.Object {
         // would otherwise leave the popup open while focus was already lost.
         dismissCatch.enableRightButton = true;
         dismissCatch.onPush = function(event) {
+            // Keep the catch alive through ERelease. Buttons fire their action
+            // on release, so closing on push lets that release fall through to
+            // whatever control sits underneath the menu.
+            event.propagate = false;
+        };
+        dismissCatch.onRelease = function(event) {
             event.propagate = false;
             close();
         };
@@ -519,7 +525,13 @@ class MenuDropdown extends h2d.Object {
         rowHit.onPush = function(event) {
             event.propagate = false;
             if (item.dragMeshId != null) beginRowDrag(item, rowHit, activate);
-            else activate();
+        };
+        rowHit.onRelease = function(event) {
+            // Activate on release, while this row is still subscribed to input.
+            // Otherwise close() detaches it and the release event reaches the
+            // UI control underneath the submenu.
+            event.propagate = false;
+            if (item.dragMeshId == null) activate();
         };
         if (item.dragMeshId != null && dropViewport != null && onDropPrimitive != null) {
             rowHit.cursor = hxd.Cursor.Move;

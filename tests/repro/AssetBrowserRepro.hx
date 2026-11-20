@@ -1,6 +1,10 @@
 import boltspark.editor.EditorSession;
+import boltspark.engine.PrimitiveMeshes;
+import boltspark.engine.inspector.AssetType;
 import boltspark.project.AssetTypeRegistry;
+import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectSession;
+import boltspark.ui.AssetDragPayload;
 import boltspark.ui.widgets.AssetBrowserStore;
 import haxe.io.Path;
 
@@ -19,6 +23,7 @@ class AssetBrowserRepro {
         sys.FileSystem.createDirectory(root);
 
         testRegistry();
+        testEngineAssets();
         testDiscoveryAndMetadata();
         testGenericOperations();
         testFolderOperations();
@@ -40,6 +45,46 @@ class AssetBrowserRepro {
         assertTrue(AssetTypeRegistry.isInternal("Scene.boltscene.bak"),
             "atomic-save backups are internal");
         assertTrue(AssetTypeRegistry.isInternal(".hidden"), "dot files are internal");
+    }
+
+    static function testEngineAssets():Void {
+        var engine = EngineAssetCatalog.all();
+        assertTrue(engine.length >= 6,
+            "engine catalog should include primitives and materials");
+        var meshCount = 0;
+        var materialCount = 0;
+        var cubePayload:Null<AssetDragPayload> = null;
+        var materialPayload:Null<AssetDragPayload> = null;
+        for (entry in engine) {
+            assertTrue(entry.kind == AssetTypeRegistry.KIND_ENGINE,
+                "catalog entry is not an engine asset");
+            assertTrue(entry.folder == EngineAssetCatalog.FOLDER
+                    && entry.kindLabel == AssetTypeRegistry.ENGINE_INFO_LABEL,
+                "engine asset lost its Engine folder / display metadata");
+            var payload = EngineAssetCatalog.dragPayload(entry);
+            assertTrue(payload != null && payload.assetId.length > 0,
+                "engine asset could not produce a drag payload");
+            if (payload.assetType == AssetType.MeshAsset) {
+                meshCount++;
+                if (payload.assetId == PrimitiveMeshes.CUBE_ID) cubePayload = payload;
+            } else {
+                materialCount++;
+                assertTrue(payload.assetType == AssetType.MaterialAsset,
+                    "non-mesh engine asset is not a material");
+                if (materialPayload == null) materialPayload = payload;
+            }
+        }
+        assertTrue(meshCount >= 5 && materialCount >= 1,
+            "engine catalog is missing primitives or materials");
+        assertTrue(cubePayload != null && materialPayload != null,
+            "representative engine payloads were not found");
+        var info = AssetTypeRegistry.engineInfo();
+        assertTrue(info.kind == AssetTypeRegistry.KIND_ENGINE && info.loadable,
+            "engine kind is not registered as a loadable asset kind");
+
+        assertTrue(cubePayload.assetType == AssetType.MeshAsset
+                && materialPayload.assetType == AssetType.MaterialAsset,
+            "engine drag payloads lost their type-aware identity");
     }
 
     static function testDiscoveryAndMetadata():Void {
@@ -187,6 +232,7 @@ class AssetBrowserRepro {
         store.markRecent("Scenes/Second.boltscene");
         store.viewMode = 2;
         store.inspectorWidth = 260;
+        store.showEngineAssets = true;
         assertTrue(store.save() == null, "store saves without error");
 
         var reloaded = new AssetBrowserStore();
@@ -196,6 +242,8 @@ class AssetBrowserRepro {
             "recent list persisted in most-recent-first order");
         assertTrue(reloaded.viewMode == 2 && reloaded.inspectorWidth == 260,
             "view preferences persisted");
+        assertTrue(reloaded.showEngineAssets,
+            "engine asset visibility preference persisted");
         assertTrue(!reloaded.toggleFavorite("Scenes/Main Scene.boltscene"),
             "favorite toggled off");
         Sys.putEnv("LOCALAPPDATA", previous == null ? "" : previous);

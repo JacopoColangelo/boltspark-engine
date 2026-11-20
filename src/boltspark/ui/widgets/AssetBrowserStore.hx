@@ -22,6 +22,8 @@ class AssetBrowserStore {
     public var sortKey:Int = 0;
     public var sortAsc:Bool = true;
     public var typeFilter:String = "all";
+    /** When true, engine assets also appear outside the Engine Asset filter. */
+    public var showEngineAssets:Bool = false;
     public var foldersFirst:Bool = true;
     public var folderWidth:Float = 118;
     public var inspectorWidth:Float = 220;
@@ -94,6 +96,7 @@ class AssetBrowserStore {
         sortAsc = boolValue(Reflect.field(data, "sortAsc"), true);
         typeFilter = Reflect.field(data, "typeFilter") is String
             ? Reflect.field(data, "typeFilter") : "all";
+        showEngineAssets = boolValue(Reflect.field(data, "showEngineAssets"), false);
         foldersFirst = boolValue(Reflect.field(data, "foldersFirst"), true);
         folderWidth = clampFloat(Reflect.field(data, "folderWidth"), 90, 280, 118);
         inspectorWidth = clampFloat(Reflect.field(data, "inspectorWidth"), 160, 420, 220);
@@ -114,6 +117,7 @@ class AssetBrowserStore {
                 sortKey: sortKey,
                 sortAsc: sortAsc,
                 typeFilter: typeFilter,
+                showEngineAssets: showEngineAssets,
                 foldersFirst: foldersFirst,
                 folderWidth: folderWidth,
                 inspectorWidth: inspectorWidth,

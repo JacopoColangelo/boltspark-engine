@@ -1,11 +1,9 @@
 package boltspark.engine;
 
-/** Convenience factories; primitives remain ordinary GameObjects. */
+/** Convenience factories for Mesh3D objects backed by primitive assets. */
 class PrimitiveGameObjects {
-    public static function createCube(name:String = "Cube"):GameObject {
-        var result = new GameObject(name);
-        result.addComponent(createCubeRenderer());
-        return result;
+    public static function createCube(name:String = "Cube"):Mesh3D {
+        return new Mesh3D(name, PrimitiveMeshes.cube(), Material.defaultMaterial());
     }
 
     public static function createCubeRenderer():MeshRenderer {

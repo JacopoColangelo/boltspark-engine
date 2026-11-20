@@ -20,6 +20,7 @@ import boltspark.editor.WorldBounds;
 import boltspark.engine.ComponentRegistry;
 import boltspark.engine.Component;
 import boltspark.engine.MeshRenderer;
+import boltspark.engine.Mesh3D;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.engine.inspector.ComponentPropertyData;
 import boltspark.engine.PrimitiveGameObjects;
@@ -27,6 +28,7 @@ import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.PrimitiveSettings;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
+import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
 import boltspark.ui.AppIcon;
@@ -323,6 +325,7 @@ class Main extends hxd.App {
         boltUI.onFileSaveScene = fileSaveScene;
         boltUI.onFileSaveAll = fileSaveAll;
         boltUI.onQueryAssets = function() return projectSession.scanAllAssets();
+        boltUI.onQueryEngineAssets = function() return EngineAssetCatalog.all();
         boltUI.onQueryAssetDetails = function(source) return projectSession.assetDetails(source);
         boltUI.onOpenAsset = openAsset;
         boltUI.onNewScene = createAssetScene;
@@ -339,6 +342,11 @@ class Main extends hxd.App {
         boltUI.onMoveFolder = moveAssetFolder;
         boltUI.onRevealAsset = revealAsset;
         boltUI.onCopyAssetPath = copyAssetPath;
+        // The browser is already the active bottom tab on startup, so no tab
+        // click will trigger a refresh. Populate it only after every query
+        // callback above exists; refreshing earlier silently yields an empty
+        // list and hides engine assets even with the preference enabled.
+        boltUI.refreshAssetBrowser();
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
@@ -2528,7 +2536,7 @@ class Main extends hxd.App {
             entries.push(new HierarchyEntry(object.id, object.name,
                 object.persistentId, parentId,
                 depth, object.children.length > 0,
-                object.getComponent(MeshRenderer) != null,
+                Mesh3D.is(object),
                 object.children.length, siblingIndex,
                 object.visible, object.enabled));
         }

@@ -84,9 +84,36 @@ recreating Unreal/Unity asset infrastructure.
 ### Search / sort / filter
 - Search matches name, file name, relative path, folder, extension, kind and
   type label, updating on every keystroke.
-- Filter menu: all files, scenes, generic files, favorites, recent.
+- Filter menu: all files, scenes, engine assets, generic files, favorites, recent.
 - Sort menu: name / type / size / modified, ascending or descending. It is a
   separate button and menu so future filter or sort options grow independently.
+
+### Engine assets
+- Primitives and built-in materials are engine-provided assets, not files.
+  `EngineAssetCatalog` synthesizes AssetFileInfo records with a reserved
+  `engine://` source scheme so the browser can list, search, sort, favorite, and
+  filter them exactly like filesystem assets. They live in a virtual **Engine**
+  folder at the Content root and never appear at the root itself; the folder is
+  only materialized when engine assets are enabled. They are exposed in the
+  **Engine Asset** filter (which shows only them) and, when the **Show Engine
+  Assets** checkbox is enabled in the Settings popover, alongside "All assets" /
+  favorites / recent. The preference persists in `asset-browser.json`. The
+  Engine folder is browsable but cannot be renamed, moved, or deleted.
+- Engine assets cannot be renamed, duplicated, moved, or deleted on disk: those
+  commands are guarded and instead show a status hint.
+- Each asset preview is a pre-baked in-engine render shipped as an embedded
+  PNG at 512px under `res/thumbnails/` (not generated at runtime). They are
+  supersampled 2x and area-averaged at bake time for antialiased edges, so no
+  runtime filtering is needed and the slider never magnifies them. Primitives are shown
+  upright on a solid light-grey background under soft diffuse lighting, and the
+  Default Material is shown applied to a sphere. `PrimitiveThumbnails` loads
+  the PNGs directly on first use and reuses them in grid tiles, compact/detail
+  rows, the folder tree, and the framed Inspector slot.
+- Dragging an engine asset out of the browser starts a typed drag session. Mesh
+  assets only drop onto the Mesh slot of a MeshRenderer Inspector and material
+  assets only onto its Material slot. The picker is a framed slot: a compatible
+  drop highlights it, applies the asset through the normal Inspector change
+  path, and refreshes both the picker label and the dropdown selection.
 
 ### Operations
 - Open, rename, duplicate, copy, cut, paste, delete (single confirm for a whole
@@ -200,8 +227,10 @@ build 26300 x64:
 - **No OS drag-in.** Dragging files from Windows Explorer into the dock is not
   wired; the existing editor has no generic file-drop payload for it. Internal
   multi-asset and folder drags are supported.
-- **No cross-panel asset drop.** Assets use an internal path-array payload, but
-  no other editor panel currently consumes it.
+- **Cross-panel drop is limited to engine assets.** The path-array payload used
+  by filesystem assets is still browser-local; only engine assets (primitives
+  and materials) carry a typed drag payload that the MeshRenderer Inspector
+  slots consume.
 - **No real image/texture thumbnails.** The engine cannot load image files, so
   previews for `.boltscene` and generic files are Tabler icon stand-ins rather
   than rendered content. They scale with the thumbnail-size slider instead of

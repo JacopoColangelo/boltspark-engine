@@ -22,6 +22,8 @@ class ComponentInspectorSection extends InspectorSection {
     public var onBoolCommit:Null<String->Bool->Void>;
     /** Fired when an asset picker is clicked; the owner opens a typed menu. */
     public var onAssetPick:Null<String->Void>;
+    /** Fired with (propertyId, assetId) when an engine asset is dropped on a slot. */
+    public var onAssetDrop:Null<String->String->Void>;
     public var onReset:Null<String->Void>;
     public var onLinkChanged:Null<String->Bool->Void>;
     public var onEditRejected:Null<String->Void>;
@@ -251,8 +253,13 @@ class ComponentInspectorSection extends InspectorSection {
         row.field = new AssetPickerField(ctx, 100, Theme.CONTROL_HEIGHT,
             display, content);
         var propertyId = property.id;
+        row.field.assetType = property.assetType;
+        row.field.assetId = property.assetId;
         row.field.onPick = function() {
             if (onAssetPick != null) onAssetPick(propertyId);
+        };
+        row.field.onAssetDrop = function(assetId) {
+            if (onAssetDrop != null) onAssetDrop(propertyId, assetId);
         };
         assets.push(row);
     }

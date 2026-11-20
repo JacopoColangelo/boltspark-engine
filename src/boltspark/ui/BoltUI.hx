@@ -86,6 +86,7 @@ class BoltUI {
     public var onFileSaveAll:Null<Void->Void>;
     /** Asset Browser data and actions. */
     public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
+    public var onQueryEngineAssets:Null<Void->Array<AssetFileInfo>>;
     public var onOpenAsset:Null<String->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
@@ -260,6 +261,9 @@ class BoltUI {
         shell.onFileSaveAll = function() if (onFileSaveAll != null) onFileSaveAll();
         shell.onQueryAssets = function() {
             return onQueryAssets != null ? onQueryAssets() : [];
+        };
+        shell.onQueryEngineAssets = function() {
+            return onQueryEngineAssets != null ? onQueryEngineAssets() : [];
         };
         shell.onOpenAsset = function(source) {
             if (onOpenAsset != null) onOpenAsset(source);

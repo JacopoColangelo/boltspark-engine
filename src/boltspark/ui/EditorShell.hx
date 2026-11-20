@@ -210,6 +210,7 @@ class EditorShell {
     public var onFileSaveAll:Null<Void->Void>;
     /** Asset Browser data and actions, routed upward to ProjectSession. */
     public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
+    public var onQueryEngineAssets:Null<Void->Array<AssetFileInfo>>;
     public var onOpenAsset:Null<String->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
@@ -708,6 +709,11 @@ class EditorShell {
         fovGridHit.onOut = function(_) fovGridSurface.setStyle(
             Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
         fovGridHit.onPush = function(event) {
+            // Swallow the press; act on release so the closing popup does not
+            // let the release click a control underneath it.
+            event.propagate = false;
+        };
+        fovGridHit.onRelease = function(event) {
             event.propagate = false;
             closeFovPopup();
             if (onToggleGrid != null) onToggleGrid();
@@ -809,15 +815,13 @@ class EditorShell {
         // Input diagnostics are intentionally not surfaced in the shipped status bar.
         input.onDeletePressed = function() {
             if (anyTextCaptureActive()) return;
-            if (activeBottomTab == 0) {
-                if (assetBrowser.hasSelection()) {
-                    assetBrowser.deleteSelection();
-                    return;
-                }
-                if (assetBrowser.hasFolderSelection()) {
-                    assetBrowser.deleteSelectedFolder();
-                    return;
-                }
+            // Deleting the selected scene object is the default. The Asset
+            // Browser only intercepts Delete when the user has explicitly
+            // selected an asset or folder tile there; merely browsing into a
+            // folder must never turn Delete into a folder-delete command.
+            if (activeBottomTab == 0 && assetBrowser.hasSelection()
+                    && assetBrowser.deleteSelection()) {
+                return;
             }
             deleteSelection();
         };
@@ -965,6 +969,9 @@ class EditorShell {
         assetBrowser.visible = activeBottomTab == 0;
         assetBrowser.onQueryAssets = function() {
             return onQueryAssets != null ? onQueryAssets() : [];
+        };
+        assetBrowser.onQueryEngineAssets = function() {
+            return onQueryEngineAssets != null ? onQueryEngineAssets() : [];
         };
         assetBrowser.onOpenAsset = function(source) {
             if (onOpenAsset != null) onOpenAsset(source);
@@ -1886,6 +1893,11 @@ class EditorShell {
             };
             section.onAssetPick = function(propertyId) {
                 openAssetPicker(component, propertyId, componentIndex);
+            };
+            section.onAssetDrop = function(propertyId, assetId) {
+                if (onInspectorAssetChanged != null) {
+                    onInspectorAssetChanged(componentIndex, propertyId, assetId);
+                }
             };
             section.onBoolCommit = function(propertyId, value) {
                 if (onInspectorBoolChanged != null) {

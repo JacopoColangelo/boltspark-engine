@@ -4,7 +4,16 @@ import boltspark.editor.EditorTransform;
 
 /** Generic container whose behavior is entirely supplied by Components. */
 class GameObject {
+    /** Stable engine object type id; subclasses override it. */
+    public static inline var TYPE:String = "GameObject";
+
     public var name(get, set):String;
+    /**
+     * Component-based objects still expose a stable type id so systems can ask
+     * "what kind of object is this?" without depending on a concrete class.
+     * Mesh3D and its editor projection report Mesh3D.TYPE.
+     */
+    public var objectType(get, never):String;
     /** Ordered component collection. Mutate it only through component methods. */
     public final components:Array<Component> = [];
     public var transform(default, null):Transform;
@@ -123,6 +132,8 @@ class GameObject {
         if (started) component.startInternal();
         componentChanged(component);
     }
+
+    function get_objectType():String return TYPE;
 
     inline function get_name():String return objectName;
     function set_name(value:String):String return objectName = requireName(value);

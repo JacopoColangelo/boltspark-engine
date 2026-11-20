@@ -1,8 +1,10 @@
 # GameObject component system
 
 Boltspark scene behavior is composed from `src/boltspark/engine/` components.
-A `GameObject` is a generic name plus an ordered component collection. It does
-not encode cube, sphere, camera, light, or other object kinds.
+A `GameObject` is a generic name plus an ordered component collection. Behavior
+stays component-based, but every object exposes a stable `objectType`. Renderable
+objects report the `Mesh3D` type (via `Mesh3D` / `EditorMesh3D`), so systems can
+ask what kind of object something is without depending on a concrete class.
 
 ## Core API
 
@@ -36,7 +38,7 @@ the editor grid is drawn at the real origin rather than half a cube below it.
 var empty = new GameObject("GameObject");
 ```
 
-A cube is a normal GameObject configured by a factory:
+A cube is a Mesh3D configured by a factory:
 
 ```haxe
 import boltspark.engine.PrimitiveGameObjects;
@@ -59,6 +61,11 @@ session.createObject("Cube", new EditorTransform(), -1,
 `MeshRenderer.material` accepts any `Material`. `HeapsMeshFactory` maps mesh
 asset IDs to concrete Heaps primitives; adding another primitive does not
 require a new GameObject class.
+
+`Mesh3D.is(object)` recognizes both runtime `Mesh3D` instances and editor scene
+objects whose components include a `MeshRenderer`. Editor object construction
+runs through `EditorObjectFactory`, so creation, undo/redo, duplication, and
+scene loading all preserve that type identity.
 
 Meshes and materials are **reusable asset references**, not scene objects:
 `PrimitiveMeshes.all()` lists the built-in Cube, Sphere, Cylinder, Capsule, and

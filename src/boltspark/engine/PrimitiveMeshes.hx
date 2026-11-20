@@ -23,27 +23,27 @@ class PrimitiveMeshes {
     static var registeredById:Map<String, Mesh> = new Map();
 
     public static function cube():Mesh {
-        if (cubeMesh == null) cubeMesh = built(CUBE_ID, "Primitive Cube", "cube");
+        if (cubeMesh == null) cubeMesh = built(CUBE_ID, "Cube", "cube");
         return cubeMesh;
     }
 
     public static function sphere():Mesh {
-        if (sphereMesh == null) sphereMesh = built(SPHERE_ID, "Primitive Sphere", "sphere");
+        if (sphereMesh == null) sphereMesh = built(SPHERE_ID, "Sphere", "sphere");
         return sphereMesh;
     }
 
     public static function cylinder():Mesh {
-        if (cylinderMesh == null) cylinderMesh = built(CYLINDER_ID, "Primitive Cylinder", "cylinder");
+        if (cylinderMesh == null) cylinderMesh = built(CYLINDER_ID, "Cylinder", "cylinder");
         return cylinderMesh;
     }
 
     public static function capsule():Mesh {
-        if (capsuleMesh == null) capsuleMesh = built(CAPSULE_ID, "Primitive Capsule", "capsule");
+        if (capsuleMesh == null) capsuleMesh = built(CAPSULE_ID, "Capsule", "capsule");
         return capsuleMesh;
     }
 
     public static function plane():Mesh {
-        if (planeMesh == null) planeMesh = built(PLANE_ID, "Primitive Plane", "plane");
+        if (planeMesh == null) planeMesh = built(PLANE_ID, "Plane", "plane");
         return planeMesh;
     }
 

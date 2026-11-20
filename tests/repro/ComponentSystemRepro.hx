@@ -2,6 +2,7 @@ import boltspark.editor.EditorSession;
 import boltspark.engine.Component;
 import boltspark.engine.ComponentRegistry;
 import boltspark.engine.GameObject;
+import boltspark.engine.Mesh3D;
 import boltspark.engine.MeshRenderer;
 import boltspark.engine.PrimitiveGameObjects;
 import boltspark.engine.inspector.ComponentPropertyKind;
@@ -69,14 +70,15 @@ class ComponentSystemRepro {
     static function testPrimitiveComposition():Void {
         var cube = PrimitiveGameObjects.createCube();
         var renderer = cube.getComponent(MeshRenderer);
-        assertTrue(Type.getClass(cube) == GameObject,
-            "cube factory returned a special GameObject subclass");
+        assertTrue(Std.isOfType(cube, Mesh3D) && Mesh3D.is(cube)
+                && cube.objectType == Mesh3D.TYPE,
+            "cube factory did not return a Mesh3D");
         assertTrue(cube.components.length == 2
                 && cube.components[0] == cube.transform
                 && renderer != null,
             "cube is not composed from Transform + MeshRenderer");
         assertTrue(renderer.mesh != null
-                && renderer.mesh.name == "Primitive Cube"
+                && renderer.mesh.name == "Cube"
                 && renderer.material.name == "Default Material",
             "cube primitive mesh/default material assignment changed");
         var transformInspector = cube.transform.inspectorData(0);
@@ -85,7 +87,7 @@ class ComponentSystemRepro {
                 && transformInspector.properties.length == 3
                 && rendererInspector.title == "MeshRenderer"
                 && rendererInspector.properties.length == 5
-                && rendererInspector.properties[0].textValue == "Primitive Cube"
+                && rendererInspector.properties[0].textValue == "Cube"
                 && rendererInspector.properties[1].textValue == "Default Material",
             "component-owned Inspector property definitions changed");
         // Cube geometry parameters follow the two asset rows.

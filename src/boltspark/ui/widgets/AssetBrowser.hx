@@ -1,9 +1,14 @@
 package boltspark.ui.widgets;
 
+import boltspark.engine.inspector.AssetType;
 import boltspark.project.AssetTypeRegistry;
+import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectSession;
 import boltspark.project.ProjectSession.AssetDetails;
 import boltspark.project.ProjectSession.AssetFileInfo;
+import boltspark.ui.AssetDragSession;
+import boltspark.ui.AssetDragPayload;
+import boltspark.ui.PrimitiveThumbnails;
 import boltspark.ui.Theme;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiIcons.UiIconKind;
@@ -51,6 +56,7 @@ typedef BrowserItem = {
 class AssetBrowser extends h2d.Object {
     // Existing commands - forwarded by EditorShell to Main/ProjectSession.
     public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
+    public var onQueryEngineAssets:Null<Void->Array<AssetFileInfo>>;
     public var onOpenAsset:Null<String->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
@@ -128,6 +134,7 @@ class AssetBrowser extends h2d.Object {
     final settingsViewTitle:UiText;
     final settingsTitle:UiText;
     final settingsSlider:UiSlider;
+    final showEngineAssetsCheckbox:UiCheckbox;
     var settingsOpen:Bool = false;
     final favoriteHeaderStar:h2d.Graphics;
     final favoriteHeaderHit:h2d.Interactive;
@@ -171,6 +178,7 @@ class AssetBrowser extends h2d.Object {
     var searchText:String = "";
     var statusMessage:String = "";
     var typeFilter:String = "all";
+    var showEngineAssets:Bool = false;
     var sortKey:Int = 0;
     var sortAsc:Bool = true;
     var foldersFirst:Bool = true;
@@ -213,6 +221,10 @@ class AssetBrowser extends h2d.Object {
         sortKey = store.sortKey;
         sortAsc = store.sortAsc;
         typeFilter = store.typeFilter;
+        showEngineAssets = store.showEngineAssets;
+        // The virtual Engine folder starts closed so its assets don't crowd
+        // the root tree; users expand it explicitly when they need it.
+        expandedFolders.set(EngineAssetCatalog.FOLDER, false);
         foldersFirst = store.foldersFirst;
         preferredFolderWidth = folderWidth = store.folderWidth;
 
@@ -307,6 +319,11 @@ class AssetBrowser extends h2d.Object {
         // through transparent parts of the settings popover.
         settingsCatch.cursor = hxd.Cursor.Default;
         settingsCatch.onPush = function(event) {
+            // Swallow the press and keep the catch alive: buttons act on
+            // release, so closing here would click whatever is underneath.
+            event.propagate = false;
+        };
+        settingsCatch.onRelease = function(event) {
             event.propagate = false;
             closeSettings();
         };
@@ -331,10 +348,20 @@ class AssetBrowser extends h2d.Object {
             store.thumbnailSize = thumbnailSize;
             refreshLayout();
         };
+        showEngineAssetsCheckbox = new UiCheckbox(ctx, "Show Engine Assets", menus);
+        showEngineAssetsCheckbox.setWidth(SETTINGS_WIDTH - 24);
+        showEngineAssetsCheckbox.value = showEngineAssets;
+        showEngineAssetsCheckbox.onChanged = function(value) {
+            showEngineAssets = value;
+            store.showEngineAssets = showEngineAssets;
+            store.save();
+            refresh();
+        };
         // The popover surface was created after the buttons; lift them above it.
         menus.addChild(viewGridButton);
         menus.addChild(viewListButton);
         menus.addChild(viewDetailsButton);
+        menus.addChild(showEngineAssetsCheckbox);
         settingsCatch.visible = false;
         settingsPanel.visible = false;
         settingsHeader.visible = false;
@@ -342,6 +369,7 @@ class AssetBrowser extends h2d.Object {
         settingsViewTitle.visible = false;
         settingsTitle.visible = false;
         settingsSlider.visible = false;
+        showEngineAssetsCheckbox.visible = false;
         viewGridButton.visible = false;
         viewListButton.visible = false;
         viewDetailsButton.visible = false;
@@ -637,7 +665,15 @@ class AssetBrowser extends h2d.Object {
 
     /** Re-read assets from the project root and rebuild every pane. */
     public function refresh():Void {
-        entries = onQueryAssets != null ? onQueryAssets() : [];
+        var scanned = onQueryAssets != null ? onQueryAssets() : [];
+        // Engine assets stay out of the default view entirely: they are only
+        // materialized when the Engine Asset filter or the settings opt-in asks
+        // for them. This keeps counts, folders, and filesystem commands clean.
+        var engine:Array<AssetFileInfo> = [];
+        if (typeFilter == AssetTypeRegistry.KIND_ENGINE || showEngineAssets) {
+            engine = onQueryEngineAssets != null ? onQueryEngineAssets() : [];
+        }
+        entries = scanned.concat(engine);
         detailCache.clear();
         collectFolders();
         printEntries();
@@ -875,6 +911,7 @@ class AssetBrowser extends h2d.Object {
         var options = [
             {key: "all", label: "All assets"},
             {key: AssetTypeRegistry.KIND_SCENE, label: AssetTypeRegistry.SCENE_INFO_LABEL},
+            {key: AssetTypeRegistry.KIND_ENGINE, label: AssetTypeRegistry.ENGINE_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_FILE, label: AssetTypeRegistry.FILE_INFO_LABEL},
             {key: "favorites", label: "Favorites"},
             {key: "recent", label: "Recent"}
@@ -889,7 +926,7 @@ class AssetBrowser extends h2d.Object {
                     store.typeFilter = typeFilter;
                     store.save();
                     scrollValue = 0;
-                    rebuildAll();
+                    refresh();
                 }
             });
         }
@@ -919,7 +956,7 @@ class AssetBrowser extends h2d.Object {
     static inline var THUMB_MIN:Int = 64;
     static inline var THUMB_MAX:Int = 192;
     static inline var SETTINGS_WIDTH:Float = 242;
-    static inline var SETTINGS_HEIGHT:Float = 150;
+    static inline var SETTINGS_HEIGHT:Float = 184;
 
     function openSettings():Void {
         if (settingsOpen) {
@@ -958,6 +995,11 @@ class AssetBrowser extends h2d.Object {
         settingsSlider.setWidth(SETTINGS_WIDTH - 24);
         settingsSlider.x = settingsPanel.x + 12;
         settingsSlider.y = settingsPanel.y + 108;
+        showEngineAssetsCheckbox.setWidth(SETTINGS_WIDTH - 24);
+        showEngineAssetsCheckbox.x = settingsPanel.x + 12;
+        showEngineAssetsCheckbox.y = settingsPanel.y + 134;
+        showEngineAssetsCheckbox.value = showEngineAssets;
+        showEngineAssetsCheckbox.visible = true;
         settingsPanel.visible = true;
         settingsHeader.visible = true;
         settingsDivider.visible = true;
@@ -978,6 +1020,7 @@ class AssetBrowser extends h2d.Object {
         settingsViewTitle.visible = false;
         settingsTitle.visible = false;
         settingsSlider.visible = false;
+        showEngineAssetsCheckbox.visible = false;
         viewGridButton.visible = false;
         viewListButton.visible = false;
         viewDetailsButton.visible = false;
@@ -1030,7 +1073,8 @@ class AssetBrowser extends h2d.Object {
         filterButton.setText(typeFilter == "all" ? "All"
             : typeFilter == "favorites" ? "Favorites"
             : typeFilter == "recent" ? "Recent"
-            : typeFilter == AssetTypeRegistry.KIND_SCENE ? "Scenes" : "Files");
+            : typeFilter == AssetTypeRegistry.KIND_SCENE ? "Scenes"
+            : typeFilter == AssetTypeRegistry.KIND_ENGINE ? "Engine" : "Files");
         var sortNames = ["Name", "Type", "Size", "Modified"];
         sortButton.setText(sortNames[sortKey] + (sortAsc ? " \u2191" : " \u2193"));
         drawFavoriteIcon(store.favorites.length > 0
@@ -1206,6 +1250,11 @@ class AssetBrowser extends h2d.Object {
     }
 
     function matchesFilter(entry:AssetFileInfo):Bool {
+        var isEngine = entry.kind == AssetTypeRegistry.KIND_ENGINE;
+        // The Engine Asset filter is the explicit way to reveal built-ins.
+        if (typeFilter == AssetTypeRegistry.KIND_ENGINE) return isEngine;
+        // Otherwise engine assets are hidden until the settings toggle opts in.
+        if (isEngine && !showEngineAssets) return false;
         return switch (typeFilter) {
             case "all": true;
             case "favorites": store.isFavorite(entry.source);
@@ -1220,6 +1269,9 @@ class AssetBrowser extends h2d.Object {
         var items:Array<BrowserItem> = [];
         var prefix = selectedFolder == "" ? "" : selectedFolder + "/";
         for (folder in folders) {
+            // The Engine folder is a hierarchy-only grouping: it stays in the
+            // project tree but has no tile in the main Asset Panel.
+            if (isEngineFolder(folder)) continue;
             if (selectedFolder == "") {
                 if (folder.indexOf("/") >= 0) continue;
             } else {
@@ -1237,6 +1289,10 @@ class AssetBrowser extends h2d.Object {
         var result:Array<AssetFileInfo> = [];
         for (entry in entries) {
             if (selectedFolder != "" && entry.folder != selectedFolder) continue;
+            // Engine assets live in their own virtual folder: at the Content
+            // root only the "Engine" folder tile is shown, never its contents.
+            if (entry.kind == AssetTypeRegistry.KIND_ENGINE
+                    && selectedFolder != EngineAssetCatalog.FOLDER) continue;
             if (!matchesSearch(entry) || !matchesFilter(entry)) continue;
             result.push(entry);
         }
@@ -1278,6 +1334,11 @@ class AssetBrowser extends h2d.Object {
     static inline function folderFromSelectionKey(key:String):Null<String> {
         return StringTools.startsWith(key, FOLDER_KEY_PREFIX)
             ? key.substring(FOLDER_KEY_PREFIX.length) : null;
+    }
+
+    /** The Engine folder is virtual: it can be browsed but not moved/renamed. */
+    static inline function isEngineFolder(path:String):Bool {
+        return path == EngineAssetCatalog.FOLDER;
     }
 
     static function compareFloat(a:Float, b:Float):Int {
@@ -1449,9 +1510,16 @@ class AssetBrowser extends h2d.Object {
             if (isFolder) {
                 // A single click navigates and keeps folder drag/collapse working.
                 setFolderState(captured, true);
+                // Selecting the folder row makes Delete act on that folder, just
+                // like clicking a folder tile in the main panel.
+                if (captured != "") setSelected([folderSelectionKey(captured)]);
                 if (isDouble && captured != "") expandedFolders.set(captured, true);
-                if (captured != "") beginFolderDrag(captured, hit, event);
-                else { buildFolders(); buildAssets(); }
+                if (captured != "" && !isEngineFolder(captured)) {
+                    beginFolderDrag(captured, hit, event);
+                } else {
+                    buildFolders();
+                    buildAssets();
+                }
                 return;
             }
             if (hxd.Key.isDown(hxd.Key.CTRL)) toggleSelection(captured);
@@ -1470,12 +1538,13 @@ class AssetBrowser extends h2d.Object {
         var iconX = 20 + depth * 14;
         if (!compactRow) {
             var icon = new h2d.Graphics(row);
-            var kind = isFolder ? Folder : (entry == null ? Document : iconFor(entry));
             var iconSize = 14;
-            UiIcons.draw(icon, kind, iconX,
-                Math.round((ROW_HEIGHT - iconSize) * 0.5), iconSize,
-                selected ? Theme.ACCENT : isFolder ? Theme.MUTED
-                    : (entry != null && entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED));
+            var iconColor = selected ? Theme.ACCENT : isFolder ? Theme.MUTED
+                : (entry != null && entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
+            if (isFolder) UiIcons.draw(icon, Folder, iconX,
+                Math.round((ROW_HEIGHT - iconSize) * 0.5), iconSize, iconColor);
+            else drawAssetIcon(icon, entry, iconX,
+                Math.round((ROW_HEIGHT - iconSize) * 0.5), iconSize, iconColor);
         }
         var labelX = compactRow ? 6 : iconX + 18;
         var label = new UiText(ctx.font, row);
@@ -1696,6 +1765,7 @@ class AssetBrowser extends h2d.Object {
                 navigateTo(captured);
                 return;
             }
+            if (isEngineFolder(captured)) return;
             beginFolderDrag(captured, hit, event);
         };
         hit.onWheel = handleGridWheel;
@@ -1707,25 +1777,32 @@ class AssetBrowser extends h2d.Object {
      *  thumbnail-size slider. */
     function drawPreview(g:h2d.Graphics, entry:AssetFileInfo,
             x:Float, y:Float, w:Float, h:Float, selected:Bool):Void {
+        // Square preview card centered in the available rect, so a square
+        // rendered thumbnail fills it exactly without stretching or insets.
+        var cardSize = Math.min(w, h);
+        var cardX = x + (w - cardSize) * 0.5;
+        var cardY = y + (h - cardSize) * 0.5;
         g.beginFill(selected ? 0x245045 : Theme.SURFACE_1);
-        g.drawRect(x, y, w, h);
+        g.drawRect(cardX, cardY, cardSize, cardSize);
         g.endFill();
-        g.lineStyle(1, selected ? Theme.ACCENT : Theme.SURFACE_3);
-        g.drawRect(x + 0.5, y + 0.5, w - 1, h - 1);
-        g.lineStyle(0);
 
-        var cx = x + w * 0.5;
-        var cy = y + h * 0.5;
-        if (entry.loadable) {
-            var iconSize = Math.min(w, h) * 0.68;
+        var cx = cardX + cardSize * 0.5;
+        var cy = cardY + cardSize * 0.5;
+        if (entry.kind == AssetTypeRegistry.KIND_ENGINE) {
+            var payload = EngineAssetCatalog.dragPayload(entry);
+            PrimitiveThumbnails.draw(g, payload == null ? "" : payload.assetId,
+                cardX, cardY, cardSize, cardSize,
+                selected ? Theme.ACCENT : Theme.CUBE_ORANGE);
+        } else if (entry.loadable) {
+            var iconSize = cardSize * 0.68;
             UiIcons.drawSceneThumb(g, cx - iconSize * 0.5, cy - iconSize * 0.5,
                 iconSize, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
         } else {
             var base = 0x7A8794;
-            var pw = Math.min(w * 0.42, h * 0.58);
+            var pw = cardSize * 0.42;
             var ph = pw * 1.3;
             var px = cx - pw * 0.5;
-            var py = y + (h - ph) * 0.5;
+            var py = cardY + (cardSize - ph) * 0.5;
             g.beginFill(0x000000, 0.28);
             g.drawRect(px + 2, py + 3, pw, ph);
             g.endFill();
@@ -1745,9 +1822,20 @@ class AssetBrowser extends h2d.Object {
                 g.endFill();
             }
         }
+        // Selection frame is drawn last: the engine thumbnail fills the card
+        // and would otherwise paint over the border.
+        if (selected) {
+            g.lineStyle(2, Theme.ACCENT, 1);
+            g.drawRect(cardX + 1, cardY + 1, cardSize - 2, cardSize - 2);
+            g.lineStyle();
+        } else {
+            g.lineStyle(1, Theme.SURFACE_3, 1);
+            g.drawRect(cardX + 0.5, cardY + 0.5, cardSize - 1, cardSize - 1);
+            g.lineStyle();
+        }
         if (entry.active) {
             g.beginFill(Theme.ACCENT);
-            g.drawCircle(x + 9, y + 9, 3);
+            g.drawCircle(cardX + 9, cardY + 9, 3);
             g.endFill();
         }
     }
@@ -1769,10 +1857,10 @@ class AssetBrowser extends h2d.Object {
             surface.setStyle(selected ? Theme.ACCENT_MUTED : Theme.PANEL,
                 selected ? Theme.ACCENT : Theme.BORDER, 0);
             var icon = new h2d.Graphics(row);
-            UiIcons.draw(icon,
-                item.isFolder ? Folder : (item.entry == null ? Document : iconFor(item.entry)),
-                5, 3, 14, selected ? Theme.ACCENT : item.isFolder ? Theme.TEXT_SECONDARY
-                    : (item.entry != null && item.entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED));
+            var iconColor = selected ? Theme.ACCENT : item.isFolder ? Theme.TEXT_SECONDARY
+                : (item.entry != null && item.entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
+            if (item.isFolder) UiIcons.draw(icon, Folder, 5, 3, 14, iconColor);
+            else drawAssetIcon(icon, item.entry, 5, 3, 14, iconColor);
             var type = new UiText(ctx.captionFont, row);
             type.text = item.isFolder ? "Folder" : (item.entry == null ? "" : item.entry.kindLabel);
             type.textColor = Theme.MUTED;
@@ -1829,10 +1917,10 @@ class AssetBrowser extends h2d.Object {
                 selected ? Theme.ACCENT : Theme.BORDER, 0);
             surface.setSize(width, LIST_ROW_HEIGHT);
             var icon = new h2d.Graphics(row);
-            UiIcons.draw(icon,
-                item.isFolder ? Folder : (item.entry == null ? Document : iconFor(item.entry)),
-                4, 3, 14, selected ? Theme.ACCENT : item.isFolder ? Theme.TEXT_SECONDARY
-                    : (item.entry != null && item.entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED));
+            var iconColor = selected ? Theme.ACCENT : item.isFolder ? Theme.TEXT_SECONDARY
+                : (item.entry != null && item.entry.loadable ? Theme.TEXT_SECONDARY : Theme.MUTED);
+            if (item.isFolder) UiIcons.draw(icon, Folder, 4, 3, 14, iconColor);
+            else drawAssetIcon(icon, item.entry, 4, 3, 14, iconColor);
             var name = new UiText(ctx.font, row);
             fitText(name, item.name, Math.max(0, columnsX[0] - 22 - 4));
             name.textColor = selected ? Theme.TEXT : Theme.TEXT_SECONDARY;
@@ -1880,6 +1968,19 @@ class AssetBrowser extends h2d.Object {
     function iconFor(entry:AssetFileInfo):UiIconKind {
         if (entry.kind == AssetTypeRegistry.KIND_SCENE) return Scene;
         return Document;
+    }
+
+    /** Engine assets get a real per-primitive thumbnail; files use atlas glyphs. */
+    function drawAssetIcon(g:h2d.Graphics, entry:Null<AssetFileInfo>,
+            x:Float, y:Float, size:Float, color:Int):Void {
+        if (entry != null && entry.kind == AssetTypeRegistry.KIND_ENGINE) {
+            var payload = EngineAssetCatalog.dragPayload(entry);
+            PrimitiveThumbnails.draw(g, payload == null ? "" : payload.assetId,
+                x, y, size, size, color);
+        } else {
+            UiIcons.draw(g, entry == null ? Document : iconFor(entry),
+                x, y, size, color);
+        }
     }
 
     function attachItemHit(target:h2d.Object, entry:AssetFileInfo,
@@ -2037,6 +2138,12 @@ class AssetBrowser extends h2d.Object {
     }
 
     function beginAssetDrag(source:String, hit:h2d.Interactive, event:hxd.Event):Void {
+        var draggedEntry = findEntry(source);
+        var enginePayload = EngineAssetCatalog.dragPayload(draggedEntry);
+        if (enginePayload != null) {
+            beginEngineAssetDrag(enginePayload, source, hit, event);
+            return;
+        }
         dragSources = selectedSources.length > 1 ? selectedSources.copy() : [source];
         var labels = dragSources;
         dragGhost.text = ProjectSession.sceneDisplayName(labels[0])
@@ -2082,6 +2189,73 @@ class AssetBrowser extends h2d.Object {
                 case _:
                     capturedEvent.propagate = false;
             }
+        });
+    }
+
+    /**
+     * Drag an engine asset out of the browser and onto a type-aware Inspector
+     * slot. The browser still owns the gesture; AssetDragSession only carries
+     * the payload and resolves the drop target under the cursor.
+     */
+    function beginEngineAssetDrag(payload:AssetDragPayload, source:String,
+            hit:h2d.Interactive, event:hxd.Event):Void {
+        dragSources = [source];
+        dragGhost.text = payload.label;
+        addChild(dragGhost);
+        dragGhost.visible = false;
+        dragGhost.x = event.relX + 10;
+        dragGhost.y = event.relY + 8;
+        dragging = false;
+        dragStartX = ctx.window.mouseX;
+        dragStartY = ctx.window.mouseY;
+        // Don't begin the drag session on press: a plain click must not light
+        // up the Inspector slots. The session (and its highlights) starts only
+        // once the pointer actually moves far enough to be a drag.
+        hit.startCapture(function(capturedEvent) {
+            switch (capturedEvent.kind) {
+                case EMove:
+                    if (Math.abs(ctx.window.mouseX - dragStartX)
+                            + Math.abs(ctx.window.mouseY - dragStartY) > 6) {
+                        if (!dragging) {
+                            dragGhost.visible = true;
+                            AssetDragSession.begin(payload);
+                        }
+                        dragging = true;
+                    }
+                    // The scene-level capture already delivers moves/releases
+                    // everywhere inside the editor. Native SetCapture would
+                    // add latency to every move, so it is intentionally unused
+                    // for these in-window asset drags.
+                    dragGhost.x = ctx.window.mouseX - this.x + 10;
+                    dragGhost.y = ctx.window.mouseY - this.y + 8;
+                    if (dragging) {
+                        AssetDragSession.update(ctx.window.mouseX, ctx.window.mouseY);
+                    }
+                    capturedEvent.propagate = false;
+                case ERelease, EReleaseOutside, EFocusLost:
+                    var wasDragging = dragging;
+                    var mouseX = ctx.window.mouseX;
+                    var mouseY = ctx.window.mouseY;
+                    // Stop capture FIRST. The drop rebuilds the inspector and
+                    // refreshes this browser, which destroys `hit`; calling
+                    // stopCapture() afterwards would dereference a dead
+                    // Interactive. The onCancel callback below only does
+                    // cosmetic cleanup, so the payload survives until drop().
+                    hit.stopCapture();
+                    if (wasDragging) AssetDragSession.drop(mouseX, mouseY);
+                    else AssetDragSession.cancel();
+                    dragging = false;
+                    capturedEvent.propagate = false;
+                case _:
+                    capturedEvent.propagate = false;
+            }
+        }, function() {
+            // Invoked by stopCapture() or by an external capture loss. Hiding
+            // the ghost and refreshing tiles is safe in both cases; resolving
+            // the drag session belongs to the release handler above.
+            dragGhost.visible = false;
+            dragGhost.text = "";
+            buildAssets();
         });
     }
 
@@ -2146,6 +2320,16 @@ class AssetBrowser extends h2d.Object {
     function openContextMenu():Void {
         Sys.println('[probe] asset browser context source=${selectedSource}');
         var entry = findEntry(selectedSource);
+        if (entry != null && entry.kind == AssetTypeRegistry.KIND_ENGINE) {
+            contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, [{
+                label: store.isFavorite(selectedSource) ? "Remove Favorite" : "Add to Favorites",
+                onClick: function() {
+                    store.toggleFavorite(selectedSource);
+                    rebuildAll();
+                }
+            }]);
+            return;
+        }
         var loadable = entry != null && entry.loadable;
         var moreItems:Array<MenuItem> = [{
             label: "Duplicate",
@@ -2241,6 +2425,13 @@ class AssetBrowser extends h2d.Object {
     }
 
     function openFolderContextMenu(path:String):Void {
+        if (isEngineFolder(path)) {
+            contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, [{
+                label: "Open Engine Assets",
+                onClick: function() navigateTo(path)
+            }]);
+            return;
+        }
         var isFavorite = store.isFavorite("__folder__:" + path);
         var isRoot = path == "";
         var items:Array<MenuItem> = [{
@@ -2294,6 +2485,10 @@ class AssetBrowser extends h2d.Object {
         if (selectedSource == "") return;
         Sys.println('[probe] asset browser open source=${selectedSource}');
         var entry = findEntry(selectedSource);
+        if (entry != null && entry.kind == AssetTypeRegistry.KIND_ENGINE) {
+            showStatus("Engine asset — drag it onto a matching MeshRenderer slot");
+            return;
+        }
         if (entry == null || !entry.loadable) {
             showStatus("No engine preview for this file type");
             return;
@@ -2304,41 +2499,61 @@ class AssetBrowser extends h2d.Object {
 
     function duplicateSelected():Void {
         if (selectedSource == "") return;
+        var entry = findEntry(selectedSource);
+        if (entry != null && entry.kind == AssetTypeRegistry.KIND_ENGINE) {
+            showStatus("Engine assets cannot be duplicated on disk");
+            return;
+        }
         if (onDuplicateAsset != null) onDuplicateAsset(selectedSource);
     }
 
-    /** Delete entry points used by the Delete keyboard shortcut. */
-    public function hasFolderSelection():Bool return selectedFolder != "";
+    /**
+     * True only when a folder tile is explicitly selected in the browser.
+     * `selectedFolder` is navigation state (the folder currently being viewed)
+     * and must not be treated as a delete target just because the user browsed
+     * into it.
+     */
+    public function hasFolderSelection():Bool {
+        return folderFromSelectionKey(selectedSource) != null;
+    }
 
-    public function deleteSelection():Void {
-        deleteSelected();
+    /** Returns true only when an actual filesystem asset/folder delete was issued. */
+    public function deleteSelection():Bool {
+        return deleteSelected();
     }
 
     public function deleteSelectedFolder():Void {
-        if (selectedFolder == "") return;
+        if (selectedFolder == "" || isEngineFolder(selectedFolder)) return;
         var folder = selectedFolder;
         if (onDeleteFolder != null) onDeleteFolder(folder, true);
         Sys.println('[probe] asset browser delete folder request=${folder}');
     }
 
-    function deleteSelected():Void {
-        if (selectedSources.length == 0) return;
+    function deleteSelected():Bool {
+        if (selectedSources.length == 0) return false;
         var assets:Array<String> = [];
         var folders:Array<String> = [];
         for (key in selectedSources) {
+            var entry = findEntry(key);
+            if (entry != null && entry.kind == AssetTypeRegistry.KIND_ENGINE) continue;
             var folder = folderFromSelectionKey(key);
             if (folder == null) assets.push(key);
-            else folders.push(folder);
+            else if (!isEngineFolder(folder)) folders.push(folder);
         }
+        if (assets.length == 0 && folders.length == 0) return false;
+        var handled = false;
         // Folder keys are UI-only markers: route them to the folder command so
         // the user never sees "__folder__:" in a confirmation dialog.
-        for (folder in folders) if (onDeleteFolder != null) onDeleteFolder(folder, true);
-        if (assets.length == 0) return;
-        if (onDeleteAssets != null) {
-            onDeleteAssets(assets);
-            return;
+        for (folder in folders) {
+            if (onDeleteFolder != null) onDeleteFolder(folder, true);
+            handled = true;
         }
-        for (source in assets) if (onDeleteAsset != null) onDeleteAsset(source);
+        if (assets.length > 0) {
+            if (onDeleteAssets != null) onDeleteAssets(assets);
+            else for (source in assets) if (onDeleteAsset != null) onDeleteAsset(source);
+            handled = true;
+        }
+        return handled;
     }
 
     // ------------------------------------------------------------------

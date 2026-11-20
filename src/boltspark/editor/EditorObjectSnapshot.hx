@@ -38,7 +38,7 @@ class EditorObjectSnapshot {
     }
 
     public function restore(?scene:EditorSession):EditorObject {
-        return new EditorObject(id, persistentId, name, transform,
+        return EditorObjectFactory.create(id, persistentId, name, transform,
             cloneComponents(components), scene, visible, enabled);
     }
 

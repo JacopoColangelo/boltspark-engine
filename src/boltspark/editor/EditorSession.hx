@@ -54,7 +54,7 @@ class EditorSession {
         if (findObjectByPersistentId(durableId) != null) {
             throw 'Duplicate editor object ID: ${durableId}';
         }
-        var object = new EditorObject(nextObjectId, durableId,
+        var object = EditorObjectFactory.create(nextObjectId, durableId,
             name, transform == null ? new EditorTransform() : transform,
             cloneComponents(components), this, visible, enabled);
         nextObjectId++;
