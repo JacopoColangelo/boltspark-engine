@@ -16,8 +16,12 @@ typedef MenuItem = {
     ?submenu:Array<MenuItem>,
     /** Non-interactive divider used to group actions. */
     ?separator:Bool,
+    /** Muted uppercase heading for a group of mutually exclusive choices. */
+    ?section:Bool,
     /** Draws an accent checkmark and tints the row as the active choice. */
     ?selected:Bool,
+    /** Draws a radio dot instead of a checkmark for the active choice. */
+    ?radio:Bool,
     /** Draws a muted dash when the choice differs across a multi-selection. */
     ?mixed:Bool,
     /** Makes the row draggable into the viewport as this primitive asset. */
@@ -60,6 +64,7 @@ private class MenuLevel {
  */
 class MenuDropdown extends h2d.Object {
     static inline var ROW_HEIGHT:Int = 22;
+    static inline var SECTION_HEIGHT:Int = 21;
     static inline var SEPARATOR_HEIGHT:Int = 9;
     static inline var PADDING:Int = 3;
     static inline var MIN_WIDTH:Int = 168;
@@ -298,7 +303,7 @@ class MenuDropdown extends h2d.Object {
         var hasStates = hasSelectionState(items);
         var width:Float = MIN_WIDTH;
         for (item in items) {
-            if (item.separator) continue;
+            if (item.separator || item.section) continue;
             width = Math.max(width, measureLabel(item.label) + 44
                 + (hasStates ? STATE_GUTTER : 0));
         }
@@ -307,10 +312,14 @@ class MenuDropdown extends h2d.Object {
 
     function measureHeight(items:Array<MenuItem>):Float {
         var height = PADDING * 2;
-        for (item in items) {
-            height += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
-        }
+        for (item in items) height += menuRowHeight(item);
         return height;
+    }
+
+    static inline function menuRowHeight(item:MenuItem):Int {
+        if (item.separator) return SEPARATOR_HEIGHT;
+        if (item.section) return SECTION_HEIGHT;
+        return ROW_HEIGHT;
     }
 
     function maxViewHeight():Float {
@@ -388,9 +397,7 @@ class MenuDropdown extends h2d.Object {
             level.hasSearch ? level.searchQuery : activeQuery);
         var searchArea = level.hasSearch ? SEARCH_HEIGHT + PADDING : PADDING;
         var rowsSum = 0.0;
-        for (item in shown) {
-            rowsSum += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
-        }
+        for (item in shown) rowsSum += menuRowHeight(item);
         level.rowsHeight = PADDING * 2 + rowsSum;
         level.viewportHeight = Math.min(level.rowsHeight,
             Math.max(ROW_HEIGHT, level.viewHeightLimit - searchArea - PADDING));
@@ -417,7 +424,7 @@ class MenuDropdown extends h2d.Object {
         for (index in 0...shown.length) {
             var item = shown[index];
             var itemRowY = cursor;
-            cursor += item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
+            cursor += menuRowHeight(item);
             var row = new h2d.Object(level.rowMask);
             level.rows.push(row);
             row.y = itemRowY;
@@ -427,6 +434,15 @@ class MenuDropdown extends h2d.Object {
                 line.setStyle(Theme.BORDER, Theme.BORDER, 0, 0);
                 line.setSize(innerWidth, 1);
                 line.y = Math.floor(SEPARATOR_HEIGHT * 0.5);
+                continue;
+            }
+            if (item.section) {
+                var heading = new UiText(context.captionFont, row);
+                heading.text = item.label.toUpperCase();
+                heading.textColor = Theme.MUTED;
+                heading.lineBreak = false;
+                heading.x = 10 + (hasStates ? STATE_GUTTER : 0);
+                heading.y = Math.round((SECTION_HEIGHT - heading.textHeight) * 0.5);
                 continue;
             }
             var captured = item;
@@ -439,7 +455,7 @@ class MenuDropdown extends h2d.Object {
                 }
             };
             addRowContent(row, item, itemRowY, innerWidth, activate,
-                item.submenu != null, level, hasStates);
+                item.submenu != null, level, hasStates, item.radio == true);
         }
         positionLevel(level);
     }
@@ -463,7 +479,7 @@ class MenuDropdown extends h2d.Object {
 
     static function collectMatches(item:MenuItem, query:String,
             out:Array<MenuItem>):Void {
-        if (item.separator) return;
+        if (item.separator || item.section) return;
         if (item.submenu != null) {
             for (child in item.submenu) collectMatches(child, query, out);
         } else if (item.label.toLowerCase().indexOf(query) >= 0) {
@@ -510,7 +526,7 @@ class MenuDropdown extends h2d.Object {
 
     function addRowContent(row:h2d.Object, item:MenuItem, rowY:Float, width:Float,
             activate:Void->Void, hasSubmenu:Bool, level:MenuLevel,
-            showStates:Bool):Void {
+            showStates:Bool, radio:Bool):Void {
         // The wrapper is positioned at the row's Y; all content is relative.
         row.y = rowY;
         var selected = item.selected == true;
@@ -550,7 +566,7 @@ class MenuDropdown extends h2d.Object {
         if (item.dragMeshId != null && dropViewport != null && onDropPrimitive != null) {
             rowHit.cursor = hxd.Cursor.Move;
         }
-        if (showStates) drawStateMark(row, selected, item.mixed == true);
+        if (showStates) drawStateMark(row, selected, item.mixed == true, radio);
         var label = new UiText(context.font, row);
         label.text = item.label;
         label.lineBreak = false;
@@ -578,14 +594,22 @@ class MenuDropdown extends h2d.Object {
      * the current choice; `minus` marks a mixed multi-selection instead of a
      * bullet glued to one label.
      */
-    static function drawStateMark(row:h2d.Object, selected:Bool, mixed:Bool):Void {
+    static function drawStateMark(row:h2d.Object, selected:Bool, mixed:Bool,
+            radio:Bool):Void {
         if (!selected && !mixed) return;
         var mark = new h2d.Graphics(row);
         var size = 12;
         mark.x = 7;
         mark.y = Math.round((ROW_HEIGHT - size) * 0.5);
-        if (mixed) UiIcons.draw(mark, Minus, 0, 0, size, Theme.MUTED);
-        else UiIcons.draw(mark, Check, 0, 0, size, Theme.ACCENT_HOVER);
+        if (radio && !mixed) {
+            mark.beginFill(Theme.ACCENT_HOVER, 1);
+            mark.drawCircle(size * 0.5, size * 0.5, 3.5);
+            mark.endFill();
+        } else if (mixed) {
+            UiIcons.draw(mark, Minus, 0, 0, size, Theme.MUTED);
+        } else {
+            UiIcons.draw(mark, Check, 0, 0, size, Theme.ACCENT_HOVER);
+        }
     }
 
     function measureLabel(labelText:String):Float {

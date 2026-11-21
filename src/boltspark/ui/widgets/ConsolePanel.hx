@@ -2,7 +2,6 @@ package boltspark.ui.widgets;
 
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
-import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
 import boltspark.ui.widgets.MenuDropdown;
@@ -18,8 +17,6 @@ class ConsolePanel extends h2d.Object {
     final contentMask:h2d.Mask;
     final scrollHit:h2d.Interactive;
     final text:h2d.Text;
-    final title:h2d.Text;
-    final titleIcon:h2d.Graphics;
     final clearButton:UiButton;
     final scrollBar:ScrollBar;
     /** Full-panel catch for right-click context menu; left/hover pass through. */
@@ -39,15 +36,6 @@ class ConsolePanel extends h2d.Object {
         background = new h2d.Graphics(this);
         bodySurface = new UiSurface(ctx, this);
         bodySurface.setStyle(Theme.CONSOLE_BG, Theme.BORDER, 0);
-        titleIcon = new h2d.Graphics(this);
-        UiIcons.draw(titleIcon, Console, 0, 0, 15, Theme.TEXT_SECONDARY);
-        title = new UiText(ctx.semiboldFont, this);
-        title.text = "Output Log";
-        title.textColor = Theme.TEXT;
-        title.lineBreak = false;
-        title.x = 25;
-        title.y = 5;
-
         // Icon-only and narrow so it stays clear of the bottom-dock tabs.
         // Eraser reads as "clear the log" without the destructive trash-bin
         // connotation, and the framed style matches the other editor buttons.
@@ -136,16 +124,11 @@ class ConsolePanel extends h2d.Object {
         background.beginFill(Theme.PANEL_HEADER);
         background.drawRect(0, 0, safeW, 28);
         background.endFill();
-        background.beginFill(Theme.ACCENT);
-        background.drawRect(0, 0, Math.min(86, safeW), 2);
-        background.endFill();
         background.lineStyle(1, Theme.BORDER, 1);
         background.moveTo(0, 27.5);
         background.lineTo(safeW, 27.5);
         background.lineStyle();
 
-        titleIcon.x = 5;
-        titleIcon.y = 7;
         clearButton.x = Math.max(0, safeW - 30);
         clearButton.y = 4;
         bodySurface.x = 0;

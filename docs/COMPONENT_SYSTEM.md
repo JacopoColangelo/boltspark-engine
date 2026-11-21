@@ -47,7 +47,7 @@ var cube = PrimitiveGameObjects.createCube("Cube");
 // Transform
 // MeshRenderer
 //   Mesh     = Primitive Cube
-//   Material = Default Material
+//   Material = White Material
 ```
 
 Editor-session creation uses the same fresh component preset:
@@ -73,9 +73,9 @@ scene loading all preserve that type identity.
 Meshes and materials are **reusable asset references**, not scene objects:
 `PrimitiveMeshes.all()` lists the built-in Cube, Sphere, Cylinder, Capsule, and
 Plane assets (and any future imported static meshes registered with
-`PrimitiveMeshes.register()`), while `Material.all()` lists the built-in Default
-Material plus any registered materials. A new `MeshRenderer` automatically uses
-the Default Material when none is supplied. Each renderer owns its own
+`PrimitiveMeshes.register()`), while `Material.all()` lists the built-in White
+and Orange materials plus any registered materials. A new `MeshRenderer`
+automatically uses White Material when none is supplied. Each renderer owns its own
 `h3d.scene.MultiMaterial` (one Heaps material per slot); geometry is cached per
 (mesh asset id + `PrimitiveSettings`) pair, so multiple entities can share a
 mesh/material asset without sharing transforms or mutable renderer state.

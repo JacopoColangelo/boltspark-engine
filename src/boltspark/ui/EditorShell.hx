@@ -19,6 +19,7 @@ import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.layout.BoxLayout;
 import boltspark.ui.core.UiFrame;
 import boltspark.ui.windows.ApplicationWindowKind;
+import boltspark.ui.widgets.BottomDockTab;
 import boltspark.ui.widgets.ConsolePanel;
 import boltspark.ui.widgets.ComponentInspectorSection;
 import boltspark.ui.widgets.DockSplitter;
@@ -28,6 +29,7 @@ import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.AssetBrowser;
 import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
+import boltspark.ui.widgets.UiTooltip;
 import boltspark.project.ProjectSession.AssetDetails;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.widgets.NumericDragField;
@@ -44,6 +46,8 @@ import boltspark.ui.widgets.ViewportSnapBar;
  */
 class EditorShell {
     static inline var HIERARCHY_ROW_HEIGHT:Int = 22;
+    static inline var HIERARCHY_SORT_WIDTH:Int = 40;
+    static inline var HIERARCHY_SORT_ICON_WIDTH:Int = 26;
     static inline var INSPECTOR_ROW_HEIGHT:Int = 28;
 
     final ctx:UiContext;
@@ -68,6 +72,7 @@ class EditorShell {
     final hierarchyTitle:h2d.Text;
     final hierarchyCount:h2d.Text;
     final hierarchySearch:SearchField;
+    final hierarchySortButton:UiButton;
     final hierarchyHit:h2d.Interactive;
     final hierarchyRows:Array<HierarchyRow> = [];
     final allHierarchyEntries:Array<HierarchyEntry> = [];
@@ -158,8 +163,9 @@ class EditorShell {
     }
     final console:ConsolePanel;
     final bottomTabs:h2d.Object;
-    final logTab:UiButton;
-    final assetsTab:UiButton;
+    final logTab:BottomDockTab;
+    final assetsTab:BottomDockTab;
+    final bottomTabLine:h2d.Graphics;
     var activeBottomTab:Int = 0;
     final statusDot:h2d.Graphics;
     final statusText:h2d.Text;
@@ -173,6 +179,7 @@ class EditorShell {
     final layoutStore:DockLayoutStore;
     final palette:GameObjectPalette;
     final menuDropdown:MenuDropdown;
+    final tooltip:UiTooltip;
     final assetBrowser:AssetBrowser;
 
     /** Create a primitive in front of the viewport camera (Add menu click). */
@@ -297,6 +304,9 @@ class EditorShell {
     var firstVisibleHierarchyRow:Int = 0;
     var inspectorScrollValue:Float = 0;
     var hierarchyFilter:String = "";
+    /** Uses HierarchyOrder.AUTHORED / NAME / TYPE. */
+    var hierarchySortKey:Int = HierarchyOrder.AUTHORED;
+    var hierarchySortAsc:Bool = true;
     var hierarchyDragIds:Array<Int> = [];
     var hierarchyDropParentId:Int = -1;
     var hierarchyDropSiblingIndex:Int = 0;
@@ -564,6 +574,11 @@ class EditorShell {
         hierarchyCount.lineBreak = false;
         hierarchySearch = new SearchField(ctx, "Search Entities", 100, 24, leftContentMask);
         hierarchySearch.onChange = function(value) applyHierarchyFilter(value);
+        hierarchySortButton = new UiButton(ctx, "", HIERARCHY_SORT_WIDTH, 20, leftContentMask);
+        hierarchySortButton.setIcon(Sort);
+        hierarchySortButton.setIconSize(14);
+        hierarchySortButton.setDropdown();
+        hierarchySortButton.onClick = openHierarchySortMenu;
 
         hierarchyHit = new h2d.Interactive(1, 1, leftContentMask);
         hierarchyHit.backgroundColor = 0;
@@ -849,12 +864,11 @@ class EditorShell {
 
         // Bottom dock tabs: Asset Browser first, Output Log second.
         bottomTabs = new h2d.Object(root);
-        assetsTab = new UiButton(ctx, "Asset Browser", 108, 22, bottomTabs);
-        assetsTab.setQuiet();
-        assetsTab.onClick = showAssetBrowser;
-        logTab = new UiButton(ctx, "Output Log", 92, 22, bottomTabs);
-        logTab.setQuiet();
+        assetsTab = new BottomDockTab(ctx, "Asset Browser", Folder, 108, 22, bottomTabs);
+        assetsTab.onClick = function() setBottomTab(0);
+        logTab = new BottomDockTab(ctx, "Output Log", Console, 92, 22, bottomTabs);
         logTab.onClick = function() setBottomTab(1);
+        bottomTabLine = new h2d.Graphics(bottomTabs);
 
         statusDot = new h2d.Graphics(root);
         UiIcons.draw(statusDot, StatusDot, 0, 0, 6, Theme.SUCCESS);
@@ -1091,6 +1105,9 @@ class EditorShell {
         // the Asset Browser or palette reach the dismiss catch and close an
         // open menu instead of being consumed by dock interactives.
         menuDropdown = new MenuDropdown(ctx, root);
+        // Topmost shared tooltip for the hierarchy and Asset Browser.
+        tooltip = new UiTooltip(ctx, root);
+        assetBrowser.tooltip = tooltip;
 
         if (layoutError != null) log("layout: " + layoutError);
         selectionStatus.text = selectionStatusValue;
@@ -1376,18 +1393,25 @@ class EditorShell {
         dockLayout.bottomTab = index;
         console.visible = index == 1;
         assetBrowser.visible = index == 0;
+        updateBottomTabState();
         if (index == 0) assetBrowser.refresh();
         saveLayout();
+        Sys.println('[probe] bottom tab=${index == 0 ? "assets" : "log"}');
+    }
+
+    /** Frameless tabs: only the icon/text tint and a 2px accent rule mark active. */
+    function updateBottomTabState():Void {
+        assetsTab.setActive(activeBottomTab == 0);
+        logTab.setActive(activeBottomTab == 1);
+        var tab = activeBottomTab == 0 ? assetsTab : logTab;
+        bottomTabLine.clear();
+        bottomTabLine.beginFill(Theme.ACCENT);
+        bottomTabLine.drawRect(tab.x, 22, tab.width, 2);
+        bottomTabLine.endFill();
     }
 
     /** Refresh the docked Asset Browser after a project asset changes. */
     public function refreshAssetBrowser():Void {
-        assetBrowser.refresh();
-    }
-
-    /** Show the Asset Browser bottom tab and rebuild its listing. */
-    function showAssetBrowser():Void {
-        setBottomTab(0);
         assetBrowser.refresh();
     }
 
@@ -1412,6 +1436,7 @@ class EditorShell {
     }
 
     public function update(dt:Float):Void {
+        tooltip.update(dt);
         if (ctx.width != lastWidth || ctx.height != lastHeight) resize();
         if (hierarchyAssetDragActive) {
             updateHierarchyAssetDropFeedback(ctx.window.mouseX, ctx.window.mouseY);
@@ -1486,8 +1511,8 @@ class EditorShell {
         // instead of spilling over the neighbouring panel.
         var tabSpace = Math.max(0, geometry.console.width);
         var tabGap = 2.0;
-        var naturalAssets = 108.0;
-        var naturalLog = 92.0;
+        var naturalAssets = assetsTab.naturalWidth;
+        var naturalLog = logTab.naturalWidth;
         var tabScale = tabSpace >= naturalAssets + naturalLog + tabGap ? 1.0
             : Math.max(0, (tabSpace - tabGap) / (naturalAssets + naturalLog));
         var assetsTabWidth = Math.max(14, Math.round(naturalAssets * tabScale));
@@ -1505,6 +1530,7 @@ class EditorShell {
         logTab.x = assetsTabWidth + tabGap;
         logTab.y = 0;
         logTab.setWidth(logTabWidth);
+        updateBottomTabState();
         var contentY = geometry.console.y + tabHeight;
         var contentHeight = Math.max(0, geometry.console.height - tabHeight);
         console.x = geometry.console.x;
@@ -1658,7 +1684,13 @@ class EditorShell {
         hierarchyCount.text = hierarchyFilter.length == 0
             ? Std.string(allHierarchyEntries.length)
             : visibleHierarchyEntries.length + "/" + allHierarchyEntries.length;
-        hierarchyCount.x = Math.max(42, leftWidth - hierarchyCount.textWidth - 9);
+        refreshHierarchySortButton(leftWidth);
+        hierarchySortButton.x = Math.max(29, leftWidth - hierarchySortButton.width - 9);
+        hierarchySortButton.y = bodyTop + 4;
+        hierarchyCount.x = Math.max(42,
+            hierarchySortButton.x - hierarchyCount.textWidth - 8);
+        hierarchyCount.visible = hierarchyCount.x > hierarchyTitle.x
+            + hierarchyTitle.textWidth + 2;
         hierarchyCount.y = bodyTop + 8;
 
         hierarchySearch.x = 8;
@@ -1805,6 +1837,57 @@ class EditorShell {
         rebuildFilteredHierarchy();
     }
 
+    function refreshHierarchySortButton(leftWidth:Float):Void {
+        var compact = leftWidth < 225;
+        // A 26px button has no room for the chevron without overlapping the icon.
+        hierarchySortButton.setDropdown(!compact);
+        hierarchySortButton.setWidth(compact
+            ? HIERARCHY_SORT_ICON_WIDTH : HIERARCHY_SORT_WIDTH);
+        // Icon-only dropdowns stay quiet at Tree order and light up when sorted.
+        hierarchySortButton.setSelected(hierarchySortKey != HierarchyOrder.AUTHORED);
+    }
+
+    function openHierarchySortMenu():Void {
+        var items:Array<MenuItem> = [{label: "Sort By", section: true}];
+        var choices = [
+            {key: HierarchyOrder.AUTHORED, label: "Tree"},
+            {key: HierarchyOrder.NAME, label: "Name"},
+            {key: HierarchyOrder.TYPE, label: "Type"}
+        ];
+        for (choice in choices) {
+            var captured = choice.key;
+            items.push({
+                label: choice.label,
+                selected: hierarchySortKey == captured,
+                radio: true,
+                onClick: function() {
+                    hierarchySortKey = captured;
+                    refreshHierarchySortButton(leftContentMask.width);
+                    rebuildFilteredHierarchy();
+                }
+            });
+        }
+        items.push({label: "", separator: true});
+        items.push({label: "Sort Direction", section: true});
+        var directions = [{label: "Ascending", ascending: true},
+            {label: "Descending", ascending: false}];
+        for (direction in directions) {
+            var capturedAsc = direction.ascending;
+            items.push({
+                label: direction.label,
+                selected: hierarchySortAsc == capturedAsc,
+                radio: true,
+                onClick: function() {
+                    if (hierarchySortAsc == capturedAsc) return;
+                    hierarchySortAsc = capturedAsc;
+                    refreshHierarchySortButton(leftContentMask.width);
+                    rebuildFilteredHierarchy();
+                }
+            });
+        }
+        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
+    }
+
     function rebuildFilteredHierarchy():Void {
         visibleHierarchyEntries.resize(0);
         var byId:Map<Int, HierarchyEntry> = [];
@@ -1822,7 +1905,8 @@ class EditorShell {
                 }
             }
         }
-        for (entry in allHierarchyEntries) {
+        for (entry in HierarchyOrder.order(allHierarchyEntries,
+                hierarchySortKey, hierarchySortAsc)) {
             // Search must still respect fold state: a match under a collapsed
             // parent stays hidden, and toggling that parent's chevron really
             // collapses/expands it instead of only swapping the glyph.
@@ -1844,6 +1928,14 @@ class EditorShell {
                 row = hierarchyRows[index];
             } else {
                 row = new HierarchyRow(ctx, entry.id, entry.name, leftContentMask);
+                row.onHover = function(id, hovering) {
+                    if (hovering) {
+                        tooltip.schedule(hierarchyObjectPath(id),
+                            ctx.window.mouseX, ctx.window.mouseY);
+                    } else {
+                        tooltip.cancel();
+                    }
+                };
                 row.onSelect = selectHierarchyRow;
                 row.onWheel = function(delta) scrollHierarchy(delta);
                 row.onToggle = toggleHierarchyEntry;
@@ -1861,6 +1953,19 @@ class EditorShell {
         }
         clearHierarchyDropFeedback();
         resize();
+    }
+
+    /** Slash-separated scene path used by the hierarchy hover tooltip. */
+    function hierarchyObjectPath(id:Int):String {
+        var byId:Map<Int, HierarchyEntry> = [];
+        for (entry in allHierarchyEntries) byId.set(entry.id, entry);
+        var names:Array<String> = [];
+        var current = byId.get(id);
+        while (current != null) {
+            names.unshift(current.name);
+            current = current.parentId < 0 ? null : byId.get(current.parentId);
+        }
+        return names.length == 0 ? "" : "/" + names.join("/");
     }
 
     function ancestorsExpanded(entry:HierarchyEntry,
@@ -2093,6 +2198,7 @@ class EditorShell {
     }
 
     function selectHierarchyRow(id:Int, control:Bool, shift:Bool):Void {
+        tooltip.cancel();
         var clickedIndex = -1;
         for (index in 0...hierarchyRows.length) {
             if (hierarchyRows[index].objectId == id) {
@@ -2229,15 +2335,27 @@ class EditorShell {
         targetRow.setDropFeedback(hierarchyDropMode, true);
     }
 
+    inline function hierarchyReorderEnabled():Bool {
+        return hierarchySortKey == HierarchyOrder.AUTHORED;
+    }
+
     function beginHierarchyDrag(sourceId:Int):Void {
         closePaletteIfOpen();
+        hierarchyDragIds.resize(0);
+        clearHierarchyDropFeedback();
+        if (!hierarchyReorderEnabled()) {
+            // A sorted view is display-only: dropping would target authored
+            // sibling indices and move rows somewhere unexpected.
+            log("hierarchy: switch to Tree order to reorder objects");
+            return;
+        }
         hierarchyDragIds = selectedObjectIds.indexOf(sourceId) >= 0
             ? selectedObjectIds.copy() : [sourceId];
-        clearHierarchyDropFeedback();
     }
 
     function updateHierarchyDrag(sourceId:Int, mouseX:Float, mouseY:Float):Void {
         clearHierarchyDropFeedback();
+        if (!hierarchyReorderEnabled()) return;
         if (hierarchyDragIds.length == 0) hierarchyDragIds = [sourceId];
         if (mouseX < hierarchyHit.x || mouseX > hierarchyHit.x + hierarchyHit.width
                 || mouseY < hierarchyHit.y
@@ -2310,6 +2428,11 @@ class EditorShell {
     }
 
     function finishHierarchyDrag(sourceId:Int, mouseX:Float, mouseY:Float):Void {
+        if (!hierarchyReorderEnabled()) {
+            hierarchyDragIds.resize(0);
+            clearHierarchyDropFeedback();
+            return;
+        }
         updateHierarchyDrag(sourceId, mouseX, mouseY);
         if (hierarchyDropValid && onHierarchyDrop != null) {
             // Default behavior matches Unity/Unreal: preserve world. Holding
@@ -2610,6 +2733,7 @@ class EditorShell {
     }
 
     function closePaletteIfOpen():Void {
+        tooltip.cancel();
         if (palette.visible) palette.close();
         snapBar.closePopup();
         menuDropdown.close();

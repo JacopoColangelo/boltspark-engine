@@ -37,8 +37,9 @@ recreating Unreal/Unity asset infrastructure.
   also first-class items in the main panel, alongside assets. There is
   deliberately no per-asset inspector panel; metadata is in the detail list.
 - Responsive toolbar: back / forward / parent, breadcrumb, live search, separate
-  labeled **Filter** and **Sort** buttons (each with its own short menu, so
-  neither becomes a catch-all as options grow), a Settings popover that holds
+  icon-only **Filter** and **Sort** dropdowns (each with its own short menu, so
+  neither becomes a catch-all as options grow; either button lights up when its
+  choice differs from the default), a Settings popover that holds
   both the grid / compact-list / detail-list view switcher and the shared
   `UiSlider` (thin rail, teal fill, tiny rectangular handle, value in an inset
   field), and the original Add menu. The inert Refresh button was removed;
@@ -54,8 +55,11 @@ recreating Unreal/Unity asset infrastructure.
 - Wheel scrolling works over tiles, empty space, and the scrollbar. hldx reports
   a physical wheel-down as a positive delta after `hxd.Window` negation, so the
   handler adds it to the scroll position; the native probe verifies direction.
-- Hover tooltips were removed as noise. A plain click never shows the floating
-  drag label — it only appears once the pointer moves past the drag threshold.
+- Hovering a card or row for about half a second shows a tooltip with the item's
+  name and project-relative path (folders show their folder path). Hover uses a
+  lighter surface; a single click switches to the same teal selection highlight
+  used by the Scene Hierarchy. A plain click never shows the floating drag label
+  — it only appears once the pointer moves past the drag threshold.
 - The hierarchy pane has a draggable splitter, and its width persists alongside
   the view preferences. Child folders and assets use a fixed chevron gutter and
   a depth-based indent so nested items are always visibly deeper than parents.
@@ -109,8 +113,8 @@ recreating Unreal/Unity asset infrastructure.
   `PrimitiveThumbnails` reuses that tile in grid tiles, compact/detail rows,
   the folder tree, and the framed Inspector slot, so the size slider stays
   crisp at every step. Primitives are framed tightly with soft top-right
-  studio lighting on a transparent background; the Default Material is shown
-  as an orange sphere through the same path.
+  studio lighting on a transparent background; White Material and Orange Material each have their own
+  zoomed-in sphere preview through the same path.
 - Dragging an engine asset out of the browser starts a typed drag session. Mesh
   assets only drop onto the Mesh slot of a MeshRenderer Inspector and material
   assets only onto its Material slot. The picker is a framed slot: a compatible

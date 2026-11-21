@@ -8,6 +8,7 @@ import boltspark.editor.EditorObject;
 import boltspark.editor.EditorSession;
 import boltspark.editor.EditorTransform;
 import boltspark.editor.Keybindings;
+import boltspark.editor.MeshPicking;
 import boltspark.editor.MultiInspectorData;
 import boltspark.editor.RotationEuler;
 import boltspark.editor.ScalePolicy;
@@ -2403,9 +2404,7 @@ class Main extends hxd.App {
         var nearestObject:Null<SceneObject> = null;
         for (sceneObject in sceneObjects) {
             for (renderMesh in sceneObject.allRenderMeshes()) {
-                var collider = renderMesh.getGlobalCollider();
-                if (collider == null) continue;
-                var distance = collider.rayIntersection(ray, true);
+                var distance = MeshPicking.rayIntersection(renderMesh, ray);
                 if (distance >= 0 && distance < nearestDistance) {
                     nearestDistance = distance;
                     nearestObject = sceneObject;
@@ -2777,7 +2776,7 @@ class Main extends hxd.App {
                 object.persistentId, parentId,
                 depth, object.children.length > 0,
                 Mesh3D.is(object),
-                object.children.length, siblingIndex,
+                object.children.length, siblingIndex, object.objectType,
                 object.visible, object.enabled));
         }
         boltUI.setHierarchyEntries(entries);

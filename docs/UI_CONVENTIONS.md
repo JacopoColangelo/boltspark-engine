@@ -69,7 +69,9 @@ should follow them instead of inventing local variants.
 
 ## Interaction
 
-- No hover tooltips in dense panels; labels and icons must be self-explanatory.
+- Dense panels use delayed hover tooltips (about half a second) for paths and
+  identity; labels and icons still have to read on their own without the delay.
+- Hover highlighting stays visually distinct from selection highlighting.
 - A plain click never starts a drag; the drag ghost appears only after the
   pointer moves past the drag threshold.
 - Desktop editor controls keep the arrow cursor and avoid hand/zoom cursors.

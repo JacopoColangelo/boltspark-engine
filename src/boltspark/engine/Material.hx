@@ -2,7 +2,9 @@ package boltspark.engine;
 
 /** Lightweight assignable material definition applied to Heaps materials. */
 class Material {
-    public static inline var DEFAULT_ID:String = "default";
+    /** Built-in ids follow the same `family:name` style as primitive meshes. */
+    public static inline var DEFAULT_ID:String = "material:white";
+    public static inline var ORANGE_ID:String = "material:orange";
 
     public final id:String;
     public final name:String;
@@ -13,6 +15,7 @@ class Material {
     public var culling:MaterialCulling;
 
     static var sharedDefault:Null<Material>;
+    static var sharedOrange:Null<Material>;
     static var registered:Array<Material> = [];
 
     public function new(id:String, name:String, color:Int = 0xFFFFFF,
@@ -34,25 +37,34 @@ class Material {
         this.culling = culling;
     }
 
-    /** Existing orange editor appearance, now represented as an asset. */
+    /** Neutral white default assigned to newly created primitives. */
     public static function defaultMaterial():Material {
         if (sharedDefault == null) {
-            sharedDefault = new Material(DEFAULT_ID, "Default Material",
-                0xE58A3A, false, 0.18, 24, Back);
+            sharedDefault = new Material(DEFAULT_ID, "White Material",
+                0xFFFFFF, false, 0.18, 24, Back);
         }
         return sharedDefault;
     }
 
+    /** The original orange editor appearance, kept as a selectable asset. */
+    public static function orangeMaterial():Material {
+        if (sharedOrange == null) {
+            sharedOrange = new Material(ORANGE_ID, "Orange Material",
+                0xE58A3A, false, 0.18, 24, Back);
+        }
+        return sharedOrange;
+    }
+
     /**
-     * Register an additional reusable material asset. The Default Material is
-     * always available and is returned first by `all()`.
+     * Register an additional reusable material asset. Both built-ins are
+     * always available and returned first by `all()`.
      */
     public static function register(material:Material):Void {
         if (material == null || material.id == null
                 || StringTools.trim(material.id).length == 0) {
             throw "Material registration requires a material with an ID";
         }
-        if (material.id == DEFAULT_ID) return;
+        if (material.id == DEFAULT_ID || material.id == ORANGE_ID) return;
         for (existing in registered) {
             if (existing.id == material.id) {
                 throw 'Duplicate material id ${material.id}';
@@ -63,19 +75,27 @@ class Material {
 
     /** Stable asset list for type-aware Inspector pickers. */
     public static function all():Array<Material> {
-        var result = [defaultMaterial()];
+        var result = [defaultMaterial(), orangeMaterial()];
         for (material in registered) {
-            if (material.id != DEFAULT_ID) result.push(material);
+            if (material.id != DEFAULT_ID && material.id != ORANGE_ID) {
+                result.push(material);
+            }
         }
         return result;
     }
 
     public static function find(id:String):Null<Material> {
-        if (id == DEFAULT_ID || id == "Default Material") return defaultMaterial();
+        if (id == null) return null;
+        // Legacy scene/manifest ids keep resolving to the new default so old
+        // projects do not lose their material reference.
+        if (id == DEFAULT_ID || id == "default" || id == "White Material"
+            || id == "Default Material") {
+            return defaultMaterial();
+        }
+        if (id == ORANGE_ID || id == "Orange Material") return orangeMaterial();
         for (material in registered) {
             if (material.id == id) return material;
         }
         return null;
     }
-
 }

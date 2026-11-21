@@ -299,6 +299,12 @@ class ProjectSession {
 
     /** Metadata for one asset, fetched on demand by the inspector. */
     public function assetDetails(source:String):AssetDetails {
+        // Engine assets are virtual (`engine://...`) and have no file on disk.
+        // Detail/table views still ask for their metadata, so answer with
+        // placeholder size/date rather than routing them through path rules.
+        if (StringTools.startsWith(source, EngineAssetCatalog.SOURCE_PREFIX)) {
+            return engineAssetDetails(source);
+        }
         var normalized = ProjectPath.normalizeRelative(source);
         var info = AssetTypeRegistry.infoFor(new Path(normalized).file);
         var rawExtension = new Path(normalized).ext;
@@ -326,6 +332,30 @@ class ProjectSession {
             absolutePath: absolute,
             size: size,
             modified: modified
+        };
+    }
+
+    function engineAssetDetails(source:String):AssetDetails {
+        var name = source;
+        for (entry in EngineAssetCatalog.all()) {
+            if (entry.source == source) {
+                name = entry.name;
+                break;
+            }
+        }
+        return {
+            source: source,
+            name: name,
+            folder: EngineAssetCatalog.FOLDER,
+            kind: AssetTypeRegistry.KIND_ENGINE,
+            kindLabel: AssetTypeRegistry.ENGINE_INFO_LABEL,
+            extension: "",
+            loadable: true,
+            registered: false,
+            active: false,
+            absolutePath: "",
+            size: -1,
+            modified: -1.0
         };
     }
 

@@ -2,6 +2,8 @@ import boltspark.editor.EditorObject;
 import boltspark.editor.EditorSession;
 import boltspark.engine.MeshRenderer;
 import boltspark.engine.PrimitiveGameObjects;
+import boltspark.engine.inspector.AssetType;
+import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectSession;
 import haxe.io.Path;
 
@@ -26,6 +28,16 @@ class ProjectSessionRepro {
         untitled.captureScene(sourceSession);
         assertTrue(!untitled.dirty, "untitled capture starts clean");
         assertTrue(untitled.projectPath == "", "untitled manifest path is empty");
+
+        // Detail/table views ask for metadata on every row, including virtual
+        // engine assets, which must not be routed through relative-path checks.
+        var engineSource = EngineAssetCatalog.sourceFor(AssetType.MeshAsset, "capsule");
+        var engineDetails = untitled.assetDetails(engineSource);
+        assertTrue(engineDetails.source == engineSource, "engine detail source changed");
+        assertTrue(engineDetails.size == -1 && engineDetails.modified < 0,
+            "virtual engine asset reported filesystem metadata");
+        assertTrue(engineDetails.absolutePath == "",
+            "virtual engine asset resolved a disk path");
 
         // Save As persists the current editor graph; New Project starts empty.
         untitled.saveAs(projectPath, sourceSession);

@@ -20,6 +20,8 @@ class HierarchyRow extends h2d.Object {
     public var depth(default, null):Int = 0;
     public var hasChildren(default, null):Bool = false;
     public var onWheel:Null<Float->Void>;
+    /** `hovering` is true on enter and false on leave; used for path tooltips. */
+    public var onHover:Null<Int->Bool->Void>;
     public var onSelect:Null<Int->Bool->Bool->Void>;
     public var onToggle:Null<Int->Void>;
     public var onToggleVisibility:Null<Int->Void>;
@@ -74,10 +76,12 @@ class HierarchyRow extends h2d.Object {
         background.onOver = function(_) {
             hovered = true;
             updateStyle();
+            if (onHover != null) onHover(objectId, true);
         };
         background.onOut = function(_) {
             hovered = false;
             updateStyle();
+            if (onHover != null) onHover(objectId, false);
         };
         background.onPush = beginPointerInteraction;
         background.onWheel = function(event) {
@@ -370,19 +374,18 @@ class HierarchyRow extends h2d.Object {
     function updateStyle():Void {
         surface.visible = selected || hovered;
         if (selected) {
-            surface.setStyle(Theme.ACCENT_MUTED, Theme.ACCENT_MUTED, 0, 0);
+            // Click selection uses the same green frame as Asset Browser cards;
+            // hovering a selected row brightens the fill to keep the two apart.
+            surface.setStyle(hovered ? 0x356B5C : Theme.ACCENT_MUTED,
+                Theme.ACCENT, 0, 0);
         } else if (hovered) {
-            surface.setStyle(Theme.SURFACE_2, Theme.SURFACE_2, 0, 0);
+            surface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0, 0);
         }
         label.textColor = !visibleFlag || !enabledFlag
             ? Theme.DISABLED
-            : selected ? 0xF3F7FF : Theme.TEXT;
+            : (selected || hovered) ? 0xF3F7FF : Theme.TEXT;
+        // The surface border carries both states; no separate left bar.
         selectionEdge.clear();
-        if (selected) {
-            selectionEdge.beginFill(Theme.ACCENT);
-            selectionEdge.drawRect(0, 0, 2, background.height);
-            selectionEdge.endFill();
-        }
     }
 
     function fitLabel(maxWidth:Float):Void {

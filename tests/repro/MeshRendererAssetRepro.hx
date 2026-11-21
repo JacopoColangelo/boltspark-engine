@@ -75,6 +75,18 @@ class MeshRendererAssetRepro {
             if (material == defaultMaterial) found = true;
         }
         assertTrue(found, "default material missing from catalog");
+        assertTrue(defaultMaterial.name == "White Material"
+            && defaultMaterial.color == 0xFFFFFF,
+            "default material should be neutral white");
+        var orange = Material.orangeMaterial();
+        assertTrue(orange.name == "Orange Material" && orange.color == 0xE58A3A
+            && orange != defaultMaterial, "legacy orange material was lost");
+        assertTrue(Material.find(Material.ORANGE_ID) == orange
+            && Material.find("default") == defaultMaterial,
+            "material ids or legacy aliases no longer resolve");
+        var hasOrange = false;
+        for (material in Material.all()) if (material == orange) hasOrange = true;
+        assertTrue(hasOrange, "orange material missing from picker catalog");
     }
 
     /**
@@ -126,7 +138,7 @@ class MeshRendererAssetRepro {
             && materialProperty.assetType == AssetType.MaterialAsset,
             "asset properties lost their type-aware identity");
         assertTrue(meshProperty.textValue == "Cube"
-            && materialProperty.textValue == "Default Material",
+            && materialProperty.textValue == "White Material",
             "asset labels did not carry the current value");
         assertTrue(hasOption(meshProperty, "") && hasOption(meshProperty, PrimitiveMeshes.CUBE_ID)
             && hasOption(meshProperty, PrimitiveMeshes.SPHERE_ID),

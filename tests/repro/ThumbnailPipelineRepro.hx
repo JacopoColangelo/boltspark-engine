@@ -14,8 +14,22 @@ class ThumbnailPipelineRepro {
         testNoDarkHalos();
         testBundleRoundTrip();
         testBundleValidation();
+        testSphereFraming();
         Sys.println("[thumbnail-pipeline] mip chain, halo-free filtering, "
-            + "bundle round-trip and validation passed");
+            + "bundle round-trip, validation and sphere framing passed");
+    }
+
+    static function testSphereFraming():Void {
+        // A radius-0.5 sphere has an AABB bounding radius of sqrt(3)/2; the
+        // zoomed frame must bring it close to the box forms.
+        var boundsRadius = Math.sqrt(3) * 0.5;
+        var boxDistance = ThumbnailBaker.frameDistance(boundsRadius, 1.0);
+        var sphereDistance = ThumbnailBaker.frameDistance(boundsRadius,
+            ThumbnailBaker.SPHERE_FRAME_SCALE);
+        assertTrue(sphereDistance < boxDistance * 0.7,
+            "sphere and material previews were not zoomed in");
+        assertTrue(sphereDistance > boxDistance * 0.5,
+            "sphere framing zoomed in too far");
     }
 
     static function testChainSizes():Void {

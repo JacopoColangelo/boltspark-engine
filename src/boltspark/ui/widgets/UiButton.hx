@@ -17,6 +17,7 @@ class UiButton extends h2d.Object {
     final surface:UiSurface;
     final hit:h2d.Interactive;
     final icon:h2d.Graphics;
+    final chevron:h2d.Graphics;
     final label:h2d.Text;
     var fullText:String;
     var widthValue:Float;
@@ -28,6 +29,7 @@ class UiButton extends h2d.Object {
     var danger:Bool = false;
     var quiet:Bool = false;
     var selected:Bool = false;
+    var dropdown:Bool = false;
     /** Optional fixed icon size. Toolbars with short controls use this to keep
      *  icons legible instead of shrinking them to `height - 10`. */
     var iconSizeOverride:Int = 0;
@@ -69,6 +71,7 @@ class UiButton extends h2d.Object {
         };
 
         icon = new h2d.Graphics(this);
+        chevron = new h2d.Graphics(this);
         label = new UiText(ctx.semiboldFont, this);
         label.textColor = Theme.TEXT;
         label.lineBreak = false;
@@ -121,6 +124,13 @@ class UiButton extends h2d.Object {
         return this;
     }
 
+    /** Reserve room for a small chevron so an icon-only button reads as a menu. */
+    public function setDropdown(value:Bool = true):UiButton {
+        dropdown = value;
+        redraw();
+        return this;
+    }
+
     /** Set text and re-center; long values are elided. */
     public function setText(text:String):Void {
         fullText = text;
@@ -143,9 +153,13 @@ class UiButton extends h2d.Object {
         var iconSize = iconKind == None ? 0.0 : iconSize();
         var gap = iconSize > 0 && label.text.length > 0 ? 7.0 : 0.0;
         var contentWidth = iconSize + gap + label.textWidth;
-        var contentX = Math.round(Math.max(0, (widthValue - contentWidth) * 0.5));
+        var reserved = dropdown ? 16.0 : 0.0;
+        var contentX = Math.round(Math.max(0,
+            (widthValue - reserved - contentWidth) * 0.5));
         icon.x = contentX;
         icon.y = Math.max(0, Math.round((heightValue - iconSize) * 0.5));
+        chevron.x = Math.round(widthValue - 14);
+        chevron.y = Math.round((heightValue - 8) * 0.5);
         label.x = contentX + iconSize + gap;
         label.y = Math.max(0, Math.round((heightValue - label.textHeight) * 0.5 - 0.5));
     }
@@ -191,6 +205,8 @@ class UiButton extends h2d.Object {
         surface.setStyle(fill, border, 0);
         label.textColor = textColor;
         redrawIcon(textColor);
+        chevron.clear();
+        if (dropdown) UiIcons.draw(chevron, ChevronDown, 0, 0, 8, textColor);
     }
 
     function redrawIcon(?color:Int):Void {

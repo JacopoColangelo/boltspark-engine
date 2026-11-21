@@ -1,6 +1,7 @@
 package boltspark.thumbnails;
 
 import boltspark.editor.HeapsMeshFactory;
+import boltspark.engine.Material;
 import boltspark.engine.Mesh;
 import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.PrimitiveSettings;
@@ -48,8 +49,12 @@ class ThumbnailBaker {
     public static inline var BUNDLE_MAGIC:Int = 0x424D5342;
     public static inline var BUNDLE_VERSION:Int = 1;
 
-    /** Mirrors boltspark.ui.Theme.CUBE_ORANGE, the default material swatch. */
-    public static inline var DEFAULT_MATERIAL_COLOR:Int = 0xE58A3A;
+    /**
+     * `Bounds.toSphere()` fits half the AABB diagonal, which overstates a true
+     * sphere's radius by sqrt(3). Sphere previews (including material swatches)
+     * were framed ~1.73x too far away, so pull the camera in to match the boxes.
+     */
+    public static inline var SPHERE_FRAME_SCALE:Float = 0.60;
 
     static final SRGB_TO_LINEAR:haxe.ds.Vector<Float> = buildSrgbToLinear();
     static final LINEAR_TO_SRGB:haxe.ds.Vector<Int> = buildLinearToSrgb();
@@ -67,14 +72,20 @@ class ThumbnailBaker {
     }
 
     /**
-     * Bake the default-material preview. It is a sphere rendered with the same
-     * transparent offscreen path as the primitives, so the material card no
-     * longer shows an opaque rectangle against the dark editor background.
+     * Bake one material swatch. Each built-in material gets its own sphere and
+     * bundle so the white default and the orange legacy material are distinct
+     * in the Asset Browser.
      */
-    public static function bakeDefaultMaterial(?outputDirectory:String):String {
-        var path = bakeMeshTinted(PrimitiveMeshes.sphere(),
-            DEFAULT_MATERIAL_COLOR, outputDirectory, "material");
-        return path;
+    public static function bakeMaterial(material:Material,
+            ?outputDirectory:String):String {
+        if (material == null) throw "ThumbnailBaker.bakeMaterial requires a Material";
+        return bakeMeshTinted(PrimitiveMeshes.sphere(), material.color,
+            outputDirectory, materialBundleName(material.id));
+    }
+
+    /** Bundle stem for a material id, e.g. `material:white` -> `material_white`. */
+    public static inline function materialBundleName(id:String):String {
+        return StringTools.replace(id, ":", "_");
     }
 
     static function bakeMeshTinted(mesh:Mesh, tint:Null<Int>,
@@ -86,7 +97,7 @@ class ThumbnailBaker {
         var baseName = fileNameBase == null ? bundleResourceName(mesh.id) : fileNameBase;
         var fileName = baseName + ".bundle";
         var path = haxe.io.Path.join([directory, fileName]);
-        serialize(fileNameBase == null ? mesh.id : "material", mips, path);
+        serialize(fileNameBase == null ? mesh.id : fileNameBase, mips, path);
         return path;
     }
 
@@ -102,7 +113,9 @@ class ThumbnailBaker {
         ]) {
             report.push(id + " -> " + bakeMesh(PrimitiveMeshes.find(id), outputDirectory));
         }
-        report.push("material -> " + bakeDefaultMaterial(outputDirectory));
+        for (material in Material.all()) {
+            report.push(material.id + " -> " + bakeMaterial(material, outputDirectory));
+        }
         return report;
     }
 
@@ -217,7 +230,8 @@ class ThumbnailBaker {
         sceneMesh.material.specularAmount = 0.08;
         // Vector4.setColor reads alpha from the high byte, so force opaque.
         if (tint != null) sceneMesh.material.color.setColor(tint | 0xFF000000);
-        frameCamera(scene.camera, sceneMesh.getBounds());
+        var frameScale = mesh.primitiveId == "sphere" ? SPHERE_FRAME_SCALE : 1.0;
+        frameCamera(scene.camera, sceneMesh.getBounds(), frameScale);
 
         var sceneTarget = new Texture(RESOLUTION, RESOLUTION, [TextureFlags.Target]);
         sceneTarget.setName("thumbnailSceneTarget");
@@ -306,12 +320,19 @@ class ThumbnailBaker {
         bounceC.color.set(0.09, 0.09, 0.10);
     }
 
+    /** Pure framing math so the sphere zoom can be checked without a GPU. */
+    public static inline function frameDistance(boundsRadius:Float,
+            distanceScale:Float = 1.0):Float {
+        return boundsRadius / Math.sin(30 * Math.PI / 180 * 0.5)
+            * 1.05 * distanceScale;
+    }
+
     /** Fit a perspective camera around the mesh's absolute bounds. */
-    static function frameCamera(camera:h3d.Camera, bounds:h3d.col.Bounds):Void {
+    static function frameCamera(camera:h3d.Camera, bounds:h3d.col.Bounds,
+            distanceScale:Float = 1.0):Void {
         var sphere = bounds.toSphere();
         var radius = Math.max(0.001, sphere.r);
-        var fovY = 30 * Math.PI / 180;
-        var distance = radius / Math.sin(fovY * 0.5) * 1.05;
+        var distance = frameDistance(radius, distanceScale);
         var direction = new h3d.Vector(1.0, 0.62, 1.25).normalized();
 
         camera.fovY = 30;

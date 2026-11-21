@@ -79,7 +79,7 @@ class ComponentSystemRepro {
             "cube is not composed from Transform + MeshRenderer");
         assertTrue(renderer.mesh != null
                 && renderer.mesh.name == "Cube"
-                && renderer.material.name == "Default Material",
+                && renderer.material.name == "White Material",
             "cube primitive mesh/default material assignment changed");
         var transformInspector = cube.transform.inspectorData(0);
         var rendererInspector = renderer.inspectorData(1);
@@ -88,7 +88,7 @@ class ComponentSystemRepro {
                 && rendererInspector.title == "MeshRenderer"
                 && rendererInspector.properties.length == 5
                 && rendererInspector.properties[0].textValue == "Cube"
-                && rendererInspector.properties[1].textValue == "Default Material",
+                && rendererInspector.properties[1].textValue == "White Material",
             "component-owned Inspector property definitions changed");
         // Cube geometry parameters follow the two asset rows.
         for (index in 2...5) {

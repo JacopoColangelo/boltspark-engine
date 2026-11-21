@@ -2,6 +2,7 @@ package boltspark.ui;
 
 import boltspark.engine.Material;
 import boltspark.engine.PrimitiveMeshes;
+import boltspark.thumbnails.ThumbnailBaker;
 import boltspark.thumbnails.ThumbnailLoader;
 import boltspark.ui.UiIcons;
 
@@ -57,7 +58,10 @@ class PrimitiveThumbnails {
             case PrimitiveMeshes.CYLINDER_ID: "cylinder";
             case PrimitiveMeshes.CAPSULE_ID: "capsule";
             case PrimitiveMeshes.PLANE_ID: "plane";
-            default: Material.find(assetId) != null ? "material" : null;
+            default: {
+                var material = Material.find(assetId);
+                material == null ? null : ThumbnailBaker.materialBundleName(material.id);
+            }
         };
         if (resourceName == null) return null;
 
