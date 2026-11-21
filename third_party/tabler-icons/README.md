@@ -13,7 +13,7 @@ BoltUI uses selected icons from **Tabler Icons v3.52.0**, released on
 - Scene thumbnail SHA-256: `BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722682CC8AD6B0C2`
 - Folder thumbnail mask: `src/res/icons/folder_thumb.png` (`outline/folder`, 64px)
 - Folder thumbnail SHA-256: `4BC891ECED4A5B17AA991C3CC82A6D1FF72D6D775534CAE4BEAB515013AB2A3A`
-- Regeneration: `tools/generate-tabler-icons.ps1`
+- Regeneration: `tools/assets/generate-tabler-icons.ps1`
 
 The generator downloads the official 240px PNG render of each pinned SVG and
 creates dedicated 6–16px alpha-mask rasters. It also renders `outline/photo`

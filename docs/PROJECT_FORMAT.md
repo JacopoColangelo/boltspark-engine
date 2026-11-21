@@ -114,5 +114,5 @@ when the active one is removed, and refuses to remove the last scene. Both keep
 `DocumentStore.read` strips a UTF-8 BOM before decoding, so manifests and scenes
 edited by common Windows text editors still load. A `.boltproject` path passed
 as the editor's command-line argument (or `--project=…`) opens at startup; the
-opt-in `tools/register-project-association.ps1` writes only user-level HKCU
+opt-in `tools/setup/register-project-association.ps1` writes only user-level HKCU
 classes so double-clicking the file can use that path.

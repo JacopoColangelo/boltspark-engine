@@ -206,6 +206,7 @@ class SceneHierarchy {
     /** Validate full graph consistency after loading or complex commands. */
     public function validate():Void {
         var visited:Map<Int, Bool> = [];
+        var names:Map<String, Bool> = [];
         var stack:Array<EditorObject> = [];
         var index = roots.length - 1;
         while (index >= 0) {
@@ -221,6 +222,10 @@ class SceneHierarchy {
             if (visited.exists(object.id)) {
                 throw 'Hierarchy cycle or duplicate reference at ${object.persistentId}';
             }
+            if (names.exists(object.name)) {
+                throw 'Duplicate scene object name ${object.name}';
+            }
+            names.set(object.name, true);
             visited.set(object.id, true);
             index = object.children.length - 1;
             while (index >= 0) {

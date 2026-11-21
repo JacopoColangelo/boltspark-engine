@@ -9,7 +9,7 @@ param(
 # Nothing here runs automatically during a build or editor launch.
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $executable = Join-Path $repoRoot 'release\Boltspark.exe'
 $extension = '.boltproject'
 $progId = 'Boltspark.Project.1'

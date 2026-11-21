@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$source = Join-Path $PSScriptRoot 'font-source\JetBrainsMono.ttf'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$source = Join-Path $repoRoot 'tools\font-source\JetBrainsMono.ttf'
 $destination = Join-Path $repoRoot 'src\res\fonts\jetbrains_mono.ttf'
 
 if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

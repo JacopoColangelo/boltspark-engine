@@ -56,7 +56,7 @@ fixed-width advances and an on-demand glyph cache.
 - Full license text: `tools/font-source/JetBrainsMono-LICENSE.txt`
 
 The runtime resource can be restored byte-for-byte from the pinned source with
-`tools/generate-fonts.ps1`.
+`tools/assets/generate-fonts.ps1`.
 
 ## hlfreetype
 

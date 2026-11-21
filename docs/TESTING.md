@@ -8,7 +8,7 @@ screenshots, CSV files, and JSON results remain under ignored `bin/test-results/
 ## Portable checks
 
 ```powershell
-.\tools\test.ps1 -Portable
+.\tools\tests\test.ps1 -Portable
 ```
 
 This command does not need Neko, HashLink runtime DLLs, or a GPU. It:
@@ -31,7 +31,7 @@ on pull requests.
 ## Full local regression suite
 
 ```powershell
-.\tools\test.ps1
+.\tools\tests\test.ps1
 ```
 
 The default native path first runs `tools/build.ps1 -Check`, then compiles and
@@ -43,7 +43,7 @@ native-module regressions. It expects a previous build to have created
 To rebuild everything first:
 
 ```powershell
-.\tools\test.ps1 -Build
+.\tools\tests\test.ps1 -Build
 ```
 
 ## Native runtime probes
@@ -51,7 +51,7 @@ To rebuild everything first:
 Optional switches add real-window checks:
 
 ```powershell
-.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -ComponentRemoval -RotationHandoff -WindowLifecycle -SplitterCapture -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
+.\tools\tests\test.ps1 -Build -NativeSmoke -CommandHistory -ComponentRemoval -RotationHandoff -WindowLifecycle -SplitterCapture -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
 ```
 
 | Switch | Coverage |

@@ -98,8 +98,8 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -InstallDependencies # install missing pinned dependencies (optional)
 .\tools\build.ps1 -Check              # validate the Windows build environment
 .\tools\build.ps1 -Run                # run the development HashLink build
-.\tools\test.ps1 -Portable            # clean-worker compile + headless tests
-.\tools\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -WindowLifecycle -SplitterCapture -ProjectFiles -AssetBrowser  # full tests + DX12 interaction probes
+.\tools\tests\test.ps1 -Portable            # clean-worker compile + headless tests
+.\tools\tests\test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff -WindowLifecycle -SplitterCapture -ProjectFiles -AssetBrowser  # full tests + DX12 interaction probes
 ```
 
 The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library, PIX runtime, and verified FreeType source only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable, `freetype.hdll`, one consolidated `THIRD-PARTY-LICENSES.txt`, and its other required runtime files. Canonical upstream license files remain separate in the source tree.
@@ -111,8 +111,8 @@ The development build runs through `hl.exe` and retains its command window for l
 Engine-content thumbnails are baked offline; the editor never renders a 3D scene just to draw a thumbnail. The bake command renders each primitive at 1024x1024 into a depth-buffered offscreen target, smooths it with a `ScreenFx` tent filter plus FXAA (no MSAA — the DX12 backend does not support MSAA offscreen targets), builds a premultiplied-linear mip pyramid and writes `res\thumbnails\bundles\*.bundle` (including a transparent-background `material.bundle`). `ThumbnailLoader` then uploads those mips into one trilinearly filtered texture so the Asset Browser size slider scales smoothly. The thumbnail `h2d.Graphics` opts into `smooth = true` so Heaps selects `MIN_MAG_MIP_LINEAR` instead of point sampling inside a mip level. Baked geometry uses a denser mesh than the editor default (64 segments / 48 rings), the key light comes from the upper right, and the camera is framed tightly inside the card without clipping.
 
 ```powershell
-.\tools\bake-thumbnails.ps1                  # re-bake all built-in primitives
-.\tools\bake-thumbnails.ps1 -OutputDirectory D:\tmp\thumbs
+.\tools\bake\bake-thumbnails.ps1                  # re-bake all built-in primitives
+.\tools\bake\bake-thumbnails.ps1 -OutputDirectory D:\tmp\thumbs
 .\tools\build.ps1                            # rebuild to embed the new bundles
 ```
 
@@ -127,9 +127,9 @@ To open a project from the command line or a file association, pass the manifest
 Double-clicking `*.boltproject` requires an explicit, user-level association (no admin, no system-wide install):
 
 ```powershell
-.\tools\register-project-association.ps1          # register (opt-in)
-.\tools\register-project-association.ps1 -Check   # inspect current state
-.\tools\register-project-association.ps1 -Unregister
+.\tools\setup\register-project-association.ps1          # register (opt-in)
+.\tools\setup\register-project-association.ps1 -Check   # inspect current state
+.\tools\setup\register-project-association.ps1 -Unregister
 ```
 
 ## Documentation
@@ -184,13 +184,12 @@ tests/
   native/                     — tracked HWND, layout, DPI, reset, and performance probes
 tools/
   build.ps1                   — install dependencies, check, build, and run
-  bake-thumbnails.ps1         — offline DX12 thumbnail bake command
-  bake/                       — bake command host and its hxml
-  test.ps1                    — portable CI and full native regression entry point
-  check-policy.ps1            — native-only backend/dependency policy guard
-  register-project-association.ps1 — opt-in user-level .boltproject association
-  generate-fonts.ps1          — sync the pinned JetBrains Mono runtime TTF resource
+  bake/                       — offline DX12 thumbnail baker, host, and hxml
+  assets/                     — pinned font and icon resource generators
+  setup/                      — opt-in user-level .boltproject association
+  tests/                      — portable CI, policy guard, and regression entry points
   font-source/                — JetBrains Mono source + OFL font license texts
+  patches/                    — pinned HashLink/DX12 toolchain patches
 third_party/hlfreetype/       — pinned runtime TTF/OTF rasterizer and Heaps glyph cache
 third_party/tabler-icons/     — pinned icon mapping and MIT license
 ```

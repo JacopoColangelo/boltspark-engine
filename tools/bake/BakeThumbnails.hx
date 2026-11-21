@@ -9,7 +9,7 @@ import boltspark.thumbnails.ThumbnailBaker;
  * short report and exits. The main editor binary contains no copy of this
  * command, so there is no runtime 3D thumbnail work in the shipped game.
  *
- * Run with `tools\bake-thumbnails.ps1` or compile `tools\bake\bake-thumbnails.hxml`.
+ * Run with `tools\bake\bake-thumbnails.ps1` or compile `tools\bake\bake-thumbnails.hxml`.
  */
 class BakeThumbnails extends hxd.App {
     static function main():Void {

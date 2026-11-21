@@ -14,4 +14,4 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile project and run portable tests
         shell: powershell
-        run: .\tools\test.ps1 -Portable
+        run: .\tools\tests\test.ps1 -Portable

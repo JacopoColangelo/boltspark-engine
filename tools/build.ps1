@@ -455,11 +455,11 @@ function Test-Environment {
         'The pinned JetBrains Mono source font is required.'
     $monoFontResource = Get-RequiredFile `
         (Join-Path $repoRoot 'src\res\fonts\jetbrains_mono.ttf') `
-        'Run .\tools\generate-fonts.ps1 to restore the embedded JetBrains Mono resource.'
+        'Run .\tools\assets\generate-fonts.ps1 to restore the embedded JetBrains Mono resource.'
     $monoFontSourceHash = (Get-FileHash $monoFontSource -Algorithm SHA256).Hash
     $monoFontResourceHash = (Get-FileHash $monoFontResource -Algorithm SHA256).Hash
     if ($monoFontSourceHash -ne $monoFontResourceHash) {
-        throw 'Embedded JetBrains Mono does not match tools\font-source\JetBrainsMono.ttf. Run .\tools\generate-fonts.ps1.'
+        throw 'Embedded JetBrains Mono does not match tools\font-source\JetBrainsMono.ttf. Run .\tools\assets\generate-fonts.ps1.'
     }
     $actualPixHash = (Get-FileHash (Join-Path $hashLinkDir 'WinPixEventRuntime.dll') -Algorithm SHA256).Hash
     if ($actualPixHash -ne $pixRuntimeHash) {

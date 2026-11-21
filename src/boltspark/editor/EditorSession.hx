@@ -55,7 +55,8 @@ class EditorSession {
             throw 'Duplicate editor object ID: ${durableId}';
         }
         var object = EditorObjectFactory.create(nextObjectId, durableId,
-            name, transform == null ? new EditorTransform() : transform,
+            uniqueObjectName(name, reservedObjectNames()),
+            transform == null ? new EditorTransform() : transform,
             cloneComponents(components), this, visible, enabled);
         nextObjectId++;
         registerObject(object, objects.length);
@@ -72,7 +73,8 @@ class EditorSession {
         var parent = parentId < 0 ? null : requireObject(parentId);
         var siblings = parent == null ? hierarchy.roots : parent.children;
         var snapshot = new EditorObjectSnapshot(runtimeId,
-            StableId.create("scene-object"), EditorObject.requireName(name),
+            StableId.create("scene-object"),
+            uniqueObjectName(name, reservedObjectNames()),
             transform == null ? new EditorTransform() : transform,
             components, parent == null ? null : parent.persistentId, siblings.length);
         var before = captureSelection();
@@ -125,7 +127,7 @@ class EditorSession {
         // position. This matters for selections such as B + D in A/B/C/D.
         var parentAppendIndex = parentSiblings.length;
         var parentSnapshot = new EditorObjectSnapshot(runtimeId, persistentId,
-            EditorObject.requireName(name), parentTransform, [],
+            uniqueObjectName(name, reservedObjectNames()), parentTransform, [],
             commonParent == null ? null : commonParent.persistentId,
             parentAppendIndex);
         var selectionBefore = captureSelection();
@@ -319,6 +321,9 @@ class EditorSession {
         var object = findObject(id);
         if (object == null) return false;
         var normalized = EditorObject.requireName(name);
+        // Keep the requested name when it is free; otherwise continue the
+        // existing numeric suffix sequence so the hierarchy stays unique.
+        normalized = uniqueObjectName(normalized, reservedObjectNames(object));
         if (object.name == normalized) return false;
         history.execute(new RenameObjectCommand(this, object.persistentId,
             object.name, normalized));
@@ -550,6 +555,7 @@ class EditorSession {
             selection:EditorSelectionState):Void {
         var ordered = snapshots.copy();
         ordered.sort(function(a, b) return a.index - b.index);
+        var reserved = reservedObjectNames();
         for (entry in ordered) {
             var snapshot = entry.object;
             if (findObject(snapshot.id) != null
@@ -557,6 +563,10 @@ class EditorSession {
                 throw 'Cannot restore duplicate editor object ${snapshot.persistentId}';
             }
             var object = snapshot.restore(this);
+            // History snapshots keep their authored names, but another object
+            // may have claimed one of them while this command was undone.
+            object.name = uniqueObjectName(object.name, reserved);
+            reserved.set(object.name, true);
             registerObject(object, entry.index);
             if (snapshot.id >= nextObjectId) nextObjectId = snapshot.id + 1;
         }
@@ -665,7 +675,10 @@ class EditorSession {
 
     @:noCompletion public function commandRenameObject(
             persistentId:String, name:String):Void {
-        requirePersistentObject(persistentId).name = EditorObject.requireName(name);
+        var object = requirePersistentObject(persistentId);
+        // Also applies on undo/redo: a previously authored name may have been
+        // reused while this command was away from the top of the history.
+        object.name = uniqueObjectName(name, reservedObjectNames(object));
     }
 
     @:noCompletion public function commandSetObjectFlag(
@@ -736,11 +749,10 @@ class EditorSession {
                 appendCounts.set(key, offset + 1);
             }
             var runtimeId = oldToRuntime.get(snapshot.persistentId);
-            var cloneName = snapshot.name;
-            if (isRoot) {
-                cloneName = uniqueDuplicateName(snapshot.name, reservedNames);
-                reservedNames.set(cloneName, true);
-            }
+            // Every cloned node needs a fresh name. Descendants keep their
+            // authored name otherwise, which would duplicate the originals.
+            var cloneName = uniqueObjectName(snapshot.name, reservedNames, true);
+            reservedNames.set(cloneName, true);
             var clone = new EditorObjectSnapshot(runtimeId,
                 oldToNew.get(snapshot.persistentId),
                 cloneName,
@@ -758,19 +770,40 @@ class EditorSession {
         return [for (id in clonedRootRuntimeIds) findObject(id)];
     }
 
-    function uniqueDuplicateName(source:String,
-            reservedNames:Map<String, Bool>):String {
-        var base = source;
+    /** Names currently used by the scene, optionally ignoring one object. */
+    function reservedObjectNames(?except:EditorObject):Map<String, Bool> {
+        var reserved:Map<String, Bool> = [];
+        for (object in objects) {
+            if (object == except) continue;
+            reserved.set(object.name, true);
+        }
+        return reserved;
+    }
+
+    /**
+     * Resolve an object name against the entire scene hierarchy. An unused
+     * name is kept as authored; a conflict appends (or continues) a numeric
+     * " (N)" suffix, the same convention already used by duplicate/paste.
+     * `forceSuffix` is used by duplicate/paste, where a suffix is always added.
+     */
+    function uniqueObjectName(source:String, reserved:Map<String, Bool>,
+            forceSuffix:Bool = false):String {
+        var requested = EditorObject.requireName(source);
+        if (!forceSuffix && !reserved.exists(requested)) return requested;
+
+        var base = requested;
         var suffix = 1;
         var numberedSuffix = ~/^(.*) \(([1-9][0-9]*)\)$/;
-        if (numberedSuffix.match(source)) {
+        if (numberedSuffix.match(requested)) {
             base = numberedSuffix.matched(1);
             var sourceSuffix = Std.parseInt(numberedSuffix.matched(2));
-            if (sourceSuffix != null) suffix = sourceSuffix + 1;
+            if (sourceSuffix != null) {
+                suffix = sourceSuffix + (forceSuffix ? 1 : 0);
+            }
         }
 
         var candidate = base + " (" + suffix + ")";
-        while (reservedNames.exists(candidate)) {
+        while (reserved.exists(candidate)) {
             suffix++;
             candidate = base + " (" + suffix + ")";
         }

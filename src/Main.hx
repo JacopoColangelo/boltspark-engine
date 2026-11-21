@@ -2316,13 +2316,13 @@ class Main extends hxd.App {
     function createEmptyObjectInFront():Void {
         var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
         var limit = WorldBounds.HALF_EXTENT - 0.5;
-        var name = "GameObject" + editorSession.nextRuntimeId;
+        var name = "GameObject";
         var transform = new EditorTransform(
             Math.max(-limit, Math.min(limit, spot.x)),
             Math.max(-limit, Math.min(limit, spot.y)),
             Math.max(-limit, Math.min(limit, spot.z)));
-        editorSession.createObject(name, transform, -1, []);
-        logActivity("scene: created " + name);
+        var created = editorSession.createObject(name, transform, -1, []);
+        logActivity("scene: created " + created.name);
     }
 
     /** A point directly along the viewport camera's view direction. */
@@ -2516,8 +2516,7 @@ class Main extends hxd.App {
 
     function createPrimitiveAtWorld(meshId:String, x:Float, y:Float,
             z:Float, ?parentId:Int):Void {
-        var runtimeId = editorSession.nextRuntimeId;
-        var name = primitiveName(meshId) + runtimeId;
+        var name = primitiveName(meshId);
         // Newly added objects keep identity rotation/scale; constrain their
         // pivot before they enter session history.
         var pivotLimit = WorldBounds.HALF_EXTENT - 0.5;
@@ -2525,10 +2524,10 @@ class Main extends hxd.App {
             Math.max(-pivotLimit, Math.min(pivotLimit, x)),
             Math.max(-pivotLimit, Math.min(pivotLimit, y)),
             Math.max(-pivotLimit, Math.min(pivotLimit, z)));
-        editorSession.createObject(name, transform,
+        var created = editorSession.createObject(name, transform,
             parentId == null ? -1 : parentId,
             PrimitiveGameObjects.primitiveComponents(meshId));
-        logActivity("scene: created " + name);
+        logActivity("scene: created " + created.name);
     }
 
     function createHierarchyObject(parentId:Int, empty:Bool):Void {
@@ -2539,7 +2538,7 @@ class Main extends hxd.App {
     }
 
     function createHierarchyPrimitive(parentId:Int, meshId:String):Void {
-        var name = primitiveName(meshId) + editorSession.nextRuntimeId;
+        var name = primitiveName(meshId);
         editorSession.createObject(name, new EditorTransform(), parentId,
             PrimitiveGameObjects.primitiveComponents(meshId));
     }

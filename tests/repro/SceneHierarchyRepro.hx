@@ -18,6 +18,7 @@ class SceneHierarchyRepro {
         testSiblingPermutationUndo();
         testMultiObjectLifecycle();
         testDuplicateNaming();
+        testUniqueNames();
         testCreateEmptyParentOrdering();
         testSerialization();
         testComplexUndoRedoSequence();
@@ -273,12 +274,54 @@ class SceneHierarchyRepro {
 
         // Names generated in one command must participate in conflict checks
         // even though the command restores all snapshots only after naming.
+        // Insertion now guarantees the two rocks are "Rock" and "Rock (1)".
         var rockA = session.addInitialObject("Rock");
         var rockB = session.addInitialObject("Rock");
+        assertTrue(rockB.name == "Rock (1)",
+            "initial insertion allowed duplicate names");
         var rocks = session.duplicateObjects([rockA.id, rockB.id]);
-        assertTrue(rocks.length == 2 && rocks[0].name == "Rock (1)"
-                && rocks[1].name == "Rock (2)",
+        assertTrue(rocks.length == 2 && rocks[0].name == "Rock (2)"
+                && rocks[1].name == "Rock (3)",
             "multi-object duplicate generated conflicting names");
+    }
+
+    static function testUniqueNames():Void {
+        var session = new EditorSession(32);
+
+        // Creation suffixes conflicts instead of allowing two "Thing" objects.
+        var first = session.createObject("Thing");
+        var second = session.createObject("Thing");
+        var third = session.createObject("Thing");
+        assertTrue(first.name == "Thing" && second.name == "Thing (1)"
+                && third.name == "Thing (2)",
+            "creation did not resolve name conflicts with numeric suffixes");
+
+        // Renaming to an occupied name continues the same sequence.
+        var renamed = session.createObject("Other");
+        assertTrue(session.renameObject(renamed.id, "Thing")
+                && renamed.name == "Thing (3)",
+            "rename did not resolve a conflicting name");
+
+        // A free name is kept exactly as authored.
+        var free = session.createObject("Free Name");
+        assertTrue(free.name == "Free Name",
+            "creation changed a name that was not in use");
+
+        // Descendants of a duplicated subtree must be unique too.
+        var parent = session.createObject("Parent");
+        session.createChild(parent.id, "Branch");
+        var clone = session.duplicateObjects([parent.id])[0];
+        assertTrue(clone.name == "Parent (1)"
+                && clone.children[0].name == "Branch (1)",
+            "duplicated descendants reused their original names");
+
+        // Scene-load style insertion resolves duplicates as well.
+        var loaded = new EditorSession(8);
+        var rockA = loaded.addInitialObject("Rock");
+        var rockB = loaded.addInitialObject("Rock");
+        assertTrue(rockA.name == "Rock" && rockB.name == "Rock (1)",
+            "initial object insertion allowed duplicate names");
+        loaded.hierarchy.validate();
     }
 
     static function testCreateEmptyParentOrdering():Void {

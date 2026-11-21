@@ -153,7 +153,7 @@ now the next product-facing boundary. Current priorities are:
 
 ## 10. Post-M0 foundation update — 2026-11-15
 
-- `tools/test.ps1` is the tracked regression entry point. Its portable mode
+- `tools/tests/test.ps1` is the tracked regression entry point. Its portable mode
   compiles the complete project and runs GPU-independent tests on hosted Windows
   CI; native mode adds HashLink/CArray, FreeType, and optional HWND/DX12 probes.
 - Native smoke, resize/maximize/restore, dock-splitter + picking, current-monitor
@@ -196,7 +196,7 @@ now the next product-facing boundary. Current priorities are:
 - `tests/repro/ProjectSessionRepro.hx` covers create/save-as/open round-trips,
   scene registration, dirty/title state, session rebuild with stable IDs and
   components, and rejection of missing/unsafe/unsupported-version inputs.
-  `tools/test.ps1 -Portable` and `-NativeSmoke` pass; the full build (including
+  `tools/tests/test.ps1 -Portable` and `-NativeSmoke` pass; the full build (including
   the HashLink/C packaged release) succeeds with `ui.hdll` staged beside it.
 - `tests/native/Test-ProjectFiles.ps1` drives the real File menu in a native
   DX12 window: scripted probe paths replace the modal picker so Save As, dirty

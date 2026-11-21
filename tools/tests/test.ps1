@@ -17,7 +17,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$toolsRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent $toolsRoot
 $toolchain = Join-Path $repoRoot 'toolchain'
 $haxeDevDir = Join-Path $toolchain 'haxe-dev'
 $hashLinkDir = Join-Path $toolchain 'hashlink'
@@ -145,10 +146,10 @@ try {
     $env:Path = "$binDir;$haxeDevDir;$nekoDir;$hashLinkDir;$env:Path"
 
     if ($Build) {
-        & (Join-Path $PSScriptRoot 'build.ps1')
+        & (Join-Path $toolsRoot 'build.ps1')
         Assert-LastExitCode 'Full Boltspark build'
     } else {
-        & (Join-Path $PSScriptRoot 'build.ps1') -Check
+        & (Join-Path $toolsRoot 'build.ps1') -Check
         Assert-LastExitCode 'Boltspark environment check'
     }
 
@@ -188,7 +189,7 @@ try {
 
     $freeTypeModule = Join-Path $binDir 'freetype.hdll'
     if (-not (Test-Path $freeTypeModule)) {
-        throw 'bin\freetype.hdll is required for FreeTypeRuntimeRepro. Run tools\test.ps1 -Build.'
+        throw 'bin\freetype.hdll is required for FreeTypeRuntimeRepro. Run tools\tests\test.ps1 -Build.'
     }
     $freeTypeOutput = Join-Path $testOutput 'freetype-runtime-repro.hl'
     Invoke-Haxe @(

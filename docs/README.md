@@ -80,8 +80,8 @@ From the repository root:
 
 ```powershell
 .\tools\build.ps1
-.\tools\test.ps1 -Portable
-.\tools\test.ps1 -Build -NativeSmoke -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset
+.\tools\tests\test.ps1 -Portable
+.\tools\tests\test.ps1 -Build -NativeSmoke -RotationHandoff -WindowLifecycle -DpiProbe -DeviceReset
 ```
 
 The default action builds both the development bytecode (`bin\boltspark.hl`) and native release (`release\Boltspark.exe` plus its runtime files and consolidated `THIRD-PARTY-LICENSES.txt`). Use `.\tools\build.ps1 -Run` to launch the bytecode build; launch the native release directly from `release\Boltspark.exe`.

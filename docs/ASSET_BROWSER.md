@@ -167,7 +167,7 @@ recreating Unreal/Unity asset infrastructure.
 | `src/boltspark/ui/BoltUI.hx` | Facade forwarding for the new callbacks. |
 | `src/Main.hx` | Wires commands to `ProjectSession`, adds one-shot confirm for batch delete, prompts project creation for shell actions with no project, and launches Explorer detached with native path separators. |
 | `src/boltspark/ui/widgets/SearchField.hx` | Exposed `focusInput()` for Ctrl+F. |
-| `tools/test.ps1` | Registers `AssetBrowserRepro` in portable and native test lists. |
+| `tools/tests/test.ps1` | Registers `AssetBrowserRepro` in portable and native test lists. |
 | `tests/native/Test-AssetBrowser.ps1` | Waits for the real startup-completion log marker instead of a fixed delay, removing a race where the probe read stdout before the command-line project finished loading. |
 | `tests/native/Test-RevealRoot.ps1` | Regression probe for Reveal in Explorer on the empty-path root folder with no project loaded. |
 | `docs/TESTING.md`, `tests/native-foundation-acceptance.md` | Test/evidence documentation. |
@@ -206,12 +206,12 @@ build 26300 x64:
 
 - `haxe compile.hxml` — success (also via `tools/build.ps1 -Build`, including
   the packaged `release\Boltspark.exe` native release).
-- `tools/test.ps1 -Portable` — pass; includes `[asset-browser-repro] all 41
+- `tools/tests/test.ps1 -Portable` — pass; includes `[asset-browser-repro] all 41
   checks passed`.
-- `tools/test.ps1 -AssetBrowser` — pass; original native probe (Add/Rename/Open,
+- `tools/tests/test.ps1 -AssetBrowser` — pass; original native probe (Add/Rename/Open,
   folder create + F2, clipboard, drag-drop, scroll, collapse/expand) still
   passes.
-- `tools/test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff
+- `tools/tests/test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff
   -ProjectFiles -AssetBrowser` — pass; all requested native and release checks
   succeeded.
 - Visual verification: DX12 `PrintWindow` capture at

@@ -11,7 +11,7 @@ $stdout = Join-Path $outputDir 'development.stdout.log'
 $stderr = Join-Path $outputDir 'development.stderr.log'
 
 if (-not (Test-Path $runtime) -or -not (Test-Path $bytecode)) {
-    throw 'Development runtime/build missing. Run tools\test.ps1 -Build first.'
+    throw 'Development runtime/build missing. Run tools\tests\test.ps1 -Build first.'
 }
 if (Get-Process hl -ErrorAction SilentlyContinue) {
     throw 'hl.exe is already running; close it before the rotation handoff probe.'

@@ -25,7 +25,7 @@ M9 release hardening. They remain unchecked and must not be described as passed.
 - [x] Process opens a normal native Windows desktop window (`bin/m0_window.png` — title "Boltspark Engine").
 - [x] No Electron, NW.js, CEF, Chromium, Tauri, Wails, WebView, browser, Node, SDL, or OpenGL fallback is launched/used: the native modules are HashLink runtime services + `dx12.hdll`/`directx.hdll`/`heaps.hdll` and the project-local `freetype.hdll`; `hlsdl`/`sdl.hdll` is never referenced by the build (`compile.hxml` checked by `tools/build.ps1 -Check`).
 - [x] Window closes cleanly (run exits with code 0 on close).
-- [x] One tracked entry point (`tools/test.ps1`) enforces the native-only policy,
+- [x] One tracked entry point (`tools/tests/test.ps1`) enforces the native-only policy,
   compiles the complete project, runs portable/native regressions, and can add
   development + packaged-release HWND smoke tests. Hosted Windows CI executes
   its portable path (`.github/workflows/windows-ci.yml`).
@@ -210,7 +210,7 @@ Executed on 2026-11-12 with the automated Win32 probe (`tests/native/historical/
 
 ## Reusable UI and durable-data foundations
 
-Executed through `tools/test.ps1` on 2026-11-15; portable tests also form the
+Executed through `tools/tests/test.ps1` on 2026-11-15; portable tests also form the
 hosted Windows CI job.
 
 - [x] BoltUI frame lifecycle reports duplicate IDs, invalid layout, and
@@ -244,7 +244,7 @@ hosted Windows CI job.
   and components, tracks dirty state, and rejects missing, unsafe, and
   unsupported-version inputs (`tests/repro/ProjectSessionRepro.hx`). The full
   native build bundles `ui.hdll` for the Windows file dialogs; both development
-  and packaged editors still launch and close cleanly (`tools/test.ps1 -NativeSmoke`).
+  and packaged editors still launch and close cleanly (`tools/tests/test.ps1 -NativeSmoke`).
 - [x] File menu project commands are driven end-to-end in a native DX12 window:
   Save Project As writes the manifest and scene, the title-strip dirty marker
   appears on edits and clears on save, an unsaved-change answer of `no` cancels
