@@ -46,6 +46,15 @@ class NativeWindow {
         #end
     }
 
+    /** Screen-space origin of a window, for converting client rects to HWND coords. */
+    public static function screenOrigin(window:hxd.Window):{x:Float, y:Float} {
+        #if hldx
+        @:privateAccess return {x: window.window.x, y: window.window.y};
+        #else
+        return {x: 0, y: 0};
+        #end
+    }
+
     /** Per-monitor scale reported by the locked hldx Win32 window wrapper. */
     public static function displayScale(window:hxd.Window):Float {
         #if hldx

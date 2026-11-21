@@ -63,6 +63,12 @@ private class MenuLevel {
  * live state.
  */
 class MenuDropdown extends h2d.Object {
+    /**
+     * Topmost layer for editor popups. Hosts set this so menus opened by
+     * docked panels are not covered by dock tab bars and split handles.
+     */
+    public static var overlayLayer:Null<h2d.Object> = null;
+
     static inline var ROW_HEIGHT:Int = 22;
     static inline var SECTION_HEIGHT:Int = 21;
     static inline var SEPARATOR_HEIGHT:Int = 9;
@@ -147,6 +153,7 @@ class MenuDropdown extends h2d.Object {
      *  it from its labels (cascades still size themselves naturally). */
     public function open(x:Float, y:Float, items:Array<MenuItem>,
             ?searchPlaceholder:String, ?fixedWidth:Float, ?preferAboveY:Float):Void {
+        if (overlayLayer != null && parent != overlayLayer) overlayLayer.addChild(this);
         closeLevelsFrom(0);
         activeQuery = "";
         rootSearchPlaceholder = searchPlaceholder == null ? "" : searchPlaceholder;

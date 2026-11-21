@@ -127,6 +127,8 @@ class BoltUI {
     public var onToggleGrid:Null<Void->Void>;
     /** Current grid visibility, mirrored by the camera-settings checkbox. */
     public var onQueryGridVisible:Null<Void->Bool>;
+    /** Inspector rows for floating native panel hosts. */
+    public var onQueryNativeInspector:Null<Void->Dynamic>;
     /** Fired with the new horizontal FOV whenever the FOV field is edited. */
     public var onFovChanged:Null<Float->Void>;
     /** F: frame the primary selection in the viewport. */
@@ -355,6 +357,9 @@ class BoltUI {
         shell.onQueryGridVisible = function() {
             return onQueryGridVisible != null && onQueryGridVisible();
         };
+        shell.onQueryNativeInspector = function() {
+            return onQueryNativeInspector != null ? onQueryNativeInspector() : null;
+        };
         shell.onFovChanged = function(value) {
             if (onFovChanged != null) onFovChanged(value);
         };
@@ -369,9 +374,22 @@ class BoltUI {
         };
     }
 
+    /**
+     * The centralized docking manager. Future panels register through its
+     * PanelRegistry; existing panels are already registered by EditorShell.
+     */
+    public function dock():boltspark.ui.dock.DockingManager return shell.dockManager;
+
+    /** Refresh snapshots shown in floating native panel windows. */
+    public function refreshNativePanels():Void shell.refreshNativePanels();
+
+    /** Shut down child processes hosting floating panels. */
+    public function shutdown():Void shell.shutdownDockWindows();
+
     /** Editor console access. */
     public function log(line:String):Void {
         shell.log(line);
+        refreshNativePanels();
         // Mirror the editor console to stdout so automated runs can verify
         // command flow without screenshots.
         Sys.println('[console] ' + line);

@@ -4,10 +4,14 @@ import boltspark.platform.NativeWindow;
 import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.Process;
+import sys.thread.Deque;
+import sys.thread.Thread;
 
 private typedef ManagedApplicationWindow = {
     var process:Process;
     var shown:Bool;
+    var ?messages:Deque<String>;
+    var ?reader:Null<Thread>;
 }
 
 /**
@@ -93,6 +97,103 @@ class ApplicationWindowManager {
         } catch (error:Dynamic) {
             return 'window: could not open ${kind.displayName()}: ${Std.string(error)}';
         }
+    }
+
+    /**
+     * Launch a native HWND host for one floating dock panel. The key is stable
+     * for the panel instance so repositioning reuses the same process/window.
+     */
+    public function openDockPanel(key:String, panelId:String, title:String,
+            x:Float, y:Float, width:Float, height:Float):Null<String> {
+        discardCompleted();
+        if (processes.exists(key)) {
+            sendGeometry(key, x, y, width, height);
+            sendCommand(processes.get(key), ApplicationWindowProtocol.SHOW);
+            return null;
+        }
+        var program = Sys.programPath();
+        var command = program;
+        var arguments = [
+            ApplicationWindowKind.DockPanel.commandArgument(),
+            ApplicationWindowProtocol.DOCK_PANEL_PREFIX + StringTools.urlEncode(panelId),
+            ApplicationWindowProtocol.TITLE_PREFIX + StringTools.urlEncode(title),
+            ApplicationWindowProtocol.HOST_ARGUMENT,
+            ApplicationWindowProtocol.ownerProcessArgument(NativeWindow.currentProcessId())
+        ];
+        if (Path.extension(program).toLowerCase() == "hl") {
+            var repository = Path.directory(Path.directory(program));
+            var projectRuntime = Path.join([repository, "toolchain", "hashlink", "hl.exe"]);
+            command = FileSystem.exists(projectRuntime) ? projectRuntime : "hl.exe";
+            arguments.unshift(program);
+        }
+        try {
+            var messages = new Deque<String>();
+            var managed:ManagedApplicationWindow = {
+                process: new Process(command, arguments, false),
+                shown: true,
+                messages: messages
+            };
+            processes.set(key, managed);
+            startReader(managed);
+            sendGeometry(key, x, y, width, height);
+            sendCommand(managed, ApplicationWindowProtocol.SHOW);
+        } catch (error:Dynamic) {
+            return 'window: could not open dock panel ${panelId}: ${Std.string(error)}';
+        }
+        return null;
+    }
+
+    function startReader(managed:ManagedApplicationWindow):Void {
+        var messages = managed.messages;
+        if (messages == null || NativeWindow.currentProcessId() <= 0) return;
+        var process = managed.process;
+        managed.reader = Thread.create(function() {
+            try {
+                while (true) messages.add(process.stdout.readLine());
+            } catch (_:Dynamic) {
+                messages.add('{"cmd":"closed"}');
+            }
+        });
+    }
+
+    /** Send a JSON command to a dock-panel host. */
+    public function sendJson(key:String, payload:Dynamic):Bool {
+        var managed = processes.get(key);
+        if (managed == null) return false;
+        return sendCommand(managed, haxe.Json.stringify(payload));
+    }
+
+    public function sendGeometry(key:String, x:Float, y:Float,
+            width:Float, height:Float):Bool {
+        return sendJson(key, {cmd: "geometry", x: x, y: y,
+            width: width, height: height});
+    }
+
+    public function sendSnapshot(key:String, panelId:String, data:Dynamic):Bool {
+        return sendJson(key, {cmd: "snapshot", panelId: panelId, data: data});
+    }
+
+    public function closeDockPanel(key:String):Void {
+        var managed = processes.get(key);
+        if (managed == null) return;
+        sendCommand(managed, ApplicationWindowProtocol.QUIT);
+        closeHandle(managed);
+        processes.remove(key);
+    }
+
+    /** Drain all messages received from child hosts since the last call. */
+    public function takeMessages():Array<{key:String, text:String}> {
+        var result:Array<{key:String, text:String}> = [];
+        for (key => managed in processes) {
+            var queue = managed.messages;
+            if (queue == null) continue;
+            var message = queue.pop(false);
+            while (message != null) {
+                result.push({key: key, text: message});
+                message = queue.pop(false);
+            }
+        }
+        return result;
     }
 
     /** Reap child handles after a host process exits unexpectedly. */

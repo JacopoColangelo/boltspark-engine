@@ -29,6 +29,7 @@ class MeshRendererAssetRepro {
         testInspectorAssetProperties();
         testPrimitiveSettings();
         testPrimitiveSettingsHistory();
+        testAssetAssignmentHistory();
         testAssignmentAndFallback();
         testMaterialSlots();
         testSharedAssetsDistinctInstances();
@@ -336,6 +337,70 @@ class MeshRendererAssetRepro {
         assertTrue(renderer.primitiveSettings.width == 2
                 && otherRenderer.primitiveSettings.width == 1,
             "composite undo did not restore every object's settings");
+    }
+
+    static function testAssetAssignmentHistory():Void {
+        var session = new EditorSession(8);
+        var object = session.addInitialObject("Cube", new EditorTransform(),
+            null, [PrimitiveGameObjects.createCubeRenderer()]);
+        var renderer = object.getComponent(MeshRenderer);
+        var before = renderer.inspectorAssetId("material");
+
+        assertTrue(renderer.setInspectorAsset("material", Material.ORANGE_ID),
+            "material assignment failed");
+        var after = renderer.inspectorAssetId("material");
+        assertTrue(after == Material.ORANGE_ID,
+            "assigned material id was not captured");
+        assertTrue(session.commitMeshAssetAssignments([object.id], "material",
+                [before], [after], "Assign Orange Material"),
+            "material assignment was not committed to history");
+        assertTrue(session.history.undoLabel == "Assign Orange Material",
+            "material assignment did not become the undo label");
+        assertTrue(session.undo()
+                && renderer.inspectorAssetId("material") == before,
+            "undo did not restore the previous material");
+        assertTrue(session.redo()
+                && renderer.inspectorAssetId("material") == after,
+            "redo did not reapply the material");
+        assertTrue(!session.commitMeshAssetAssignments([object.id], "material",
+                [after], [after], "no-op"),
+            "identical material assignment created a history entry");
+
+        // Mesh assignments use the same undoable path.
+        var meshBefore = renderer.inspectorAssetId("mesh");
+        var otherMeshId = "";
+        for (mesh in PrimitiveMeshes.all()) {
+            if (mesh.id != meshBefore) { otherMeshId = mesh.id; break; }
+        }
+        assertTrue(otherMeshId != "", "no alternate mesh available");
+        assertTrue(renderer.setInspectorAsset("mesh", otherMeshId),
+            "mesh assignment failed");
+        var meshAfter = renderer.inspectorAssetId("mesh");
+        assertTrue(session.commitMeshAssetAssignments([object.id], "mesh",
+                [meshBefore], [meshAfter], "Assign Mesh"),
+            "mesh assignment was not committed to history");
+        assertTrue(session.undo() && renderer.inspectorAssetId("mesh") == meshBefore,
+            "mesh assignment undo failed");
+        assertTrue(session.redo() && renderer.inspectorAssetId("mesh") == meshAfter,
+            "mesh assignment redo failed");
+
+        // Multi-selection edits become one composite history entry.
+        var second = session.createObject("Other", new EditorTransform(3, 0, 0),
+            -1, [PrimitiveGameObjects.createCubeRenderer()]);
+        var secondRenderer = second.getComponent(MeshRenderer);
+        var otherBefore = secondRenderer.inspectorAssetId("material");
+        assertTrue(secondRenderer.setInspectorAsset("material", Material.ORANGE_ID),
+            "second material assignment failed");
+        assertTrue(session.commitMeshAssetAssignments([object.id, second.id],
+                "material", [after, otherBefore],
+                [renderer.inspectorAssetId("material"),
+                    secondRenderer.inspectorAssetId("material")],
+                "Assign Material on 2 objects"),
+            "composite material assignment failed");
+        assertTrue(session.undo()
+                && renderer.inspectorAssetId("material") == after
+                && secondRenderer.inspectorAssetId("material") == otherBefore,
+            "composite material undo did not restore every object");
     }
 
     static function testAssignmentAndFallback():Void {

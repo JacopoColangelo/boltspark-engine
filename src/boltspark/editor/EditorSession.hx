@@ -1,5 +1,6 @@
 package boltspark.editor;
 
+import boltspark.editor.commands.AssetAssignmentCommand;
 import boltspark.editor.commands.CommandHistory;
 import boltspark.editor.commands.CompositeCommand;
 import boltspark.editor.commands.CreateObjectCommand;
@@ -468,6 +469,46 @@ class EditorSession {
                 || before.sameAs(after)) return false;
         history.execute(new PrimitiveSettingsCommand(this, object.persistentId,
             before, after, description));
+        notifyChanged();
+        return true;
+    }
+
+    /** Undoable setter for one inspector asset property (used by the command). */
+    @:noCompletion public function commandSetMeshAsset(persistentId:String,
+            propertyId:String, assetId:String):Void {
+        var renderer = requirePersistentObject(persistentId)
+            .getComponent(MeshRenderer);
+        if (renderer == null) {
+            throw 'MeshRenderer for ${persistentId} is missing';
+        }
+        if (!renderer.setInspectorAsset(propertyId, assetId)) {
+            throw 'Cannot assign ${propertyId} for ${persistentId}';
+        }
+    }
+
+    /**
+     * Commit inspector asset assignments (mesh or material slots) as one
+     * history entry. Arrays are parallel; no-op and invalid entries are skipped.
+     */
+    public function commitMeshAssetAssignments(ids:Array<Int>, propertyId:String,
+            befores:Array<String>, afters:Array<String>,
+            description:String):Bool {
+        if (ids == null || befores == null || afters == null) return false;
+        var commands:Array<EditorCommand> = [];
+        for (index in 0...ids.length) {
+            if (index >= befores.length || index >= afters.length) break;
+            var object = findObject(ids[index]);
+            var before = befores[index] == null ? "" : befores[index];
+            var after = afters[index] == null ? "" : afters[index];
+            if (object == null || object.getComponent(MeshRenderer) == null
+                    || before == after) continue;
+            commands.push(new AssetAssignmentCommand(this, object.persistentId,
+                propertyId, before, after, description));
+        }
+        if (commands.length == 0) return false;
+        history.execute(commands.length == 1
+            ? commands[0]
+            : new CompositeCommand(description, commands));
         notifyChanged();
         return true;
     }

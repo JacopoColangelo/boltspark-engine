@@ -44,6 +44,11 @@ enum abstract UiIconKind(Int) from Int to Int {
     var Check = 40;
     var Minus = 41;
     var Eraser = 42;
+    // Docking tab icons.
+    var DockPanel = 43;
+    var DockSide = 44;
+    var DockBottom = 45;
+    var ArrowDown = 46;
 }
 
 /**
@@ -57,7 +62,7 @@ enum abstract UiIconKind(Int) from Int to Int {
  */
 class UiIcons {
     static inline var CELL_SIZE:Int = 16;
-    static inline var ICON_COLUMNS:Int = 43;
+    static inline var ICON_COLUMNS:Int = 47;
     static inline var MIN_SIZE:Int = 6;
     static inline var MAX_SIZE:Int = 16;
 

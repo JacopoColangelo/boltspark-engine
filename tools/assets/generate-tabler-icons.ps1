@@ -8,7 +8,7 @@ $version = '3.52.0'
 $cellSize = 16
 $minimumSize = 6
 $maximumSize = 16
-$expectedAtlasSha256 = 'F07E185C74DE57BA2BF0811E3DE24697533738DB5DDC56AE55BE39B9165DB542'
+$expectedAtlasSha256 = '43CB6E4E4498A947BAD90204500369888D810455030B974A002A48A6EF751F00'
 $sourceRoot = Join-Path $repoRoot "src\res\.tmp\tabler-icons\$version"
 $outputPath = Join-Path $repoRoot 'src\res\icons\tabler_ui.png'
 # A separate, larger alpha mask for asset-browser scene thumbnails: the UI
@@ -65,14 +65,19 @@ $icons = @(
     @{ Column = 39; Variant = 'outline'; Name = 'camera' },
     @{ Column = 40; Variant = 'outline'; Name = 'check' },
     @{ Column = 41; Variant = 'outline'; Name = 'minus' },
-    @{ Column = 42; Variant = 'outline'; Name = 'eraser' }
+    @{ Column = 42; Variant = 'outline'; Name = 'eraser' },
+    # Docking tab icons (added for the editor dock framework).
+    @{ Column = 43; Variant = 'outline'; Name = 'layout-navbar' },
+    @{ Column = 44; Variant = 'outline'; Name = 'layout-sidebar' },
+    @{ Column = 45; Variant = 'outline'; Name = 'layout-bottombar' },
+    @{ Column = 46; Variant = 'outline'; Name = 'arrow-down' }
 )
 
 Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Force $sourceRoot | Out-Null
 New-Item -ItemType Directory -Force (Split-Path -Parent $outputPath) | Out-Null
 
-$width = 43 * $cellSize
+$width = 47 * $cellSize
 $height = ($maximumSize - $minimumSize + 1) * $cellSize
 $pixelFormat = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
 $atlas = New-Object System.Drawing.Bitmap($width, $height, $pixelFormat)

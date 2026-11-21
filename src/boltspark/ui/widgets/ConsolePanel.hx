@@ -108,6 +108,13 @@ class ConsolePanel extends h2d.Object {
         refresh();
     }
 
+    /** Plain-text lines for the native HWND panel host snapshot. */
+    public function snapshotLines():Array<String> {
+        var result:Array<String> = [];
+        for (line in lines) result.push(line);
+        return result;
+    }
+
     public function clear():Void {
         lines.resize(0);
         firstVisibleLine = 0;

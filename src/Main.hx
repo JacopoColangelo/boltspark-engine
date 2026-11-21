@@ -45,6 +45,7 @@ import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
 import boltspark.ui.windows.ApplicationWindowKind;
 import boltspark.ui.windows.ApplicationWindowManager;
+import boltspark.ui.windows.DockPanelWindowApp;
 import boltspark.ui.windows.KeybindingsWindowApp;
 
 /**
@@ -187,6 +188,7 @@ class Main extends hxd.App {
         nativeWindow.onClose = function() {
             if (!confirmDiscardChanges()) return false;
             runtimeProbes.shutdown();
+            if (boltUI != null) boltUI.shutdown();
             if (editorSession != null) editorSession.destroy();
             applicationWindows.shutdown();
             InteractiveResize.uninstall();
@@ -254,6 +256,7 @@ class Main extends hxd.App {
         boltUI.onInspectorNumberChanged = applyInspectorNumberChange;
         boltUI.onInspectorTextChanged = applyInspectorTextChange;
         boltUI.onInspectorAssetChanged = applyInspectorAssetChange;
+        boltUI.onQueryNativeInspector = buildNativeInspectorSnapshot;
         boltUI.onInspectorBoolChanged = applyInspectorBoolChange;
         boltUI.onInspectorEditBegin = beginComponentInspectorEdit;
         boltUI.onInspectorEditEnd = endComponentInspectorEdit;
@@ -573,28 +576,91 @@ class Main extends hxd.App {
         }
     }
 
+    /** Inspector rows for a floating Inspector hosted in its own HWND. */
+    function buildNativeInspectorSnapshot():Dynamic {
+        var rows:Array<Dynamic> = [];
+        var selected = editorSession.findObject(editorSession.selectedObjectId);
+        if (selected == null) {
+            return {title: "Inspector", rows: rows};
+        }
+        rows.push({id: "object", kind: "action",
+            label: "Object: " + selected.name, depth: 0, selected: true});
+        for (index in 0...selected.components.length) {
+            var section = selected.components[index].inspectorData(index);
+            rows.push({id: "section:" + index, kind: "action",
+                label: section.title, depth: 0, selected: false});
+            for (property in section.properties) {
+                var id = "p:" + index + ":" + property.id;
+                var kindText = Std.string(property.kind);
+                if (kindText == "number") {
+                    for (axis in 0...property.numberValues.length) {
+                        var axisName = axis == 0 ? "X" : axis == 1 ? "Y" : "Z";
+                        rows.push({
+                            id: id + ":" + axis,
+                            kind: "number",
+                            label: property.label + " " + axisName,
+                            value: property.numberValues[axis],
+                            min: property.numberMin,
+                            max: property.numberMax,
+                            step: property.numberStep,
+                            depth: 1,
+                            selected: false
+                        });
+                    }
+                } else if (kindText == "boolean") {
+                    rows.push({
+                        id: id, kind: "bool", label: property.label,
+                        value: property.boolValue, depth: 1, selected: false
+                    });
+                } else {
+                    var text = property.textValue;
+                    if (kindText == "asset") text = property.assetId;
+                    rows.push({
+                        id: id, kind: "action",
+                        label: property.label + ": " + text,
+                        depth: 1, selected: false
+                    });
+                }
+            }
+        }
+        return {title: "Inspector — " + selected.name, rows: rows};
+    }
+
     /** Assign a shared mesh/material asset from a type-aware Inspector picker. */
     function applyInspectorAssetChange(componentIndex:Int, propertyId:String,
             assetId:String):Void {
-        if (editorSession.selectedObjectIds.length > 1) {
-            var edited = false;
-            for (id in editorSession.selectedObjectIds) {
-                var component = multiComponentFor(id, componentIndex);
-                if (component != null
-                        && component.setInspectorAsset(propertyId, assetId)) {
-                    editorSession.componentEdited(id);
-                    edited = true;
-                }
-            }
-            if (edited) refreshSelectionInspector();
+        var multi = editorSession.selectedObjectIds.length > 1;
+        var ids = multi ? editorSession.selectedObjectIds.copy()
+            : [editorSession.selectedObjectId];
+        var applied:Array<Int> = [];
+        var befores:Array<String> = [];
+        var afters:Array<String> = [];
+        for (id in ids) {
+            var component = multi
+                ? multiComponentFor(id, componentIndex)
+                : selectedInspectorComponent(componentIndex);
+            if (component == null || !Std.isOfType(component, MeshRenderer)) continue;
+            var renderer = cast(component, MeshRenderer);
+            var before = renderer.inspectorAssetId(propertyId);
+            if (!component.setInspectorAsset(propertyId, assetId)) continue;
+            applied.push(id);
+            befores.push(before);
+            afters.push(renderer.inspectorAssetId(propertyId));
+        }
+        if (applied.length == 0) {
+            boltUI.log('inspector: could not assign ${propertyId} asset ${assetId}');
             return;
         }
-        var component = selectedInspectorComponent(componentIndex);
-        if (component != null && component.setInspectorAsset(propertyId, assetId)) {
-            editorSession.componentEdited(editorSession.selectedObjectId);
-        } else {
-            boltUI.log('inspector: could not assign ${propertyId} asset ${assetId}');
+        var target = editorSession.findObject(applied[0]);
+        var name = target == null ? "object" : target.name;
+        var label = 'Assign ${assetId} to ${name} ${propertyId}';
+        // Validated changes become one undoable history entry; multi-selections
+        // are grouped exactly like transform and primitive-settings edits.
+        if (!editorSession.commitMeshAssetAssignments(applied, propertyId,
+                befores, afters, label)) {
+            for (id in applied) editorSession.componentEdited(id);
         }
+        if (multi) refreshSelectionInspector();
     }
 
     /** Apply a boolean Inspector toggle to the selected component(s). */
@@ -2484,8 +2550,15 @@ class Main extends hxd.App {
         for (component in object.components) {
             var renderer = Std.downcast(component, MeshRenderer);
             if (renderer == null || renderer.getMaterial(pick.materialIndex) == null) continue;
+            var propertyId = MeshRenderer.materialPropertyId(pick.materialIndex);
+            var before = renderer.inspectorAssetId(propertyId);
             renderer.setMaterial(pick.materialIndex, material);
-            editorSession.componentEdited(object.id);
+            var after = renderer.inspectorAssetId(propertyId);
+            var label = 'Assign ${material.name} to ${object.name} ${propertyId}';
+            if (!editorSession.commitMeshAssetAssignments([object.id], propertyId,
+                    [before], [after], label)) {
+                editorSession.componentEdited(object.id);
+            }
             refreshSelectionInspector();
             logActivity('viewport: ${pick.object.name} material ${pick.materialIndex} = '
                 + material.name);
@@ -3365,6 +3438,8 @@ class Main extends hxd.App {
             switch (requestedWindow) {
                 case EditorKeybindings:
                     new KeybindingsWindowApp();
+                case DockPanel:
+                    new DockPanelWindowApp();
             }
             return;
         }

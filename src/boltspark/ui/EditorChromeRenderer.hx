@@ -14,15 +14,20 @@ class EditorChromeRenderer {
 
     /** With no selection the meta row under the title is omitted. */
     public function draw(target:h2d.Graphics, width:Float, height:Float,
-            geometry:DockLayoutGeometry, inspectorExpanded:Bool = true):Void {
+            geometry:DockLayoutGeometry, inspectorExpanded:Bool = true,
+            ?panelRects:Array<LayoutRect>):Void {
         commands.reset();
         commands.fillRect(new LayoutRect(0, 0, width,
             Theme.TITLE_BAR_HEIGHT), Theme.TITLE_BAR);
         commands.fillRect(new LayoutRect(0, Theme.TITLE_BAR_HEIGHT, width,
             Theme.TOOLBAR_HEIGHT), Theme.TOOLBAR);
-        commands.fillRect(geometry.leftPanel, Theme.PANEL);
-        commands.fillRect(geometry.rightPanel, Theme.PANEL);
-        commands.fillRect(geometry.console, Theme.PANEL);
+        if (panelRects != null && panelRects.length > 0) {
+            for (rect in panelRects) commands.fillRect(rect, Theme.PANEL);
+        } else {
+            commands.fillRect(geometry.leftPanel, Theme.PANEL);
+            commands.fillRect(geometry.rightPanel, Theme.PANEL);
+            commands.fillRect(geometry.console, Theme.PANEL);
+        }
         commands.fillRect(new LayoutRect(geometry.leftPanel.x,
             geometry.leftPanel.y, geometry.leftPanel.width,
             Theme.PANEL_HEADER_HEIGHT), Theme.PANEL_HEADER);

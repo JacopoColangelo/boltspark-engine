@@ -349,6 +349,17 @@ class MeshRenderer extends Component {
         return index == 0 ? "material" : 'material:${index}';
     }
 
+    /** Current asset id for an inspector asset property, for history capture. */
+    public function inspectorAssetId(propertyId:String):String {
+        if (propertyId == "mesh") return meshValue == null ? "" : meshValue.id;
+        if (propertyId == "material") {
+            return materialsValue.length == 0 ? "" : materialsValue[0].id;
+        }
+        var index = materialIndexFromPropertyId(propertyId);
+        return index >= 0 && index < materialsValue.length
+            ? materialsValue[index].id : "";
+    }
+
     static function materialIndexFromPropertyId(propertyId:String):Int {
         if (propertyId == null || !StringTools.startsWith(propertyId, "material:")) return -1;
         var index = Std.parseInt(propertyId.substr("material:".length));

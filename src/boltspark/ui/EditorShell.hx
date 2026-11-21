@@ -17,12 +17,16 @@ import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.layout.BoxLayout;
+import boltspark.ui.dock.DockingManager;
+import boltspark.ui.dock.DockPanelView;
+import boltspark.ui.dock.DockEnums.DockSide;
+import boltspark.ui.dock.PanelRegistry;
 import boltspark.ui.core.UiFrame;
 import boltspark.ui.windows.ApplicationWindowKind;
+import boltspark.ui.windows.ApplicationWindowManager;
 import boltspark.ui.widgets.BottomDockTab;
 import boltspark.ui.widgets.ConsolePanel;
 import boltspark.ui.widgets.ComponentInspectorSection;
-import boltspark.ui.widgets.DockSplitter;
 import boltspark.ui.widgets.GameObjectPalette;
 import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
@@ -56,6 +60,8 @@ class EditorShell {
     final chrome:h2d.Graphics;
     final chromeRenderer:EditorChromeRenderer;
     final editorBackgroundHit:h2d.Interactive;
+    /** All dockable panel hosts live here, below dock chrome but above scene. */
+    final panelLayer:h2d.Object;
 
     // Title/menu bar and editor toolbar.
     final brandMark:h2d.Bitmap;
@@ -172,11 +178,13 @@ class EditorShell {
     final rendererStatus:h2d.Text;
     final inputStatus:h2d.Text;
 
-    final leftSplitter:DockSplitter;
-    final rightSplitter:DockSplitter;
-    final consoleSplitter:DockSplitter;
     final dockLayout:DockLayout;
     final layoutStore:DockLayoutStore;
+    final dockRegistry:PanelRegistry;
+    final dockWindowManager:ApplicationWindowManager;
+    public var dockManager(default, null):DockingManager;
+    var hierarchyDockHost:h2d.Object;
+    var inspectorDockHost:h2d.Object;
     final palette:GameObjectPalette;
     final menuDropdown:MenuDropdown;
     final tooltip:UiTooltip;
@@ -287,11 +295,13 @@ class EditorShell {
     public var onToggleGrid:Null<Void->Void>;
     /** Current grid visibility, used to mirror the checkbox state. */
     public var onQueryGridVisible:Null<Void->Bool>;
+    /** Inspector rows for a floating native panel, supplied by Main. */
+    public var onQueryNativeInspector:Null<Void->Dynamic>;
     /** Fired with the new horizontal FOV whenever the FOV field is edited. */
     public var onFovChanged:Null<Float->Void>;
     /** F: frame the primary selection in the active viewport. */
     public var onFocusSelection:Null<Void->Void>;
-    public var viewportRect(default, null):LayoutRect;
+    public var viewportRect(default, null):LayoutRect = new LayoutRect(0, 0, 0, 0);
 
     var lastWidth:Int = -1;
     var lastHeight:Int = -1;
@@ -351,7 +361,9 @@ class EditorShell {
             if (event.button == 0) closePaletteIfOpen();
         };
 
-        viewportHit = new h2d.Interactive(1, 1, root);
+        // Panel hosts sit above the background catcher but below dock chrome.
+        panelLayer = new h2d.Object(root);
+        viewportHit = new h2d.Interactive(1, 1, panelLayer);
         viewportHit.backgroundColor = 0;
         viewportHit.cursor = hxd.Cursor.Default;
         // Right/middle button pushes and releases reach the handlers below
@@ -384,8 +396,8 @@ class EditorShell {
             if (onViewportClick != null) onViewportClick(event.relX, event.relY);
         };
 
-        leftContentMask = new h2d.Mask(0, 0, root);
-        rightContentMask = new h2d.Mask(0, 0, root);
+        leftContentMask = new h2d.Mask(0, 0, panelLayer);
+        rightContentMask = new h2d.Mask(0, 0, panelLayer);
 
         // Backdrop interaction covers otherwise empty hierarchy chrome. All
         // actual controls and rows are created later and remain above it.
@@ -527,6 +539,73 @@ class EditorShell {
                         label: "Collapse All",
                         onClick: collapseAllHierarchy
                     }]);
+                };
+            } else if (menuName == "Window") {
+                // Built lazily so show/hide state always reflects the live tree.
+                button.onClick = function() {
+                    if (menuDropdown.isOpen) {
+                        menuDropdown.close();
+                        return;
+                    }
+                    closePaletteIfOpen();
+                    var items:Array<MenuItem> = [{label: "Panels", section: true}];
+                    for (id in dockRegistry.ids()) {
+                        var descriptor = dockRegistry.descriptor(id);
+                        if (descriptor == null || descriptor.fixed == true) continue;
+                        var capturedId = id;
+                        var displayed = dockManager.isOpen(capturedId);
+                        items.push({
+                            label: descriptor.displayName,
+                            selected: displayed,
+                            onClick: function() {
+                                input.clearFocus();
+                                if (dockManager.isOpen(capturedId)) {
+                                    dockManager.close(capturedId);
+                                } else {
+                                    dockManager.open(capturedId);
+                                }
+                            }
+                        });
+                    }
+                    items.push({label: "", separator: true});
+                    items.push({
+                        label: "Reset Layout",
+                        onClick: function() {
+                            input.clearFocus();
+                            dockManager.reset();
+                        }
+                    });
+                    items.push({
+                        label: "Save Layout",
+                        onClick: function() {
+                            input.clearFocus();
+                            dockManager.save();
+                            log("layout: docking layout saved");
+                        }
+                    });
+                    items.push({
+                        label: "Load Layout",
+                        onClick: function() {
+                            input.clearFocus();
+                            dockManager.reload();
+                        }
+                    });
+                    items.push({label: "", separator: true});
+                    items.push({
+                        label: "Float Focused Panel",
+                        onClick: function() {
+                            input.clearFocus();
+                            dockManager.floatFocused();
+                        }
+                    });
+                    items.push({
+                        label: "Dock Floating Windows",
+                        onClick: function() {
+                            input.clearFocus();
+                            dockManager.dockAllFloating();
+                        }
+                    });
+                    menuDropdown.open(capturedButton.x, Theme.TITLE_BAR_HEIGHT, items);
                 };
             } else {
                 button.onClick = function() {
@@ -859,7 +938,7 @@ class EditorShell {
             if (onSnapToGrid != null) onSnapToGrid();
         };
 
-        console = new ConsolePanel(ctx, root);
+        console = new ConsolePanel(ctx, panelLayer);
         console.onBackgroundClick = closePaletteIfOpen;
 
         // Bottom dock tabs: Asset Browser first, Output Log second.
@@ -970,6 +1049,12 @@ class EditorShell {
         // Escape closes the most specific transient popup. Application-level
         // windows receive Escape through their own native input adapter.
         input.onEscapePressed = function() {
+            // A docking drag owns Escape first so it can be cancelled without
+            // also dismissing unrelated popups or changing selection.
+            if (dockManager != null && dockManager.isDragActive()) {
+                dockManager.cancelDrag();
+                return;
+            }
             if (menuDropdown.isOpen) {
                 menuDropdown.close();
                 return;
@@ -1010,34 +1095,11 @@ class EditorShell {
         dockLayout = new DockLayout();
         layoutStore = new DockLayoutStore();
         var layoutError = layoutStore.load(dockLayout);
-        activeBottomTab = dockLayout.bottomTab;
-        console.visible = activeBottomTab == 1;
-
-        // Splitters are created late so their interactive hit zones remain on
-        // top of panel content.
-        leftSplitter = new DockSplitter(ctx, true, root);
-        leftSplitter.onDrag = function(delta) {
-            dockLayout.preferredLeftPanelWidth += delta;
-            resize();
-        };
-        leftSplitter.onDragEnd = saveLayout;
-        rightSplitter = new DockSplitter(ctx, true, root);
-        rightSplitter.onDrag = function(delta) {
-            dockLayout.preferredRightPanelWidth -= delta;
-            resize();
-        };
-        rightSplitter.onDragEnd = saveLayout;
-        consoleSplitter = new DockSplitter(ctx, false, root);
-        consoleSplitter.onDrag = function(delta) {
-            dockLayout.preferredConsoleHeight -= delta;
-            resize();
-        };
-        consoleSplitter.onDragEnd = saveLayout;
 
         // Dock content is created first; the shared popup layer is created at
         // the end of this constructor so its full-window dismiss catch and menu
         // rows stay above every panel interactive.
-        assetBrowser = new AssetBrowser(ctx, root, root);
+        assetBrowser = new AssetBrowser(ctx, panelLayer, root);
         assetBrowser.visible = activeBottomTab == 0;
         assetBrowser.onQueryAssets = function() {
             return onQueryAssets != null ? onQueryAssets() : [];
@@ -1100,6 +1162,45 @@ class EditorShell {
         palette.onDropPrimitive = function(meshId, x, y) {
             if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
         };
+
+        // The full docking system replaces the three fixed splitters and the
+        // hardcoded bottom tab strip. It is created only after every panel
+        // content object exists, and before the shared popup layer so menus
+        // remain topmost.
+        dockRegistry = new PanelRegistry();
+        registerDockPanels();
+        var dockChromeLayer = new h2d.Object(root);
+        var dockFloatPanelLayer = new h2d.Object(root);
+        var dockFloatLayer = new h2d.Object(root);
+        var dockOverlayLayer = new h2d.Object(root);
+        MenuDropdown.overlayLayer = dockOverlayLayer;
+        // Popups created earlier in the constructor must also sit above the
+        // dock chrome, otherwise tab bars draw over their content.
+        dockOverlayLayer.addChild(fovPopupRoot);
+        dockOverlayLayer.addChild(palette);
+        dockOverlayLayer.addChild(viewportDropHintSurface);
+        dockWindowManager = new ApplicationWindowManager();
+        dockManager = new DockingManager(ctx, input, dockRegistry, panelLayer,
+            dockFloatPanelLayer, dockChromeLayer, dockFloatLayer, dockOverlayLayer,
+            dockWindowManager);
+        dockManager.onSnapshotRequest = buildNativePanelSnapshot;
+        dockManager.onDockPanelEdit = applyNativePanelEdit;
+        dockManager.onBottomTabChanged = setBottomTabFromDock;
+        dockManager.onGeometryChanged = function() {
+            drawChrome(ctx.width, ctx.height, dockManager.geometry());
+        };
+        dockManager.onBeforeSave = syncLegacyDockSizes;
+        dockManager.onLayoutSaved = saveLayout;
+        dockManager.onLayoutReset = resetLegacyLayout;
+        bottomTabs.visible = false;
+        dockManager.initialize(dockLayout);
+        dockManager.bindHostId("boltspark.hierarchy", hierarchyDockHost);
+        dockManager.bindHostId("boltspark.inspector", inspectorDockHost);
+        dockManager.bindHostId("boltspark.console", console);
+        dockManager.bindHostId("boltspark.assets", assetBrowser);
+        activeBottomTab = dockManager.legacySizes().bottomTab;
+        console.visible = activeBottomTab == 1;
+        assetBrowser.visible = activeBottomTab == 0;
 
         // Created last so the popup/dismiss hit targets are topmost: clicks in
         // the Asset Browser or palette reach the dismiss catch and close an
@@ -1436,6 +1537,7 @@ class EditorShell {
     }
 
     public function update(dt:Float):Void {
+        if (dockManager != null) dockManager.update(dt);
         tooltip.update(dt);
         if (ctx.width != lastWidth || ctx.height != lastHeight) resize();
         if (hierarchyAssetDragActive) {
@@ -1464,115 +1566,24 @@ class EditorShell {
     public function resize():Void {
         var width = ctx.width;
         var height = ctx.height;
-
-        var bodyTop = Theme.TOP_BAR_HEIGHT;
-        var geometry = dockLayout.calculate(width, height);
-        lastGeometry = geometry;
-        viewportRect = geometry.viewport;
-        var leftWidth = geometry.leftPanel.width;
-        var rightWidth = Math.max(0, geometry.rightPanel.width);
-        var rightX = geometry.rightPanel.x;
-
         lastWidth = width;
         lastHeight = height;
         editorBackgroundHit.width = Math.max(0, width);
         editorBackgroundHit.height = Math.max(0, height);
-        leftContentMask.width = Std.int(Math.max(0, leftWidth));
-        leftContentMask.height = Std.int(Math.max(0, height - Theme.STATUS_BAR_HEIGHT));
-        leftContentMask.visible = leftWidth >= 140;
-        rightContentMask.x = rightX;
-        rightContentMask.width = Std.int(rightWidth);
-        rightContentMask.height = Std.int(Math.max(0, height - Theme.STATUS_BAR_HEIGHT));
-        rightContentMask.visible = rightWidth >= 180;
-
-        drawChrome(width, height, geometry);
-
-        leftSplitter.setBounds(geometry.leftSplitter.x, geometry.leftSplitter.y,
-            geometry.leftSplitter.width, geometry.leftSplitter.height);
-        rightSplitter.setBounds(geometry.rightSplitter.x, geometry.rightSplitter.y,
-            geometry.rightSplitter.width, geometry.rightSplitter.height);
-        consoleSplitter.setBounds(geometry.consoleSplitter.x, geometry.consoleSplitter.y,
-            geometry.consoleSplitter.width, geometry.consoleSplitter.height);
-
-        viewportHit.x = geometry.viewport.x;
-        viewportHit.y = geometry.viewport.y;
-        viewportHit.width = Math.max(0, geometry.viewport.width);
-        viewportHit.height = Math.max(0, geometry.viewport.height);
-
         layoutTopBars(width);
-        layoutHierarchy(leftWidth, bodyTop);
-        layoutInspector(rightWidth, bodyTop);
 
-        // Tabs occupy the top of the bottom dock; content starts below them.
-        var tabHeight:Float = 24;
-        bottomTabs.x = geometry.console.x;
-        bottomTabs.y = geometry.console.y;
-        // Shrink and elide tabs so both stay inside a narrow bottom dock
-        // instead of spilling over the neighbouring panel.
-        var tabSpace = Math.max(0, geometry.console.width);
-        var tabGap = 2.0;
-        var naturalAssets = assetsTab.naturalWidth;
-        var naturalLog = logTab.naturalWidth;
-        var tabScale = tabSpace >= naturalAssets + naturalLog + tabGap ? 1.0
-            : Math.max(0, (tabSpace - tabGap) / (naturalAssets + naturalLog));
-        var assetsTabWidth = Math.max(14, Math.round(naturalAssets * tabScale));
-        var logTabWidth = Math.max(14, Math.round(naturalLog * tabScale));
-        var tabsOver = assetsTabWidth + logTabWidth + tabGap - tabSpace;
-        if (tabsOver > 0) {
-            if (assetsTabWidth >= logTabWidth)
-                assetsTabWidth = Math.max(14, assetsTabWidth - tabsOver);
-            else
-                logTabWidth = Math.max(14, logTabWidth - tabsOver);
+        if (dockManager != null) {
+            var body = new LayoutRect(0, Theme.TOP_BAR_HEIGHT, width,
+                Math.max(0, height - Theme.TOP_BAR_HEIGHT - Theme.STATUS_BAR_HEIGHT));
+            dockManager.layout(body);
+            var sizes = dockManager.legacySizes();
+            dockLayout.setPreferred(sizes.left, sizes.right, sizes.console);
+            dockLayout.bottomTab = sizes.bottomTab;
+            lastGeometry = dockManager.geometry();
+            viewportRect = dockManager.viewportBody();
+            // onGeometryChanged already redrew chrome through the manager.
         }
-        assetsTab.x = 0;
-        assetsTab.y = 0;
-        assetsTab.setWidth(assetsTabWidth);
-        logTab.x = assetsTabWidth + tabGap;
-        logTab.y = 0;
-        logTab.setWidth(logTabWidth);
-        updateBottomTabState();
-        var contentY = geometry.console.y + tabHeight;
-        var contentHeight = Math.max(0, geometry.console.height - tabHeight);
-        console.x = geometry.console.x;
-        console.y = contentY;
-        console.layout(Math.max(0, geometry.console.width), contentHeight);
-        assetBrowser.layout(geometry.console.x, contentY,
-            Math.max(0, geometry.console.width), contentHeight);
 
-        viewportHud.visible = geometry.viewport.width >= 290 && geometry.viewport.height >= 80;
-        viewportHud.x = geometry.viewport.x + 8;
-        viewportHud.y = geometry.viewport.y + 8;
-        viewportHintSurface.x = Math.max(142, geometry.viewport.width - 88);
-        viewportHintIcon.x = viewportHintSurface.x + 7;
-        viewportHintIcon.y = 6;
-        viewportHintText.x = viewportHintSurface.x + 25;
-        viewportHintText.y = 4;
-        viewportHintHit.x = viewportHintSurface.x;
-        viewportHintHit.y = 0;
-
-        // Frameless performance readout sits under the WORLD strip at the
-        // viewport's top-right, inset from the same whole-pixel HUD origin.
-        perfText.x = Math.round(Math.max(0,
-            geometry.viewport.width - PERF_WIDTH - 16));
-        perfText.y = 30;
-
-        // Snap toolbar sits right of the view-mode strip and before the
-        // right-aligned World/Local control; hidden on very narrow viewports.
-        snapBar.x = viewModeStripWidth + 8;
-        snapBar.y = 0;
-        snapBar.visible = viewportHud.visible
-            && geometry.viewport.width >= viewModeStripWidth + 8 + 248 + 96;
-        // Camera-speed chip sits under the view-mode strip in the
-        // viewport's bottom-left corner (viewportHud is at viewport + 8).
-        // It only shows while flashing after a speed change.
-        cameraSpeedSurface.visible = viewportHud.visible && speedChipShown;
-        cameraSpeedText.visible = viewportHud.visible && speedChipShown;
-        cameraSpeedSurface.x = 0;
-        cameraSpeedSurface.y = Math.max(0, geometry.viewport.height - 40);
-        // Real, splitter-aware container height for popup clamping: the
-        // console splitter can shrink the viewport at any time, so the popup
-        // bounds are derived from the live layout, never a fixed estimate.
-        snapBar.setContainerHeight(Math.max(0, geometry.viewport.height - 16));
         var statusY = height - Theme.STATUS_BAR_HEIGHT;
         statusDot.x = 8;
         statusDot.y = statusY + 7;
@@ -1583,9 +1594,67 @@ class EditorShell {
         inputStatus.visible = false;
     }
 
+    /**
+     * Position every viewport overlay from the docking tree's live rect.
+     * Called by the viewport panel view, never directly from resize().
+     */
+    public function layoutViewportForDock(rect:LayoutRect):Void {
+        var rx = Math.round(rect.x);
+        var ry = Math.round(rect.y);
+        var rw = Math.round(Math.max(0, rect.width));
+        var rh = Math.round(Math.max(0, rect.height));
+        viewportRect = new LayoutRect(rx, ry, rw, rh);
+        viewportHit.x = rx;
+        viewportHit.y = ry;
+        viewportHit.width = rw;
+        viewportHit.height = rh;
+
+        viewportHud.visible = rw >= 290 && rh >= 80;
+        viewportHud.x = rx + 8;
+        viewportHud.y = ry + 8;
+        // The view-mode strip keeps its original visual inset, but its hit
+        // area starts a little further in so corner picks reach the viewport.
+        viewportModeHit.x = 20;
+        viewportHintSurface.x = Math.max(142, rw - 88);
+        viewportHintIcon.x = viewportHintSurface.x + 7;
+        viewportHintIcon.y = 6;
+        viewportHintText.x = viewportHintSurface.x + 25;
+        viewportHintText.y = 4;
+        viewportHintHit.x = viewportHintSurface.x;
+        viewportHintHit.y = 0;
+
+        perfText.x = Math.round(Math.max(0, rw - PERF_WIDTH - 16));
+        perfText.y = 30;
+
+        snapBar.x = viewModeStripWidth + 8;
+        snapBar.y = 0;
+        snapBar.visible = viewportHud.visible
+            && rw >= viewModeStripWidth + 8 + 248 + 96;
+        cameraSpeedSurface.visible = viewportHud.visible && speedChipShown;
+        cameraSpeedText.visible = viewportHud.visible && speedChipShown;
+        cameraSpeedSurface.x = 0;
+        cameraSpeedSurface.y = Math.max(0, rh - 40);
+        snapBar.setContainerHeight(Math.max(0, rh - 16));
+    }
+
+    public function setViewportPanelVisible(value:Bool):Void {
+        viewportHit.visible = value;
+        viewportHud.visible = value && viewportRect.width >= 290
+            && viewportRect.height >= 80;
+    }
+
+    public function layoutHierarchyForDock(width:Float):Void {
+        layoutHierarchy(width, Theme.TOP_BAR_HEIGHT);
+    }
+
+    public function layoutInspectorForDock(width:Float):Void {
+        layoutInspector(width, Theme.TOP_BAR_HEIGHT);
+    }
+
     function drawChrome(width:Float, height:Float, geometry:DockLayoutGeometry):Void {
         chromeRenderer.draw(chrome, width, height, geometry,
-            inspectorContentMask.visible);
+            inspectorContentMask.visible,
+            dockManager == null ? null : dockManager.panelBackgroundRects());
     }
 
     function layoutTopBars(width:Float):Void {
@@ -1673,6 +1742,10 @@ class EditorShell {
     }
 
     function layoutHierarchy(leftWidth:Float, bodyTop:Float):Void {
+        // The dock tab bar now owns the panel title; suppress the old header
+        // label so the same name is never drawn twice.
+        hierarchyTitleIcon.visible = false;
+        hierarchyTitle.visible = false;
         hierarchyPanelHit.x = 0;
         hierarchyPanelHit.y = bodyTop;
         hierarchyPanelHit.width = Math.max(0, leftWidth);
@@ -1707,6 +1780,9 @@ class EditorShell {
     }
 
     function layoutInspector(rightWidth:Float, bodyTop:Float):Void {
+        // The dock tab bar owns the title; avoid duplicate label text.
+        inspectorTitleIcon.visible = false;
+        inspectorTitle.visible = false;
         inspectorTitleIcon.x = 8;
         inspectorTitleIcon.y = bodyTop + 9;
         inspectorTitle.x = 29;
@@ -2643,14 +2719,15 @@ class EditorShell {
         // This menu has no draggable rows; clear state left by the toolbar menu.
         menuDropdown.dropViewport = null;
         menuDropdown.onDropPrimitive = null;
-        // Convert from inspector-mask coordinates to window coordinates: the
-        // mask is a child of the right panel, which carries the panel's X.
-        var buttonTop = rightContentMask.y + inspectorContentMask.y
-            - inspectorContentMask.scrollY + addComponentButton.y;
-        var menuX = rightContentMask.x + inspectorContentMask.x
-            + addComponentButton.x;
-        menuDropdown.open(menuX, buttonTop + addComponentButton.height,
-            items, "Search components...", addComponentButton.width, buttonTop);
+        // Derive window coordinates from the button's real transform: the
+        // inspector can be docked/floated anywhere, so mask-local arithmetic
+        // no longer describes its on-screen position. localToGlobal also
+        // accounts for the scrolling mask's offset.
+        var topLeft = addComponentButton.localToGlobal(new h2d.col.Point(0, 0));
+        var bottomLeft = addComponentButton.localToGlobal(
+            new h2d.col.Point(0, addComponentButton.height));
+        menuDropdown.open(bottomLeft.x, bottomLeft.y,
+            items, "Search components...", addComponentButton.width, topLeft.y);
     }
 
     /** Toolbar Add: a searchable creation menu covering every object kind. */
@@ -2777,4 +2854,292 @@ class EditorShell {
         }
         if (onToolChanged != null) onToolChanged(tool);
     }
+
+    // ------------------------------------------------------------------
+    // Docking panel registration
+    // ------------------------------------------------------------------
+
+    function registerDockPanels():Void {
+        hierarchyDockHost = new h2d.Object(panelLayer);
+        leftContentMask.remove();
+        hierarchyDockHost.addChild(leftContentMask);
+        inspectorDockHost = new h2d.Object(panelLayer);
+        rightContentMask.remove();
+        inspectorDockHost.addChild(rightContentMask);
+
+        dockRegistry.register({
+            id: "boltspark.hierarchy", displayName: "Scene Hierarchy", icon: 15,
+            factory: function() return new HierarchyDockView(this, hierarchyDockHost),
+            defaultSide: DockSide.Left, minWidth: Theme.MIN_LEFT_PANEL_WIDTH,
+            minHeight: 120, canClose: true, canFloat: true, canDock: true
+        });
+        dockRegistry.register({
+            id: "boltspark.viewport", displayName: "Scene View", icon: 39,
+            factory: function() return new ViewportDockView(this),
+            defaultSide: DockSide.Center, minWidth: Theme.MIN_CENTER_PANEL_WIDTH,
+            minHeight: 140, canClose: false, canFloat: false, canDock: false,
+            fixed: true
+        });
+        dockRegistry.register({
+            id: "boltspark.inspector", displayName: "Inspector", icon: 14,
+            factory: function() return new InspectorDockView(this, inspectorDockHost),
+            defaultSide: DockSide.Right, minWidth: Theme.MIN_RIGHT_PANEL_WIDTH,
+            minHeight: 120, canClose: true, canFloat: true, canDock: true
+        });
+        dockRegistry.register({
+            id: "boltspark.console", displayName: "Output Log", icon: 13,
+            factory: function() return new ConsoleDockView(this, console),
+            defaultSide: DockSide.Bottom, minWidth: 200, minHeight: 110,
+            canClose: true, canFloat: true, canDock: true
+        });
+        dockRegistry.register({
+            id: "boltspark.assets", displayName: "Asset Browser", icon: 24,
+            factory: function() return new AssetDockView(this, assetBrowser),
+            defaultSide: DockSide.Bottom, minWidth: 240, minHeight: 130,
+            canClose: true, canFloat: true, canDock: true
+        });
+    }
+
+    function setBottomTabFromDock(index:Int):Void {
+        if (activeBottomTab == index) return;
+        activeBottomTab = index;
+        dockLayout.bottomTab = index;
+        console.visible = index == 1;
+        assetBrowser.visible = index == 0;
+        updateBottomTabState();
+        Sys.println('[probe] bottom tab=${index == 0 ? "assets" : "log"}');
+        saveLayout();
+    }
+
+    function syncLegacyDockSizes():Void {
+        var sizes = dockManager.legacySizes();
+        dockLayout.setPreferred(sizes.left, sizes.right, sizes.console);
+        dockLayout.bottomTab = sizes.bottomTab;
+    }
+
+    function resetLegacyLayout():Void {
+        dockLayout.setPreferred(Theme.LEFT_PANEL_WIDTH,
+            Theme.RIGHT_PANEL_WIDTH, Theme.CONSOLE_HEIGHT);
+        dockLayout.bottomTab = 0;
+        saveLayout();
+    }
+
+    // ------------------------------------------------------------------
+    // Native HWND floating panel snapshots and edit routing
+    // ------------------------------------------------------------------
+
+    function buildNativePanelSnapshot(panelId:String):Dynamic {
+        switch (panelId) {
+            case "boltspark.console":
+                return {title: "Output Log", lines: console.snapshotLines()};
+            case "boltspark.hierarchy":
+                var rows:Array<Dynamic> = [];
+                for (entry in allHierarchyEntries) {
+                    rows.push({
+                        id: "h:" + entry.id,
+                        kind: "action",
+                        label: entry.name,
+                        depth: entry.depth,
+                        selected: entry.id == selectedObjectId
+                    });
+                }
+                return {title: "Scene Hierarchy", rows: rows};
+            case "boltspark.assets":
+                var rows:Array<Dynamic> = [];
+                var assets = onQueryAssets != null ? onQueryAssets() : [];
+                for (asset in assets) {
+                    rows.push({
+                        id: "a:" + asset.source,
+                        kind: "action",
+                        label: asset.name + "  ·  " + asset.kindLabel,
+                        depth: 0,
+                        selected: false
+                    });
+                }
+                return {title: "Asset Browser", rows: rows};
+            case "boltspark.inspector":
+                if (onQueryNativeInspector != null) {
+                    var snapshot = onQueryNativeInspector();
+                    if (snapshot != null) return snapshot;
+                }
+                return {title: "Inspector", rows: []};
+            default:
+                return {title: "Panel", rows: []};
+        }
+    }
+
+    function applyNativePanelEdit(panelId:String, id:String,
+            value:Dynamic):Void {
+        if (StringTools.startsWith(id, "h:")) {
+            var objectId = Std.parseInt(id.substr(2));
+            if (objectId == null) return;
+            if (onObjectsSelected != null) onObjectsSelected([objectId], objectId);
+            return;
+        }
+        if (StringTools.startsWith(id, "a:")) {
+            if (onOpenAsset != null) onOpenAsset(id.substr(2));
+            return;
+        }
+        if (panelId == "boltspark.inspector") {
+            applyNativeInspectorEdit(id, value);
+        }
+    }
+
+    function applyNativeInspectorEdit(id:String, value:Dynamic):Void {
+        // Encoded as p:<componentIndex>:<propertyId>:<axis>.
+        if (!StringTools.startsWith(id, "p:")) return;
+        var parts = id.split(":");
+        if (parts.length < 3) return;
+        var componentIndex = Std.parseInt(parts[1]);
+        var propertyId = parts[2];
+        if (componentIndex == null) return;
+        if (Std.isOfType(value, Float) || Std.isOfType(value, Int)) {
+            var axis = parts.length > 3 ? Std.parseInt(parts[3]) : 0;
+            if (axis == null) axis = 0;
+            if (onInspectorNumberChanged != null) {
+                onInspectorNumberChanged(componentIndex, propertyId, axis, value);
+            }
+            return;
+        }
+        if (Std.isOfType(value, Bool)) {
+            if (onInspectorBoolChanged != null) {
+                onInspectorBoolChanged(componentIndex, propertyId, value);
+            }
+            return;
+        }
+        if (Std.isOfType(value, String)) {
+            if (onInspectorAssetChanged != null) {
+                onInspectorAssetChanged(componentIndex, propertyId, value);
+            }
+        }
+    }
+
+    /** Called by Main after editor state changes to refresh native floats. */
+    public function refreshNativePanels():Void {
+        if (dockManager != null) dockManager.refreshNativePanels();
+    }
+
+    public function shutdownDockWindows():Void {
+        if (dockManager != null) dockManager.shutdown();
+    }
+}
+
+/** Retained H2D adapter: Scene Hierarchy lives in its own movable host. */
+private class HierarchyDockView implements DockPanelView {
+    public var panelId(default, null):String = "boltspark.hierarchy";
+    final shell:EditorShell;
+    final host:h2d.Object;
+    final mask:h2d.Mask;
+
+    public function new(shell:EditorShell, host:h2d.Object) {
+        this.shell = shell;
+        this.host = host;
+        mask = cast(host.getChildAt(0), h2d.Mask);
+    }
+
+    public function layout(rect:LayoutRect):Void {
+        // Whole-pixel origins keep the FreeType text atlas crisp.
+        host.x = Math.round(rect.x);
+        // Internal hierarchy coordinates include the title/toolbar offset, so
+        // shifting the host by that amount maps them to any absolute rect.
+        host.y = Math.round(rect.y - Theme.TOP_BAR_HEIGHT);
+        mask.width = Std.int(Math.max(0, rect.width));
+        mask.height = Std.int(Math.max(0, rect.height + Theme.TOP_BAR_HEIGHT));
+        mask.visible = rect.width >= 140 && rect.height > 0;
+        shell.layoutHierarchyForDock(rect.width);
+    }
+
+    public function setVisible(value:Bool):Void host.visible = value;
+
+    public function serializeState():Dynamic return null;
+
+    public function restoreState(state:Dynamic):Void {}
+}
+
+private class InspectorDockView implements DockPanelView {
+    public var panelId(default, null):String = "boltspark.inspector";
+    final shell:EditorShell;
+    final host:h2d.Object;
+    final mask:h2d.Mask;
+
+    public function new(shell:EditorShell, host:h2d.Object) {
+        this.shell = shell;
+        this.host = host;
+        mask = cast(host.getChildAt(0), h2d.Mask);
+    }
+
+    public function layout(rect:LayoutRect):Void {
+        host.x = Math.round(rect.x);
+        host.y = Math.round(rect.y - Theme.TOP_BAR_HEIGHT);
+        mask.width = Std.int(Math.max(0, rect.width));
+        mask.height = Std.int(Math.max(0, rect.height + Theme.TOP_BAR_HEIGHT));
+        mask.visible = rect.width >= 180 && rect.height > 0;
+        shell.layoutInspectorForDock(rect.width);
+    }
+
+    public function setVisible(value:Bool):Void host.visible = value;
+
+    public function serializeState():Dynamic return null;
+
+    public function restoreState(state:Dynamic):Void {}
+}
+
+private class ViewportDockView implements DockPanelView {
+    public var panelId(default, null):String = "boltspark.viewport";
+    final shell:EditorShell;
+
+    public function new(shell:EditorShell) this.shell = shell;
+
+    public function layout(rect:LayoutRect):Void shell.layoutViewportForDock(rect);
+
+    public function setVisible(value:Bool):Void shell.setViewportPanelVisible(value);
+
+    public function serializeState():Dynamic return null;
+
+    public function restoreState(state:Dynamic):Void {}
+}
+
+private class ConsoleDockView implements DockPanelView {
+    public var panelId(default, null):String = "boltspark.console";
+    final shell:EditorShell;
+    final panel:ConsolePanel;
+
+    public function new(shell:EditorShell, panel:ConsolePanel) {
+        this.shell = shell;
+        this.panel = panel;
+    }
+
+    public function layout(rect:LayoutRect):Void {
+        panel.x = Math.round(rect.x);
+        panel.y = Math.round(rect.y);
+        panel.layout(Math.max(0, rect.width), Math.max(0, rect.height));
+    }
+
+    public function setVisible(value:Bool):Void panel.visible = value;
+
+    public function serializeState():Dynamic return null;
+
+    public function restoreState(state:Dynamic):Void {}
+}
+
+private class AssetDockView implements DockPanelView {
+    public var panelId(default, null):String = "boltspark.assets";
+    final shell:EditorShell;
+    final browser:AssetBrowser;
+
+    public function new(shell:EditorShell, browser:AssetBrowser) {
+        this.shell = shell;
+        this.browser = browser;
+    }
+
+    public function layout(rect:LayoutRect):Void {
+        browser.layout(Math.round(rect.x), Math.round(rect.y),
+            Math.max(0, rect.width), Math.max(0, rect.height));
+    }
+
+    public function setVisible(value:Bool):Void browser.visible = value;
+
+    public function serializeState():Dynamic return null;
+
+    public function restoreState(state:Dynamic):Void {}
 }

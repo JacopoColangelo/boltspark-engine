@@ -8,12 +8,15 @@ package boltspark.ui.windows;
  */
 enum abstract ApplicationWindowKind(String) to String {
     var EditorKeybindings = "editor-keybindings";
+    /** Dedicated native HWND hosting one floating dock panel. */
+    var DockPanel = "dock-panel";
 
     static inline var ARGUMENT_PREFIX:String = "--boltspark-window=";
 
     public function displayName():String {
         return switch (this) {
             case EditorKeybindings: "Editor Keybindings";
+            case DockPanel: "Dock Panel";
             default: "Editor Window";
         };
     }
@@ -28,6 +31,7 @@ enum abstract ApplicationWindowKind(String) to String {
             if (!StringTools.startsWith(argument, ARGUMENT_PREFIX)) continue;
             var value = argument.substr(ARGUMENT_PREFIX.length);
             if (value == (EditorKeybindings : String)) return EditorKeybindings;
+            if (value == (DockPanel : String)) return DockPanel;
         }
         return null;
     }
