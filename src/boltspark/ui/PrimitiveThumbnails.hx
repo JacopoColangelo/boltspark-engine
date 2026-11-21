@@ -8,13 +8,10 @@ import boltspark.ui.UiIcons;
 /**
  * Draws the engine-content thumbnails in the Asset Browser and asset pickers.
  *
- * Preferred source is the offline-baked mipmapped bundle produced by
- * `ThumbnailBaker` (see `res/thumbnails/bundles/*.bundle`). Those bundles carry
- * a complete pre-filtered pyramid, so the continuous thumbnail-size slider can
- * rescale them with trilinear filtering and zero runtime 3D rendering.
- *
- * The original single-resolution PNGs remain as a fallback for builds that
- * have not run the bake step yet, so this stays drop-in compatible.
+ * The only source is the offline-baked mipmapped bundle produced by
+ * `ThumbnailBaker` (`res/thumbnails/bundles/*.bundle`). Each bundle carries a
+ * complete pre-filtered pyramid, so the continuous thumbnail-size slider can
+ * rescale it with trilinear filtering and zero runtime 3D rendering.
  */
 class PrimitiveThumbnails {
     static var cache:Map<String, h2d.Tile> = new Map();
@@ -36,8 +33,7 @@ class PrimitiveThumbnails {
             g.drawRect(x, y, width, height);
             g.endFill();
         } else {
-            // Unknown/custom assets get a neutral document glyph. Keep the
-            // pixel-exact atlas sampling for icons in reused Graphics objects.
+            // Unknown/custom assets get a neutral document glyph.
             g.smooth = false;
             var size = Math.min(width, height);
             UiIcons.draw(g, Document, x + (width - size) * 0.5,
@@ -63,24 +59,10 @@ class PrimitiveThumbnails {
             case PrimitiveMeshes.PLANE_ID: "plane";
             default: Material.find(assetId) != null ? "material" : null;
         };
-
-        // Mipmapped bundle (produced by the offline bake command).
-        if (resourceName != null) {
-            var baked = ThumbnailLoader.get(assetId, resourceName);
-            if (baked != null) {
-                cache.set(assetId, baked);
-                return baked;
-            }
-        }
-
-        // Legacy fallback: the original single-resolution in-engine renders.
-        // Loaded by path because `hxd.Res.load()` returns a generic Any and the
-        // bundles/ subfolder prevents stable generated hxd.Res field names.
         if (resourceName == null) return null;
-        var source = hxd.Res.loader.loadCache(
-            "thumbnails/" + resourceName + ".png", hxd.res.Image);
-        var tile = source.toTile();
-        cache.set(assetId, tile);
+
+        var tile = ThumbnailLoader.get(assetId, resourceName);
+        if (tile != null) cache.set(assetId, tile);
         return tile;
     }
 }

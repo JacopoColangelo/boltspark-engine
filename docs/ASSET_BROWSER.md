@@ -101,14 +101,16 @@ recreating Unreal/Unity asset infrastructure.
   Engine folder is browsable but cannot be renamed, moved, or deleted.
 - Engine assets cannot be renamed, duplicated, moved, or deleted on disk: those
   commands are guarded and instead show a status hint.
-- Each asset preview is a pre-baked in-engine render shipped as an embedded
-  PNG at 512px under `res/thumbnails/` (not generated at runtime). They are
-  supersampled 2x and area-averaged at bake time for antialiased edges, so no
-  runtime filtering is needed and the slider never magnifies them. Primitives are shown
-  upright on a solid light-grey background under soft diffuse lighting, and the
-  Default Material is shown applied to a sphere. `PrimitiveThumbnails` loads
-  the PNGs directly on first use and reuses them in grid tiles, compact/detail
-  rows, the folder tree, and the framed Inspector slot.
+- Each asset preview is an offline-baked, mipmapped bundle under
+  `res/thumbnails/bundles/` (not generated at runtime). The bake renders the
+  mesh at 1024x1024 with FXAA and a tent resolve pass, then stores a complete
+  premultiplied-linear mip pyramid as PNG-compressed levels. `ThumbnailLoader`
+  uploads the levels into one trilinearly filtered texture and
+  `PrimitiveThumbnails` reuses that tile in grid tiles, compact/detail rows,
+  the folder tree, and the framed Inspector slot, so the size slider stays
+  crisp at every step. Primitives are framed tightly with soft top-right
+  studio lighting on a transparent background; the Default Material is shown
+  as an orange sphere through the same path.
 - Dragging an engine asset out of the browser starts a typed drag session. Mesh
   assets only drop onto the Mesh slot of a MeshRenderer Inspector and material
   assets only onto its Material slot. The picker is a framed slot: a compatible

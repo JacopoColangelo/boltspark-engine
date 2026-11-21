@@ -116,7 +116,7 @@ Engine-content thumbnails are baked offline; the editor never renders a 3D scene
 .\tools\build.ps1                            # rebuild to embed the new bundles
 ```
 
-Bundles are optional: until one is baked, the UI keeps using the legacy single-resolution PNGs in `res\thumbnails`. The CPU half of the pipeline (halo-free mips + bundle round-trip) is covered by `ThumbnailPipelineRepro`.
+The baked bundles in `res\thumbnails\bundles` are the only thumbnail source; there is no runtime PNG fallback. The CPU half of the pipeline (halo-free mips + bundle round-trip) is covered by `ThumbnailPipelineRepro`.
 
 To open a project from the command line or a file association, pass the manifest path:
 

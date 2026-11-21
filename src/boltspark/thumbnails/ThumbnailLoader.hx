@@ -28,7 +28,7 @@ class ThumbnailLoader {
      * its extension under `res/thumbnails/bundles/`. When omitted it is derived from
      * the cache key with `ThumbnailBaker.bundleResourceName()`.
      *
-     * @return null when no bundle exists, so callers can keep a legacy fallback.
+     * @return null when no bundle exists, so callers can draw a placeholder.
      */
     public static function get(cacheKey:String, ?resourceName:String):Null<h2d.Tile> {
         if (cacheKey == null) return null;
