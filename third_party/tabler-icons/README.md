@@ -8,7 +8,7 @@ BoltUI uses selected icons from **Tabler Icons v3.52.0**, released on
 - Raster source package: `@tabler/icons-png@3.52.0`
 - License: MIT; see [`LICENSE`](LICENSE)
 - Runtime atlas: `src/res/icons/tabler_ui.png`
-- Atlas SHA-256: `5F51E2AB778DB236866B417FDF6DBF087C09F665D321E807DA96851C755D9DB6`
+- Atlas SHA-256: `F07E185C74DE57BA2BF0811E3DE24697533738DB5DDC56AE55BE39B9165DB542`
 - Scene thumbnail mask: `src/res/icons/scene_thumb.png` (`outline/photo`, 64px)
 - Scene thumbnail SHA-256: `BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722682CC8AD6B0C2`
 - Folder thumbnail mask: `src/res/icons/folder_thumb.png` (`outline/folder`, 64px)
@@ -68,4 +68,5 @@ dependency at runtime.
 | `Camera` | `outline/camera` |
 | `Check` | `outline/check` |
 | `Minus` | `outline/minus` |
+| `Eraser` | `outline/eraser` |
 | Scene thumbnail (asset browser) | `outline/photo` |

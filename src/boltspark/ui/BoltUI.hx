@@ -37,6 +37,8 @@ class BoltUI {
     /** Add an empty object in front of the viewport camera. */
     public var onAddEmptyObjectInFront:Null<Void->Void>;
     public var onDropPrimitive:Null<String->Float->Float->Void>;
+    /** Engine mesh asset dropped on the hierarchy: mesh id + parent id. */
+    public var onCreatePrimitiveInHierarchy:Null<String->Int->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
@@ -123,6 +125,8 @@ class BoltUI {
     public var onWindowFocusLost:Null<Void->Void>;
     /** G: toggle the independent editor grid. */
     public var onToggleGrid:Null<Void->Void>;
+    /** Current grid visibility, mirrored by the camera-settings checkbox. */
+    public var onQueryGridVisible:Null<Void->Bool>;
     /** Fired with the new horizontal FOV whenever the FOV field is edited. */
     public var onFovChanged:Null<Float->Void>;
     /** F: frame the primary selection in the viewport. */
@@ -141,6 +145,11 @@ class BoltUI {
         };
         shell.onDropPrimitive = function(meshId, x, y) {
             if (onDropPrimitive != null) onDropPrimitive(meshId, x, y);
+        };
+        shell.onCreatePrimitiveInHierarchy = function(meshId, parentId) {
+            if (onCreatePrimitiveInHierarchy != null) {
+                onCreatePrimitiveInHierarchy(meshId, parentId);
+            }
         };
         shell.onDeleteObjects = function(ids) if (onDeleteObjects != null) onDeleteObjects(ids);
         shell.onObjectsSelected = function(ids, primary) {
@@ -343,6 +352,9 @@ class BoltUI {
         shell.onToggleGrid = function() {
             if (onToggleGrid != null) onToggleGrid();
         };
+        shell.onQueryGridVisible = function() {
+            return onQueryGridVisible != null && onQueryGridVisible();
+        };
         shell.onFovChanged = function(value) {
             if (onFovChanged != null) onFovChanged(value);
         };
@@ -387,6 +399,16 @@ class BoltUI {
 
     public function getViewportRect():LayoutRect {
         return shell.viewportRect;
+    }
+
+    /** Floating label for asset drags over the 3D viewport. */
+    public function showViewportDropHint(text:String, x:Float, y:Float,
+            viewport:LayoutRect):Void {
+        shell.showViewportDropHint(text, x, y, viewport);
+    }
+
+    public function hideViewportDropHint():Void {
+        shell.hideViewportDropHint();
     }
 
     /** UI font for editor overlay text (viewport axis gizmo letters). */

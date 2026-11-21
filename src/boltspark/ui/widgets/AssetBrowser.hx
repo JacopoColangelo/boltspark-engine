@@ -87,6 +87,8 @@ class AssetBrowser extends h2d.Object {
 
     static inline var ROW_HEIGHT:Float = 22;
     static inline var LIST_ROW_HEIGHT:Float = 20;
+    /** Pixels scrolled per wheel notch, independent of how many items exist. */
+    static inline var WHEEL_STEP:Float = 48;
     static inline var TILE_GAP:Float = 8;
     /** Space reserved under a grid preview for its name. */
     static inline var TILE_LABEL_HEIGHT:Float = 20;
@@ -871,9 +873,12 @@ class AssetBrowser extends h2d.Object {
             filterButton.y = 3;
             filterButton.setWidth(filterWidth);
         }
-        searchField.x = place(searchWidth);
+        // Snap to whole pixels: a fractional origin makes the FreeType atlas
+        // glyphs sample between texels, so "Search assets..." renders blurry
+        // while the integer-aligned hierarchy search field stays crisp.
+        searchField.x = Math.round(place(searchWidth));
         searchField.y = 3;
-        searchField.setWidth(searchWidth);
+        searchField.setWidth(Math.round(searchWidth));
 
         backButton.x = 4;
         forwardButton.x = 28;
@@ -1591,8 +1596,7 @@ class AssetBrowser extends h2d.Object {
         var over = Math.max(0, treeContentHeight - treeMask.height);
         if (over <= 0) return;
         treeScrollValue = Math.max(0, Math.min(1,
-            treeScrollValue + delta * ROW_HEIGHT / over));
-        Sys.println('[probe] asset browser tree scroll=${treeScrollValue}');
+            treeScrollValue + delta * WHEEL_STEP / over));
         buildFolders();
     }
 
@@ -1670,7 +1674,6 @@ class AssetBrowser extends h2d.Object {
         var content = contentHeight(items.length);
         var view = gridViewportHeight();
         var ratio = content <= 0 ? 1.0 : Math.min(1.0, view / content);
-        if (ratio < 1) Sys.println('[probe] asset browser scrollable=true tiles=${items.length}');
         gridScroll.setMetrics(ratio, scrollValue);
         gridScroll.setBounds(Math.max(0, folderWidth + centerWidth() - 10),
             TOOLBAR_HEIGHT + 2, 6, Math.max(0, view - 4));
@@ -1727,17 +1730,23 @@ class AssetBrowser extends h2d.Object {
         }
     }
 
-    /** Folder tile preview: the pinned Tabler folder glyph on a card. */
+    /** Folder tile preview: the pinned Tabler folder glyph on a square card. */
     function drawFolderPreview(g:h2d.Graphics, x:Float, y:Float,
             w:Float, h:Float, selected:Bool):Void {
+        // Same square, centered card geometry as drawPreview so folder tiles
+        // match scenes and engine assets instead of stretching wide.
+        var cardSize = Math.min(w, h);
+        var cardX = x + (w - cardSize) * 0.5;
+        var cardY = y + (h - cardSize) * 0.5;
         g.beginFill(selected ? 0x245045 : Theme.SURFACE_1);
-        g.drawRect(x, y, w, h);
+        g.drawRect(cardX, cardY, cardSize, cardSize);
         g.endFill();
         g.lineStyle(1, selected ? Theme.ACCENT : Theme.SURFACE_3);
-        g.drawRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        g.drawRect(cardX + 0.5, cardY + 0.5, cardSize - 1, cardSize - 1);
         g.lineStyle(0);
-        var size = Math.min(w, h) * 0.62;
-        UiIcons.drawFolderThumb(g, x + (w - size) * 0.5, y + (h - size) * 0.5,
+        var size = cardSize * 0.62;
+        UiIcons.drawFolderThumb(g, cardX + (cardSize - size) * 0.5,
+            cardY + (cardSize - size) * 0.5,
             size, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
     }
 
@@ -1823,16 +1832,11 @@ class AssetBrowser extends h2d.Object {
             }
         }
         // Selection frame is drawn last: the engine thumbnail fills the card
-        // and would otherwise paint over the border.
-        if (selected) {
-            g.lineStyle(2, Theme.ACCENT, 1);
-            g.drawRect(cardX + 1, cardY + 1, cardSize - 2, cardSize - 2);
-            g.lineStyle();
-        } else {
-            g.lineStyle(1, Theme.SURFACE_3, 1);
-            g.drawRect(cardX + 0.5, cardY + 0.5, cardSize - 1, cardSize - 1);
-            g.lineStyle();
-        }
+        // and would otherwise paint over the border. Keep the stroke at 1px
+        // in both states so selecting a card doesn't add an extra border width.
+        g.lineStyle(1, selected ? Theme.ACCENT : Theme.SURFACE_3, 1);
+        g.drawRect(cardX + 0.5, cardY + 0.5, cardSize - 1, cardSize - 1);
+        g.lineStyle();
         if (entry.active) {
             g.beginFill(Theme.ACCENT);
             g.drawCircle(cardX + 9, cardY + 9, 3);
@@ -2074,14 +2078,13 @@ class AssetBrowser extends h2d.Object {
     function handleWheelDelta(delta:Float):Void {
         var over = Math.max(0, contentHeight(shownItems.length) - gridViewportHeight());
         if (over <= 0) return;
-        var rows = viewMode == 0
-            ? Math.max(1, Math.ceil(shownItems.length / Math.max(1, gridColumns())))
-            : Math.max(1, shownItems.length);
         // Windows WM_MOUSEWHEEL: wheel-down is a negative WPARAM. hldx divides
         // by 120 and hxd.Window negates again, so wheel-down arrives here as a
         // positive delta. Adding it moves the viewport toward the end.
-        scrollValue = Math.max(0, Math.min(1, scrollValue + delta * 0.12 / rows));
-        Sys.println('[probe] asset browser scroll=${scrollValue} delta=${delta}');
+        // Use a fixed pixel step: the old 0.12/rows fraction made a notch move
+        // less and less as the item count grew, which felt sluggish.
+        scrollValue = Math.max(0, Math.min(1,
+            scrollValue + delta * WHEEL_STEP / over));
         buildAssets();
     }
 
@@ -2229,7 +2232,12 @@ class AssetBrowser extends h2d.Object {
                     dragGhost.x = ctx.window.mouseX - this.x + 10;
                     dragGhost.y = ctx.window.mouseY - this.y + 8;
                     if (dragging) {
-                        AssetDragSession.update(ctx.window.mouseX, ctx.window.mouseY);
+                        var hovered = AssetDragSession.update(
+                            ctx.window.mouseX, ctx.window.mouseY);
+                        // The viewport shows its own framed hint; a second label
+                        // at the same cursor offset would clip into it.
+                        dragGhost.visible = hovered == null
+                            || !hovered.hideGhostOnHover;
                     }
                     capturedEvent.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:

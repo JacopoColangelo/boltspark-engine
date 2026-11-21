@@ -31,7 +31,12 @@ class KeybindingsWindowApp extends hxd.App {
             NativeWindow.setOwnerProcess(nativeWindow, ownerProcessId);
         }
         nativeWindow.title = "Editor Keybindings — Boltspark Engine";
-        nativeWindow.vsync = true;
+        // This is a static UI-only window. With vsync on, the interactive
+        // resize callback's forced frame blocks on a present at every Win32
+        // size step, so Windows alternates between a fresh frame and a
+        // stretched one while the border is dragged. Without vsync the forced
+        // frames stay cheap and the resize stays smooth.
+        nativeWindow.vsync = false;
         nativeWindow.resize(KeybindingsWindowContent.DEFAULT_WIDTH,
             KeybindingsWindowContent.DEFAULT_HEIGHT);
 
@@ -141,7 +146,7 @@ class KeybindingsWindowApp extends hxd.App {
         }
         #end
         NativeWindow.activate(nativeWindow);
-        nativeWindow.vsync = true;
+        nativeWindow.vsync = false;
         windowVisible = true;
     }
 

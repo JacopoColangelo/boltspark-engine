@@ -5,6 +5,8 @@ import boltspark.ui.UiContext;
 import boltspark.ui.UiIcons;
 import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
+import boltspark.ui.widgets.MenuDropdown;
+import boltspark.ui.widgets.MenuDropdown.MenuItem;
 
 class ConsolePanel extends h2d.Object {
     public static inline var MAX_LINES:Int = 500;
@@ -20,6 +22,9 @@ class ConsolePanel extends h2d.Object {
     final titleIcon:h2d.Graphics;
     final clearButton:UiButton;
     final scrollBar:ScrollBar;
+    /** Full-panel catch for right-click context menu; left/hover pass through. */
+    final panelHit:h2d.Interactive;
+    final contextMenu:MenuDropdown;
     final lines:Array<String> = [];
     final lineHeight:Float;
     var contentWidth:Float = 0;
@@ -43,9 +48,15 @@ class ConsolePanel extends h2d.Object {
         title.x = 25;
         title.y = 5;
 
-        clearButton = new UiButton(ctx, "Clear", 74, 22, this);
-        clearButton.setIcon(Trash).setQuiet();
-        clearButton.onClick = clear;
+        // Icon-only and narrow so it stays clear of the bottom-dock tabs.
+        // Eraser reads as "clear the log" without the destructive trash-bin
+        // connotation, and the framed style matches the other editor buttons.
+        clearButton = new UiButton(ctx, "", 26, 20, this);
+        clearButton.setIcon(Eraser).setIconSize(12);
+        clearButton.onClick = function() {
+            contextMenu.close();
+            clear();
+        };
 
         contentMask = new h2d.Mask(0, 0, this);
         contentMask.x = 0;
@@ -72,6 +83,29 @@ class ConsolePanel extends h2d.Object {
         scrollBar.onWheel = function(delta) {
             return scrollLines(Std.int(Math.round(delta * 3)));
         };
+
+        // Right-click anywhere in the log opens a small context menu. The
+        // catch is transparent and sits above the other controls, so it must
+        // pass every event it does not handle through to them; otherwise it
+        // would swallow clicks on the Clear button and wheel scrolling.
+        panelHit = new h2d.Interactive(0, 0, this);
+        panelHit.backgroundColor = 0;
+        panelHit.cursor = hxd.Cursor.Default;
+        panelHit.enableRightButton = true;
+        panelHit.cancelEvents = true;
+        panelHit.onPush = function(event) {
+            if (event.button != 1) return; // cancelEvents forwards left clicks
+            event.propagate = false;
+            var point = localToGlobal(new h2d.col.Point(event.relX, event.relY));
+            contextMenu.open(point.x, point.y, [{
+                label: "Clear Output Log",
+                onClick: clear
+            }]);
+        };
+        // The menu lives in the root scene so it can render above the docked
+        // console without being clipped by the panel's masks.
+        var scene = getScene();
+        contextMenu = new MenuDropdown(ctx, scene == null ? this : scene);
     }
 
     public function log(line:String):Void {
@@ -112,8 +146,8 @@ class ConsolePanel extends h2d.Object {
 
         titleIcon.x = 5;
         titleIcon.y = 7;
-        clearButton.x = Math.max(0, safeW - 78);
-        clearButton.y = 3;
+        clearButton.x = Math.max(0, safeW - 30);
+        clearButton.y = 4;
         bodySurface.x = 0;
         bodySurface.y = 28;
         bodySurface.setSize(Math.max(0, safeW), Math.max(0, safeH - 28));
@@ -127,6 +161,10 @@ class ConsolePanel extends h2d.Object {
         scrollHit.height = contentMask.height;
         visibleLines = Std.int(Math.floor(contentHeight / Math.max(1, lineHeight)));
         scrollBar.setBounds(Math.max(0, safeW - 8), 32, 4, Math.max(0, contentHeight - 6));
+        panelHit.x = 0;
+        panelHit.y = 0;
+        panelHit.width = safeW;
+        panelHit.height = safeH;
         updateScrollBar();
         refresh();
     }

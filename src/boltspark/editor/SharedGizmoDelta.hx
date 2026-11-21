@@ -27,6 +27,31 @@ class SharedGizmoDelta {
 
     static inline var EPSILON:Float = 0.000000001;
 
+    /** Compose an authored local transform with its parent's world matrix. */
+    public static function worldFromParent(localWorld:EditorTransform,
+            parentWorld:Null<TransformMatrix>,
+            ?hint:EditorTransform):EditorTransform {
+        if (localWorld == null) throw "Local transform cannot be null";
+        if (parentWorld == null) return localWorld.clone();
+        return EditorTransform.fromMatrix(
+            parentWorld.multiplied(localWorld.toMatrix()), hint);
+    }
+
+    /**
+     * Convert a desired world transform into a local transform against the
+     * parent's previewed world matrix. During a shared drag the session model
+     * still holds the drag-start transform, so resolving against that stale
+     * matrix would double-apply a selected parent's delta to its children.
+     */
+    public static function localForWorld(desiredWorld:EditorTransform,
+            parentWorld:Null<TransformMatrix>,
+            hint:EditorTransform):EditorTransform {
+        if (desiredWorld == null) throw "Desired world transform cannot be null";
+        if (parentWorld == null) return desiredWorld.clone();
+        return EditorTransform.fromMatrix(
+            parentWorld.inverse().multiplied(desiredWorld.toMatrix()), hint);
+    }
+
     public static function apply(startWorld:EditorTransform,
             pivotStart:EditorTransform, pivotEnd:EditorTransform,
             mode:Int):EditorTransform {

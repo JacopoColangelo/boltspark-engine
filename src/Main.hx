@@ -16,11 +16,13 @@ import boltspark.editor.SelectionClick;
 import boltspark.editor.SelectionOutlineEdges;
 import boltspark.editor.SharedGizmoDelta;
 import boltspark.editor.TransformGizmo;
+import boltspark.editor.TransformMatrix;
 import boltspark.editor.WorldBounds;
 import boltspark.engine.ComponentRegistry;
 import boltspark.engine.Component;
 import boltspark.engine.MeshRenderer;
 import boltspark.engine.Mesh3D;
+import boltspark.engine.inspector.AssetType;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.engine.inspector.ComponentPropertyData;
 import boltspark.engine.PrimitiveGameObjects;
@@ -31,7 +33,12 @@ import boltspark.platform.InteractiveResize;
 import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
+import boltspark.engine.Material;
 import boltspark.ui.AppIcon;
+import boltspark.ui.AssetDragPayload;
+import boltspark.ui.AssetDragSession;
+import boltspark.ui.AssetDropRect;
+import boltspark.ui.AssetDropTarget;
 import boltspark.ui.BoltUI;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
@@ -62,6 +69,15 @@ class Main extends hxd.App {
     /** Editor free-fly camera navigation (RMB look, WASDQE, pan, orbit). */
     var cameraController:EditorCameraController;
     var selectionOutline:h3d.scene.Graphics;
+    var viewportDropOutline:h3d.scene.Graphics;
+    /** Asset drags from the browser can drop onto the 3D viewport. */
+    var viewportMeshDropTarget:Null<AssetDropTarget>;
+    var viewportMaterialDropTarget:Null<AssetDropTarget>;
+    /** 0 = none, 1 = mesh, 2 = material; set by drop-target highlight. */
+    var viewportDragKind:Int = 0;
+    var viewportHoverObject:Null<SceneObject>;
+    var viewportHoverMaterialIndex:Int = 0;
+    var viewportDropOutlineDrawn:Bool = false;
     /** Reused inverse world matrix for local-space silhouette classification. */
     final outlineInverse:h3d.Matrix = new h3d.Matrix();
     /** Heaps render views synchronized from the renderer-independent session. */
@@ -107,6 +123,9 @@ class Main extends hxd.App {
     // edited by a single scrub/type gesture (mirrors the single-object path).
     final inspectorEditIds:Array<Int> = [];
     final inspectorEditBefores:Array<EditorTransform> = [];
+    /** World + parent-world snapshots for multi-selection Inspector gestures. */
+    final inspectorEditWorldBefores:Array<EditorTransform> = [];
+    final inspectorEditParentWorldBefores:Array<Null<TransformMatrix>> = [];
     // Primitive-settings gesture snapshots. Numeric fields bracket every edit
     // (scrub, typed commit, arrow step) with onEditBegin/onEditEnd; history is
     // committed at gesture end so a drag never rebuilds the Inspector
@@ -228,6 +247,7 @@ class Main extends hxd.App {
         boltUI.onCreatePrimitive = createPrimitive;
         boltUI.onAddEmptyObjectInFront = createEmptyObjectInFront;
         boltUI.onDropPrimitive = createPrimitiveAtViewport;
+        boltUI.onCreatePrimitiveInHierarchy = createPrimitiveInHierarchy;
         boltUI.onDeleteObjects = deleteSceneObjects;
         boltUI.onObjectsSelected = selectSceneObjects;
         boltUI.onInspectorNumberChanged = applyInspectorNumberChange;
@@ -314,6 +334,7 @@ class Main extends hxd.App {
             cameraController.onWindowFocusLost();
         };
         boltUI.onToggleGrid = toggleEditorGrid;
+        boltUI.onQueryGridVisible = function() return gridRenderer.visible;
         boltUI.onFovChanged = function(value) {
             printActivity('[viewport] fov=${Math.round(value)}°');
         };
@@ -347,6 +368,7 @@ class Main extends hxd.App {
         // callback above exists; refreshing earlier silently yields an empty
         // list and hides engine assets even with the preference enabled.
         boltUI.refreshAssetBrowser();
+        registerViewportDropTargets();
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
@@ -415,6 +437,7 @@ class Main extends hxd.App {
         cameraController.update(dt);
         boltUI.update(dt);
         axisGizmo.update();
+        updateViewportDropHover();
         refreshCameraSpeedLabel();
         if (verboseLogging) {
             cameraTelemetryTimer += dt;
@@ -891,11 +914,18 @@ class Main extends hxd.App {
             inspectorEditBefore = null;
             inspectorEditIds.resize(0);
             inspectorEditBefores.resize(0);
+            inspectorEditWorldBefores.resize(0);
+            inspectorEditParentWorldBefores.resize(0);
             for (id in editorSession.selectedObjectIds) {
                 var sceneObject = findSceneObject(id);
-                if (sceneObject == null) continue;
+                var model = editorSession.findObject(id);
+                if (sceneObject == null || model == null) continue;
                 inspectorEditIds.push(id);
                 inspectorEditBefores.push(sceneObject.captureTransform());
+                inspectorEditWorldBefores.push(
+                    editorSession.hierarchy.worldTransform(model));
+                inspectorEditParentWorldBefores.push(model.parent == null
+                    ? null : editorSession.hierarchy.worldMatrix(model.parent));
             }
             return;
         }
@@ -948,6 +978,8 @@ class Main extends hxd.App {
         inspectorEditBefore = null;
         inspectorEditIds.resize(0);
         inspectorEditBefores.resize(0);
+        inspectorEditWorldBefores.resize(0);
+        inspectorEditParentWorldBefores.resize(0);
     }
 
     function inspectorTransformLabel(name:String, row:Int, axis:Int):String {
@@ -987,6 +1019,20 @@ class Main extends hxd.App {
         return null;
     }
 
+    function gestureStartWorld(id:Int):Null<EditorTransform> {
+        for (index in 0...inspectorEditIds.length) {
+            if (inspectorEditIds[index] == id) return inspectorEditWorldBefores[index];
+        }
+        return null;
+    }
+
+    function gestureStartParentWorld(id:Int):Null<TransformMatrix> {
+        for (index in 0...inspectorEditIds.length) {
+            if (inspectorEditIds[index] == id) return inspectorEditParentWorldBefores[index];
+        }
+        return null;
+    }
+
     static function transformRotationDegrees(t:EditorTransform):h3d.Vector {
         var quat = new h3d.Quat();
         quat.set(t.rotationX, t.rotationY, t.rotationZ, t.rotationW);
@@ -1007,98 +1053,137 @@ class Main extends hxd.App {
         };
     }
 
+    /** Build a local transform with one authored axis replaced by `value`. */
+    function transformWithAxisValue(source:EditorTransform, row:Int, axis:Int,
+            value:Float):EditorTransform {
+        var result = source.clone();
+        switch (row) {
+            case 0:
+                switch (axis) {
+                    case 0: result.positionX = value;
+                    case 1: result.positionY = value;
+                    default: result.positionZ = value;
+                }
+            case 1:
+                var euler = transformRotationDegrees(source);
+                switch (axis) {
+                    case 0: euler.x = value;
+                    case 1: euler.y = value;
+                    default: euler.z = value;
+                }
+                var quat = new h3d.Quat();
+                quat.initRotation(degToRad(euler.z), degToRad(euler.y),
+                    degToRad(euler.x));
+                result.rotationX = quat.x;
+                result.rotationY = quat.y;
+                result.rotationZ = quat.z;
+                result.rotationW = quat.w;
+                result.rotationHintX = euler.x;
+                result.rotationHintY = euler.y;
+                result.rotationHintZ = euler.z;
+                result.rotationHintValid = true;
+            default:
+                var previous = switch (axis) {
+                    case 0: source.scaleX;
+                    case 1: source.scaleY;
+                    default: source.scaleZ;
+                };
+                var clamped = clampedScale(value, previous);
+                if (scaleProportionsLinked) {
+                    var ratio = clamped / ScalePolicy.nonZero(previous, clamped);
+                    result.scaleX = clampedScale(result.scaleX * ratio, result.scaleX);
+                    result.scaleY = clampedScale(result.scaleY * ratio, result.scaleY);
+                    result.scaleZ = clampedScale(result.scaleZ * ratio, result.scaleZ);
+                } else {
+                    switch (axis) {
+                        case 0: result.scaleX = clamped;
+                        case 1: result.scaleY = clamped;
+                        default: result.scaleZ = clamped;
+                    }
+                }
+        }
+        return result;
+    }
+
+    /**
+     * Multi-selection Inspector sliders use the same world-space delta as the
+     * gizmo. Editing a selected parent and child together must not apply the
+     * parent's motion twice to the child, so every target world is converted
+     * back to local against the parent's previewed world matrix.
+     */
     function multiTransformEdit(row:Int, axis:Int, value:Float):Void {
         var objects = selectedSceneObjects();
         if (objects.length == 0) return;
-        // The Inspector edits the primary object's displayed value. Apply that
-        // edit as a delta from each object's gesture-start transform, exactly
-        // like a shared gizmo drag, so relative offsets are preserved.
-        // The displayed base value comes from the active object, which need
-        // not be first in selection order after a Ctrl/shift-click.
         var primary = getSelectedObject();
         if (primary == null || !containsObject(objects, primary.id)) primary = objects[0];
-        var primaryBefore = gestureStartTransform(primary.id);
-        if (primaryBefore == null) primaryBefore = primary.captureTransform();
-        var delta = value - transformAxisValue(primaryBefore, row, axis);
+
+        var primaryBeforeLocal = gestureStartTransform(primary.id);
+        if (primaryBeforeLocal == null) primaryBeforeLocal = primary.captureTransform();
+        var primaryBeforeWorld = gestureStartWorld(primary.id);
+        if (primaryBeforeWorld == null) {
+            var primaryModel = editorSession.findObject(primary.id);
+            primaryBeforeWorld = primaryModel == null ? null
+                : editorSession.hierarchy.worldTransform(primaryModel);
+        }
+        if (primaryBeforeWorld == null) return;
+
+        var desiredPrimaryWorld = localTransformSpace
+            ? SharedGizmoDelta.worldFromParent(
+                transformWithAxisValue(primaryBeforeLocal, row, axis, value),
+                gestureStartParentWorld(primary.id), primaryBeforeWorld)
+            : transformWithAxisValue(primaryBeforeWorld, row, axis, value);
+        var mode = switch (row) {
+            case 0: SharedGizmoDelta.MOVE;
+            case 1: SharedGizmoDelta.ROTATE;
+            default: SharedGizmoDelta.SCALE;
+        };
+
+        // Resolve all desired worlds first so a selected parent is projected
+        // with its previewed matrix when its children are converted to local.
+        var desiredWorldById:Map<Int, EditorTransform> = new Map();
         for (sceneObject in objects) {
-            var before = gestureStartTransform(sceneObject.id);
-            if (before == null) before = sceneObject.captureTransform();
-            var target = transformAxisValue(before, row, axis) + delta;
-            switch (row) {
-                case 0: applyMultiPosition(sceneObject, axis, target);
-                case 1: applyMultiRotation(sceneObject, axis, target, before);
-                default: applyMultiScale(sceneObject, axis, target, before);
+            var beforeWorld = gestureStartWorld(sceneObject.id);
+            if (beforeWorld == null) {
+                var model = editorSession.findObject(sceneObject.id);
+                beforeWorld = model == null ? null
+                    : editorSession.hierarchy.worldTransform(model);
             }
+            if (beforeWorld == null) continue;
+            desiredWorldById.set(sceneObject.id, SharedGizmoDelta.apply(
+                beforeWorld, primaryBeforeWorld, desiredPrimaryWorld, mode));
+        }
+
+        for (sceneObject in objects) {
+            var desired = desiredWorldById.get(sceneObject.id);
+            if (desired == null) continue;
+            var model = editorSession.findObject(sceneObject.id);
+            var parentWorld = gestureStartParentWorld(sceneObject.id);
+            if (model != null && model.parent != null
+                    && desiredWorldById.exists(model.parent.id)) {
+                parentWorld = desiredWorldById.get(model.parent.id).toMatrix();
+            }
+            var beforeLocal = gestureStartTransform(sceneObject.id);
+            if (beforeLocal == null) beforeLocal = sceneObject.captureTransform();
+            var local = SharedGizmoDelta.localForWorld(
+                desired, parentWorld, beforeLocal);
+            var previous = sceneObject.captureTransform();
+            if (row == 2) {
+                var bounded = WorldBounds.fitScale(sceneObject.mesh,
+                    local.scaleX, local.scaleY, local.scaleZ,
+                    function(x, y, z) applySceneObjectScale(sceneObject, x, y, z));
+                local.scaleX = bounded.x;
+                local.scaleY = bounded.y;
+                local.scaleZ = bounded.z;
+            }
+            sceneObject.applyTransform(local);
+            if (!containSceneObject(sceneObject)) {
+                sceneObject.applyTransform(previous);
+                continue;
+            }
+            refreshScaleRendering(sceneObject);
         }
         refreshGizmoFromSelection();
         pushSelectionInspectorTransform();
-    }
-
-    function applyMultiPosition(sceneObject:SceneObject, axis:Int,
-            value:Float):Void {
-        var previous = sceneObject.captureTransform();
-        var desired = previous.clone();
-        switch (axis) {
-            case 0: desired.positionX = value;
-            case 1: desired.positionY = value;
-            default: desired.positionZ = value;
-        }
-        sceneObject.applyTransform(desired);
-        if (!containSceneObject(sceneObject)) sceneObject.applyTransform(previous);
-    }
-
-    function applyMultiRotation(sceneObject:SceneObject, axis:Int,
-            degrees:Float, before:EditorTransform):Void {
-        var previous = sceneObject.captureTransform();
-        var current = transformRotationDegrees(before);
-        switch (axis) {
-            case 0: current.x = degrees;
-            case 1: current.y = degrees;
-            default: current.z = degrees;
-        }
-        var quat = new h3d.Quat();
-        quat.initRotation(degToRad(current.z), degToRad(current.y), degToRad(current.x));
-        var desired = sceneObject.captureTransform();
-        desired.rotationX = quat.x;
-        desired.rotationY = quat.y;
-        desired.rotationZ = quat.z;
-        desired.rotationW = quat.w;
-        desired.rotationHintX = current.x;
-        desired.rotationHintY = current.y;
-        desired.rotationHintZ = current.z;
-        desired.rotationHintValid = true;
-        sceneObject.applyTransform(desired);
-        if (!containSceneObject(sceneObject)) sceneObject.applyTransform(previous);
-    }
-
-    function applyMultiScale(sceneObject:SceneObject, axis:Int,
-            value:Float, before:EditorTransform):Void {
-        var previousScale = switch (axis) {
-            case 0: before.scaleX;
-            case 1: before.scaleY;
-            default: before.scaleZ;
-        };
-        var clamped = clampedScale(value, previousScale);
-        var targetX = before.scaleX;
-        var targetY = before.scaleY;
-        var targetZ = before.scaleZ;
-        if (scaleProportionsLinked) {
-            var ratio = clamped / ScalePolicy.nonZero(previousScale, clamped);
-            targetX = clampedScale(targetX * ratio, targetX);
-            targetY = clampedScale(targetY * ratio, targetY);
-            targetZ = clampedScale(targetZ * ratio, targetZ);
-        } else {
-            switch (axis) {
-                case 0: targetX = clamped;
-                case 1: targetY = clamped;
-                default: targetZ = clamped;
-            }
-        }
-        var bounded = WorldBounds.fitScale(sceneObject.mesh,
-            targetX, targetY, targetZ,
-            function(x, y, z) applySceneObjectScale(sceneObject, x, y, z));
-        applySceneObjectScale(sceneObject, bounded.x, bounded.y, bounded.z);
-        refreshScaleRendering(sceneObject);
     }
 
     function resetTransformRowMulti(row:Int):Void {
@@ -1143,124 +1228,74 @@ class Main extends hxd.App {
             'Reset ${scope} ${rowName}');
     }
 
-    function applyTransformChange(axis:Int, value:Float):Void {
+    /**
+     * Apply one Inspector axis edit in the active WORLD/LOCAL space. World edits
+     * on a rotated nested object change several local channels at once, so the
+     * full desired local transform must be composed rather than one axis value.
+     */
+    function applyInspectorAxisEdit(row:Int, axis:Int, value:Float):Void {
         var selected = getSelectedObject();
         if (selected == null) return;
+        var model = editorSession.findObject(selected.id);
+        if (model == null) return;
         var commandBefore = atomicTransformStart(selected);
-        var previous = selected.captureTransform();
-        // Inspector commits are deliberate typed values, so they are never
-        // snapped (matching Unreal's details panel); only gizmo drags snap,
-        // incrementally, and Ctrl+End performs an explicit absolute snap.
-        var desired = previous.clone();
-        switch (axis) {
-            case 0: desired.positionX = value;
-            case 1: desired.positionY = value;
-            default: desired.positionZ = value;
+        var localBefore = selected.captureTransform();
+        var localDesired = localTransformSpace
+            ? transformWithAxisValue(localBefore, row, axis, value)
+            : SharedGizmoDelta.localForWorld(
+                transformWithAxisValue(worldTransformForLocal(model, localBefore),
+                    row, axis, value),
+                model.parent == null ? null
+                    : editorSession.hierarchy.worldMatrix(model.parent),
+                localBefore);
+        var previous = localBefore.clone();
+        if (row == 2) {
+            var bounded = WorldBounds.fitScale(selected.mesh,
+                localDesired.scaleX, localDesired.scaleY, localDesired.scaleZ,
+                function(x, y, z) applySceneObjectScale(selected, x, y, z));
+            localDesired.scaleX = bounded.x;
+            localDesired.scaleY = bounded.y;
+            localDesired.scaleZ = bounded.z;
         }
-        selected.applyTransform(desired);
-        var placed = containSceneObject(selected);
-        if (!placed) {
-            selected.applyTransform(previous);
-            boltUI.log('world bounds: ${selected.name} is too large to reposition');
-        }
-        var actual = axis == 0 ? selected.mesh.x
-            : axis == 1 ? selected.mesh.y : selected.mesh.z;
-        if (placed && different(actual, value)) logWorldBound(selected);
-        pushInspectorTransform(selected);
-        commitAtomicTransform(selected, commandBefore,
-            inspectorTransformLabel(selected.name, 0, axis));
-        logActivity('command: ${selected.name} position.${axisName(axis)} = ${round2(actual)}');
-    }
-
-    function applyRotationChange(axis:Int, degrees:Float):Void {
-        var selected = getSelectedObject();
-        if (selected == null) return;
-        var commandBefore = atomicTransformStart(selected);
-        var previous = selected.captureTransform();
-        var current = rotationDegrees(selected);
-        switch (axis) {
-            case 0: current.x = degrees;
-            case 1: current.y = degrees;
-            default: current.z = degrees;
-        }
-        var quat = new h3d.Quat();
-        quat.initRotation(degToRad(current.z), degToRad(current.y), degToRad(current.x));
-        var desired = selected.captureTransform();
-        desired.rotationX = quat.x;
-        desired.rotationY = quat.y;
-        desired.rotationZ = quat.z;
-        desired.rotationW = quat.w;
-        desired.rotationHintX = current.x;
-        desired.rotationHintY = current.y;
-        desired.rotationHintZ = current.z;
-        desired.rotationHintValid = true;
-        selected.applyTransform(desired);
-        var beforeContainX = selected.mesh.x;
-        var beforeContainY = selected.mesh.y;
-        var beforeContainZ = selected.mesh.z;
+        selected.applyTransform(localDesired);
         if (!containSceneObject(selected)) {
             selected.applyTransform(previous);
             logWorldBound(selected);
-        } else if (different(beforeContainX, selected.mesh.x)
-                || different(beforeContainY, selected.mesh.y)
-                || different(beforeContainZ, selected.mesh.z)) {
-            logWorldBound(selected);
         }
+        refreshScaleRendering(selected);
         pushInspectorTransform(selected);
-        var applied = rotationDegrees(selected);
-        var actual = axis == 0 ? applied.x : axis == 1 ? applied.y : applied.z;
+        // Keep the shared gizmo at the live value while the slider is dragged;
+        // otherwise it stays at the drag-start pivot and snaps on release.
+        refreshGizmoFromSelection();
         commitAtomicTransform(selected, commandBefore,
-            inspectorTransformLabel(selected.name, 1, axis));
-        logActivity('command: ${selected.name} rotation.${axisName(axis)} = ${round2(actual)} deg');
+            inspectorTransformLabel(selected.name, row, axis));
+        var axisNameText = axisName(axis);
+        var applied = displayedTransform(selected);
+        var actual = switch (row) {
+            case 0: axis == 0 ? applied.positionX
+                : axis == 1 ? applied.positionY : applied.positionZ;
+            case 1:
+                var euler = displayedRotationDegrees(selected);
+                axis == 0 ? euler.x : axis == 1 ? euler.y : euler.z;
+            default:
+                axis == 0 ? applied.scaleX
+                    : axis == 1 ? applied.scaleY : applied.scaleZ;
+        };
+        logActivity('command: ${selected.name} ${["position", "rotation", "scale"][row]}.'
+            + '${axisNameText} = ${round2(actual)}'
+            + (row == 1 ? " deg" : ""));
+    }
+
+    function applyTransformChange(axis:Int, value:Float):Void {
+        applyInspectorAxisEdit(0, axis, value);
+    }
+
+    function applyRotationChange(axis:Int, degrees:Float):Void {
+        applyInspectorAxisEdit(1, axis, degrees);
     }
 
     function applyScaleChange(axis:Int, value:Float):Void {
-        var selected = getSelectedObject();
-        if (selected == null) return;
-        var commandBefore = atomicTransformStart(selected);
-        var previous = switch (axis) {
-            case 0: selected.mesh.scaleX;
-            case 1: selected.mesh.scaleY;
-            default: selected.mesh.scaleZ;
-        };
-        // Signed scale mirrors geometry. Keep only a tiny dead zone around
-        // zero because an exactly singular transform cannot be inverted.
-        var clamped = clampedScale(value, previous);
-        var targetX = selected.mesh.scaleX;
-        var targetY = selected.mesh.scaleY;
-        var targetZ = selected.mesh.scaleZ;
-        if (scaleProportionsLinked) {
-            var ratio = clamped / ScalePolicy.nonZero(previous, clamped);
-            targetX = clampedScale(targetX * ratio, targetX);
-            targetY = clampedScale(targetY * ratio, targetY);
-            targetZ = clampedScale(targetZ * ratio, targetZ);
-        } else {
-            switch (axis) {
-                case 0: targetX = clamped;
-                case 1: targetY = clamped;
-                default: targetZ = clamped;
-            }
-        }
-        var bounded = WorldBounds.fitScale(
-            selected.mesh, targetX, targetY, targetZ,
-            function(x, y, z) applySceneObjectScale(selected, x, y, z));
-        applySceneObjectScale(selected, bounded.x, bounded.y, bounded.z);
-        if (different(bounded.x, targetX) || different(bounded.y, targetY)
-                || different(bounded.z, targetZ)) logWorldBound(selected);
-        refreshScaleRendering(selected);
-        pushInspectorTransform(selected);
-        if (scaleProportionsLinked) {
-            commitAtomicTransform(selected, commandBefore,
-                'Edit ${selected.name} Proportional Scale');
-            logActivity('command: ${selected.name} proportional scale = '
-                + scaleDescription(selected.mesh));
-        } else {
-            var actual = axis == 0 ? selected.mesh.scaleX
-                : axis == 1 ? selected.mesh.scaleY : selected.mesh.scaleZ;
-            commitAtomicTransform(selected, commandBefore,
-                inspectorTransformLabel(selected.name, 2, axis));
-            logActivity('command: ${selected.name} scale.${axisName(axis)} = ${round2(actual)}');
-        }
+        applyInspectorAxisEdit(2, axis, value);
     }
 
     static inline function clampedScale(value:Float, fallbackSign:Float = 1):Float {
@@ -1355,6 +1390,14 @@ class Main extends hxd.App {
     function setTransformSpace(local:Bool):Void {
         localTransformSpace = local;
         gizmo.setSpace(local ? TransformGizmo.SPACE_LOCAL : TransformGizmo.SPACE_WORLD);
+        // The Inspector shows the active space too, so refresh its values as
+        // soon as the mode changes rather than waiting for another edit.
+        if (editorSession.selectedObjectIds.length > 1) {
+            pushSelectionInspectorTransform();
+        } else {
+            var selected = getSelectedObject();
+            if (selected != null) pushInspectorTransform(selected);
+        }
         if (verboseLogging) {
             logActivity('viewport transform space: ${local ? "Local" : "World"}');
             var xAxis = gizmo.getAxisDirection(TransformGizmo.HANDLE_AXIS_X);
@@ -1612,11 +1655,32 @@ class Main extends hxd.App {
             case TransformGizmo.TOOL_ROTATE: SharedGizmoDelta.ROTATE;
             default: SharedGizmoDelta.SCALE;
         };
+        // Compute every desired world transform first. A selected parent must be
+        // projected with its *previewed* world matrix, not the session's stale
+        // model world (which only updates when the drag is committed) — otherwise
+        // a selected child gets the parent's delta applied twice.
+        var desiredByAnchor:Map<GizmoDragAnchor, EditorTransform> = new Map();
         for (anchor in gizmoDragAnchors) {
-            var desired = SharedGizmoDelta.apply(anchor.startWorld,
-                dragStartWorldTransform, desiredWorld, mode);
-            var local = editorSession.hierarchy.localTransformForWorld(
-                anchor.model, desired, anchor.model.parent);
+            desiredByAnchor.set(anchor, SharedGizmoDelta.apply(anchor.startWorld,
+                dragStartWorldTransform, desiredWorld, mode));
+        }
+        for (anchor in gizmoDragAnchors) {
+            var desired = desiredByAnchor.get(anchor);
+            var local:EditorTransform = desired;
+            var parent = anchor.model.parent;
+            if (parent != null) {
+                var parentAnchor = anchorFor(parent.id);
+                var parentWorld:Null<TransformMatrix> = null;
+                if (parentAnchor != null) {
+                    var parentDesired = desiredByAnchor.get(parentAnchor);
+                    if (parentDesired != null) parentWorld = parentDesired.toMatrix();
+                }
+                if (parentWorld == null) {
+                    parentWorld = editorSession.hierarchy.worldMatrix(parent);
+                }
+                local = SharedGizmoDelta.localForWorld(
+                    desired, parentWorld, anchor.startLocal);
+            }
             anchor.sceneObject.applyTransform(local);
             if (!containSceneObject(anchor.sceneObject)) {
                 anchor.sceneObject.applyTransform(anchor.previewLocal);
@@ -1946,18 +2010,33 @@ class Main extends hxd.App {
         };
     }
 
+    /** Transform values as shown by the Inspector for the active space mode. */
+    function displayedTransform(selected:SceneObject):EditorTransform {
+        var local = selected.captureTransform();
+        if (localTransformSpace) return local;
+        var model = editorSession.findObject(selected.id);
+        return model == null ? local : worldTransformForLocal(model, local);
+    }
+
+    function displayedRotationDegrees(selected:SceneObject):h3d.Vector {
+        return localTransformSpace
+            ? rotationDegrees(selected)
+            : transformRotationDegrees(displayedTransform(selected));
+    }
+
     /** Live inspector values while a gizmo drag is in progress. */
     function pushInspectorTransform(selected:SceneObject):Void {
-        var rotation = rotationDegrees(selected);
         var model = editorSession.findObject(selected.id);
         if (model == null) return;
         var componentIndex = model.components.indexOf(model.transform);
+        var displayed = displayedTransform(selected);
+        var rotation = displayedRotationDegrees(selected);
         boltUI.updateInspectorVector(componentIndex, "position",
-            selected.mesh.x, selected.mesh.y, selected.mesh.z);
+            displayed.positionX, displayed.positionY, displayed.positionZ);
         boltUI.updateInspectorVector(componentIndex, "rotation",
             rotation.x, rotation.y, rotation.z);
         boltUI.updateInspectorVector(componentIndex, "scale",
-            selected.mesh.scaleX, selected.mesh.scaleY, selected.mesh.scaleZ);
+            displayed.scaleX, displayed.scaleY, displayed.scaleZ);
     }
 
     /** Live inspector values for every selected object, with mixed-axis hints. */
@@ -1990,13 +2069,13 @@ class Main extends hxd.App {
     }
 
     function transformVectorFor(sceneObject:SceneObject, row:Int):Array<Float> {
+        var displayed = displayedTransform(sceneObject);
         return switch (row) {
-            case 0: [sceneObject.mesh.x, sceneObject.mesh.y, sceneObject.mesh.z];
+            case 0: [displayed.positionX, displayed.positionY, displayed.positionZ];
             case 1:
-                var rotation = rotationDegrees(sceneObject);
+                var rotation = displayedRotationDegrees(sceneObject);
                 [rotation.x, rotation.y, rotation.z];
-            default: [sceneObject.mesh.scaleX, sceneObject.mesh.scaleY,
-                sceneObject.mesh.scaleZ];
+            default: [displayed.scaleX, displayed.scaleY, displayed.scaleZ];
         };
     }
 
@@ -2064,22 +2143,8 @@ class Main extends hxd.App {
     }
 
     function onViewportClick(x:Float, y:Float):Void {
-        var ray = viewportRay(x, y);
-        var nearestDistance = Math.POSITIVE_INFINITY;
-        var nearestObject:Null<SceneObject> = null;
-        for (sceneObject in sceneObjects) {
-            for (renderMesh in sceneObject.allRenderMeshes()) {
-                // Pick renderer-owned geometry, not the root's recursive
-                // collider; empty parents must not steal their children's hits.
-                var collider = renderMesh.getGlobalCollider();
-                if (collider == null) continue;
-                var distance = collider.rayIntersection(ray, true);
-                if (distance >= 0 && distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearestObject = sceneObject;
-                }
-            }
-        }
+        var pick = pickViewportObject(x, y);
+        var nearestObject = pick.object;
         // Modifier semantics match the hierarchy: Ctrl toggles membership,
         // Shift adds to the current selection, a plain click replaces it.
         var mode = hxd.Key.isDown(hxd.Key.SHIFT) ? SelectionClickMode.Add
@@ -2179,12 +2244,17 @@ class Main extends hxd.App {
             var mirrored = mesh.getAbsPos().getDeterminant() < 0;
             // A camera inside a closed one-sided mesh sees only back faces.
             // Draw both sides only in that editor condition.
-            var culling = cameraInsideMesh(mesh)
-                ? h3d.mat.Data.Face.None
-                : renderer.cullingForScale(mirrored);
-            mesh.material.mainPass.culling = culling;
-            var shadowPass = mesh.material.getPass("shadow");
-            if (shadowPass != null) shadowPass.culling = culling;
+            var inside = cameraInsideMesh(mesh);
+            for (index in 0...renderer.mesh.materials.length) {
+                var material = renderer.mesh.materials[index];
+                if (material == null) continue;
+                var culling = inside
+                    ? h3d.mat.Data.Face.None
+                    : renderer.cullingForScale(mirrored, index);
+                material.mainPass.culling = culling;
+                var shadowPass = material.getPass("shadow");
+                if (shadowPass != null) shadowPass.culling = culling;
+            }
         }
     }
 
@@ -2237,6 +2307,12 @@ class Main extends hxd.App {
         createPrimitiveAtWorld(meshId, spot.x, spot.y, spot.z);
     }
 
+    /** Hierarchy asset drop: same camera placement as Add, with drop parent. */
+    function createPrimitiveInHierarchy(meshId:String, parentId:Int):Void {
+        var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
+        createPrimitiveAtWorld(meshId, spot.x, spot.y, spot.z, parentId);
+    }
+
     function createEmptyObjectInFront():Void {
         var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
         var limit = WorldBounds.HALF_EXTENT - 0.5;
@@ -2266,6 +2342,159 @@ class Main extends hxd.App {
         };
     }
 
+    // ------------------------------------------------------------------
+    // Asset drops into the 3D viewport
+    // ------------------------------------------------------------------
+
+    /** Register the viewport as a drop target for engine mesh/material drags. */
+    function registerViewportDropTargets():Void {
+        viewportMeshDropTarget = new AssetDropTarget(AssetType.MeshAsset, s2d,
+            viewportDropRect, function(active) {
+                if (active) viewportDragKind |= 1;
+                else {
+                    viewportDragKind &= ~1;
+                    if (viewportDragKind == 0) clearViewportDropHover();
+                }
+            }, function(payload) {
+                var point = viewportLocalMouse();
+                if (point != null) {
+                    createPrimitiveAtViewport(payload.assetId, point.x, point.y);
+                }
+                clearViewportDropHover();
+            });
+        viewportMeshDropTarget.hideGhostOnHover = true;
+        AssetDragSession.add(viewportMeshDropTarget);
+
+        viewportMaterialDropTarget = new AssetDropTarget(AssetType.MaterialAsset, s2d,
+            viewportDropRect, function(active) {
+                if (active) viewportDragKind |= 2;
+                else {
+                    viewportDragKind &= ~2;
+                    if (viewportDragKind == 0) clearViewportDropHover();
+                }
+            }, function(payload) {
+                applyViewportMaterialDrop(payload.assetId);
+                clearViewportDropHover();
+            });
+        viewportMaterialDropTarget.hideGhostOnHover = true;
+        AssetDragSession.add(viewportMaterialDropTarget);
+    }
+
+    function viewportDropRect():AssetDropRect {
+        var rect = boltUI.getViewportRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }
+
+    /** Cursor in viewport-local coordinates, or null when outside the viewport. */
+    function viewportLocalMouse():Null<{ x:Float, y:Float }> {
+        var rect = boltUI.getViewportRect();
+        var mouseX = nativeWindow.mouseX;
+        var mouseY = nativeWindow.mouseY;
+        if (mouseX < rect.x || mouseX >= rect.x + rect.width
+                || mouseY < rect.y || mouseY >= rect.y + rect.height) return null;
+        return { x: mouseX - rect.x, y: mouseY - rect.y };
+    }
+
+    /** Nearest scene object under a viewport point, with its material slot. */
+    function pickViewportObject(viewX:Float, viewY:Float):{
+            object:Null<SceneObject>, distance:Float, materialIndex:Int } {
+        var ray = viewportRay(viewX, viewY);
+        var nearestDistance = Math.POSITIVE_INFINITY;
+        var nearestObject:Null<SceneObject> = null;
+        for (sceneObject in sceneObjects) {
+            for (renderMesh in sceneObject.allRenderMeshes()) {
+                var collider = renderMesh.getGlobalCollider();
+                if (collider == null) continue;
+                var distance = collider.rayIntersection(ray, true);
+                if (distance >= 0 && distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestObject = sceneObject;
+                }
+            }
+        }
+        // Built-in primitives have a single material group (index 0). Imported
+        // meshes can report the intersected group here once they exist.
+        return {
+            object: nearestObject,
+            distance: nearestDistance,
+            materialIndex: 0
+        };
+    }
+
+    function updateViewportDropHover():Void {
+        if (viewportDragKind == 0) {
+            clearViewportDropHover();
+            return;
+        }
+        var point = viewportLocalMouse();
+        if (point == null) {
+            clearViewportDropHover();
+            return;
+        }
+        var pick = pickViewportObject(point.x, point.y);
+        viewportHoverObject = pick.object;
+        viewportHoverMaterialIndex = pick.materialIndex;
+        if (viewportDropOutline != null) {
+            viewportDropOutline.clear();
+            // A mesh drag places a new object at the cursor; there is no target
+            // to highlight. Only material drags overwrite an existing object.
+            var materialDrag = (viewportDragKind & 2) != 0;
+            if (pick.object != null && materialDrag) {
+                viewportDropOutline.lineStyle(2.0, Theme.ACCENT_HOVER, 1);
+                for (renderMesh in pick.object.allRenderMeshes()) {
+                    drawSelectionEdges(viewportDropOutline, renderMesh);
+                }
+            }
+            viewportDropOutlineDrawn = pick.object != null && materialDrag;
+        }
+        // Show only the dragged asset's name, exactly as the browser ghost did.
+        var payload = AssetDragSession.current();
+        boltUI.showViewportDropHint(payload == null ? "" : payload.label,
+            nativeWindow.mouseX + 14, nativeWindow.mouseY + 12,
+            boltUI.getViewportRect());
+    }
+
+    function clearViewportDropHover():Void {
+        if (viewportHoverObject == null && !viewportDropOutlineDrawn) {
+            boltUI.hideViewportDropHint();
+            return;
+        }
+        viewportHoverObject = null;
+        viewportHoverMaterialIndex = 0;
+        viewportDropOutlineDrawn = false;
+        if (viewportDropOutline != null) viewportDropOutline.clear();
+        boltUI.hideViewportDropHint();
+    }
+
+    /** Apply a material drag onto the material slot under the cursor. */
+    function applyViewportMaterialDrop(assetId:String):Void {
+        var material = Material.find(assetId);
+        if (material == null) {
+            boltUI.log("viewport: unknown material " + assetId);
+            return;
+        }
+        var point = viewportLocalMouse();
+        if (point == null) return;
+        var pick = pickViewportObject(point.x, point.y);
+        if (pick.object == null) {
+            boltUI.log("viewport: drop a material onto an object");
+            return;
+        }
+        var object = editorSession.findObject(pick.object.id);
+        if (object == null) return;
+        for (component in object.components) {
+            var renderer = Std.downcast(component, MeshRenderer);
+            if (renderer == null || renderer.getMaterial(pick.materialIndex) == null) continue;
+            renderer.setMaterial(pick.materialIndex, material);
+            editorSession.componentEdited(object.id);
+            refreshSelectionInspector();
+            logActivity('viewport: ${pick.object.name} material ${pick.materialIndex} = '
+                + material.name);
+            return;
+        }
+        boltUI.log("viewport: hovered object has no MeshRenderer");
+    }
+
     function createPrimitiveAtViewport(meshId:String, viewX:Float,
             viewY:Float):Void {
         var ray = viewportRay(viewX, viewY);
@@ -2286,7 +2515,7 @@ class Main extends hxd.App {
     }
 
     function createPrimitiveAtWorld(meshId:String, x:Float, y:Float,
-            z:Float):Void {
+            z:Float, ?parentId:Int):Void {
         var runtimeId = editorSession.nextRuntimeId;
         var name = primitiveName(meshId) + runtimeId;
         // Newly added objects keep identity rotation/scale; constrain their
@@ -2296,7 +2525,8 @@ class Main extends hxd.App {
             Math.max(-pivotLimit, Math.min(pivotLimit, x)),
             Math.max(-pivotLimit, Math.min(pivotLimit, y)),
             Math.max(-pivotLimit, Math.min(pivotLimit, z)));
-        editorSession.createObject(name, transform, -1,
+        editorSession.createObject(name, transform,
+            parentId == null ? -1 : parentId,
             PrimitiveGameObjects.primitiveComponents(meshId));
         logActivity("scene: created " + name);
     }
@@ -2443,12 +2673,24 @@ class Main extends hxd.App {
      * Live pivot from the renderer transforms, used while an Inspector edit is
      * still in progress (the session model is only updated on history commit).
      */
+    /** Live world transform from renderer views, walking up selected parents. */
+    function liveWorldFor(view:SceneObject):EditorTransform {
+        var local = view.captureTransform();
+        var model = editorSession.findObject(view.id);
+        var parent = model == null ? null : model.parent;
+        if (parent == null) return local;
+        var parentView = findSceneObject(parent.id);
+        var parentWorld = parentView == null
+            ? editorSession.hierarchy.worldTransform(parent)
+            : liveWorldFor(parentView);
+        return SharedGizmoDelta.worldFromParent(
+            local, parentWorld.toMatrix(), local);
+    }
+
     function liveSelectionPivotWorld():Null<EditorTransform> {
         var primary = getSelectedObject();
         if (primary == null) return null;
-        var primaryModel = editorSession.findObject(primary.id);
-        if (primaryModel == null) return primary.captureTransform();
-        var pivot = worldTransformForLocal(primaryModel, primary.captureTransform());
+        var pivot = liveWorldFor(primary);
         var ids = editorSession.selectedObjectIds;
         if (ids.length <= 1) return pivot;
         var count = 0;
@@ -2456,10 +2698,9 @@ class Main extends hxd.App {
         var y = 0.0;
         var z = 0.0;
         for (id in ids) {
-            var model = editorSession.findObject(id);
             var view = findSceneObject(id);
-            if (model == null || view == null) continue;
-            var world = worldTransformForLocal(model, view.captureTransform());
+            if (view == null) continue;
+            var world = liveWorldFor(view);
             x += world.positionX;
             y += world.positionY;
             z += world.positionZ;
@@ -2998,6 +3239,14 @@ class Main extends hxd.App {
         selectionOutline.material.mainPass.depthWrite = false;
         selectionOutline.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
         selectionOutline.material.mainPass.layer = 10;
+
+        // Accent X-ray outline for the object currently under an asset drag.
+        viewportDropOutline = new h3d.scene.Graphics(s3d);
+        viewportDropOutline.name = "ViewportDropOutline";
+        viewportDropOutline.is3D = false;
+        viewportDropOutline.material.mainPass.depthWrite = false;
+        viewportDropOutline.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
+        viewportDropOutline.material.mainPass.layer = 11;
     }
 
     function refreshSelectionOutline():Void {

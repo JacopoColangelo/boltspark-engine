@@ -12,6 +12,7 @@ import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.inspector.AssetType;
 import boltspark.engine.inspector.ComponentPropertyKind;
 import boltspark.engine.inspector.ComponentPropertyData;
+import boltspark.project.ComponentData;
 import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.AssetDragSession;
@@ -29,6 +30,7 @@ class MeshRendererAssetRepro {
         testPrimitiveSettings();
         testPrimitiveSettingsHistory();
         testAssignmentAndFallback();
+        testMaterialSlots();
         testSharedAssetsDistinctInstances();
         testEngineAssetDrop();
         Sys.println("[mesh-renderer-assets] primitive/material catalogs, asset "
@@ -350,6 +352,53 @@ class MeshRendererAssetRepro {
             "clearing the material reference failed");
         assertTrue(renderer.material == Material.defaultMaterial(),
             "missing material reference did not fall back to Default Material");
+    }
+
+    /**
+     * A mesh with two material slots publishes one picker per slot, keeps the
+     * legacy "material" id for slot 0, and round-trips every slot through the
+     * component payload.
+     */
+    static function testMaterialSlots():Void {
+        var multi = new Mesh("test:multi", "Two Slot Mesh", null, 2);
+        PrimitiveMeshes.register(multi);
+        var custom = new Material("test:slots", "Slot Material", 0x112233);
+        Material.register(custom);
+        var renderer = new MeshRenderer(multi, Material.defaultMaterial(),
+            null, null, null,
+            [Material.defaultMaterial(), Material.defaultMaterial()]);
+
+        assertTrue(renderer.materialCount == 2,
+            "mesh material slot count was not exposed");
+        var data = renderer.inspectorData(1);
+        assertTrue(property(data.properties, "material") != null
+            && property(data.properties, "material:1") != null,
+            "one inspector picker per material slot was not published");
+        assertTrue(renderer.setInspectorAsset("material:1", custom.id)
+            && renderer.getMaterial(1) == custom,
+            "material:1 assignment did not target the second slot");
+        assertTrue(renderer.getMaterial(0) == Material.defaultMaterial(),
+            "assigning slot 1 changed slot 0");
+
+        var stored = renderer.toComponentData();
+        var rawMaterials = Reflect.field(stored.data, "materials");
+        assertTrue(Std.isOfType(rawMaterials, Array) && rawMaterials.length == 2,
+            "material slot array was not serialized");
+        var restored = MeshRenderer.fromComponentData(stored);
+        assertTrue(restored.materialCount == 2
+            && restored.getMaterial(0) == Material.defaultMaterial()
+            && restored.getMaterial(1) == custom,
+            "material slots did not survive serialization");
+
+        // Legacy payloads with only a single material still load, with extra
+        // slots falling back to Default.
+        var legacy = Reflect.copy(stored.data);
+        Reflect.deleteField(legacy, "materials");
+        var legacyRenderer = MeshRenderer.fromComponentData(
+            new ComponentData(MeshRenderer.TYPE_ID, MeshRenderer.VERSION, legacy));
+        assertTrue(legacyRenderer.materialCount == 2
+            && legacyRenderer.getMaterial(1) == Material.defaultMaterial(),
+            "legacy single-material payload did not migrate to multiple slots");
     }
 
     static function testSharedAssetsDistinctInstances():Void {

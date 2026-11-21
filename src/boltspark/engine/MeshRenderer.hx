@@ -12,21 +12,35 @@ class MeshRenderer extends Component {
     public static inline var VERSION:Int = 1;
 
     public var mesh(get, set):Null<Mesh>;
+    /** Slot 0 convenience alias; use `getMaterial`/`setMaterial` for other slots. */
     public var material(get, set):Material;
     public var primitiveSettings(get, set):PrimitiveSettings;
 
+    public var materialCount(get, never):Int;
+
     var meshValue:Null<Mesh>;
-    var materialValue:Material;
+    var materialsValue:Array<Material>;
     var settingsValue:PrimitiveSettings;
     var componentExtraFields:Dynamic;
     var dataTemplate:Dynamic;
 
     public function new(?mesh:Mesh, ?material:Material,
             ?dataTemplate:Dynamic, ?componentExtraFields:Dynamic,
-            ?settings:PrimitiveSettings) {
+            ?settings:PrimitiveSettings, ?materials:Array<Material>) {
         super();
         meshValue = mesh;
-        materialValue = material == null ? Material.defaultMaterial() : material;
+        var slotCount = materialSlotsFor(mesh);
+        if (materials != null && materials.length > 0) {
+            materialsValue = [];
+            for (index in 0...slotCount) {
+                var entry = index < materials.length ? materials[index] : null;
+                materialsValue.push(entry == null ? Material.defaultMaterial() : entry);
+            }
+        } else {
+            var first = material == null ? Material.defaultMaterial() : material;
+            materialsValue = [];
+            for (index in 0...slotCount) materialsValue.push(first);
+        }
         settingsValue = settings == null
             ? PrimitiveMeshes.defaultSettings(mesh == null ? null : mesh.primitiveId)
             : settings.clone();
@@ -37,9 +51,11 @@ class MeshRenderer extends Component {
     override function get_typeId():String return TYPE_ID;
     override function get_displayName():String return "MeshRenderer";
 
-    public function cullingForScale(mirrored:Bool):MaterialCulling {
-        if (!mirrored) return materialValue.culling;
-        return switch (materialValue.culling) {
+    public function cullingForScale(mirrored:Bool, ?materialIndex:Int):MaterialCulling {
+        var slot = materialsValue[materialIndex == null ? 0 : materialIndex];
+        if (slot == null) return MaterialCulling.Back;
+        if (!mirrored) return slot.culling;
+        return switch (slot.culling) {
             case Back: Front;
             case Front: Back;
             case None: None;
@@ -48,8 +64,8 @@ class MeshRenderer extends Component {
     }
 
     override public function cloneComponent():Component {
-        return new MeshRenderer(meshValue, materialValue,
-            dataTemplate, componentExtraFields, settingsValue);
+        return new MeshRenderer(meshValue, materialsValue[0],
+            dataTemplate, componentExtraFields, settingsValue, materialsValue.copy());
     }
 
     override public function inspectorData(componentIndex:Int):ComponentInspectorData {
@@ -62,10 +78,14 @@ class MeshRenderer extends Component {
         var properties = [
             ComponentPropertyData.asset("mesh", "Mesh", AssetType.MeshAsset,
                 meshValue == null ? "" : meshValue.id,
-                meshValue == null ? "None" : meshValue.name, meshOptions),
-            ComponentPropertyData.asset("material", "Material", AssetType.MaterialAsset,
-                materialValue.id, materialValue.name, materialOptions)
+                meshValue == null ? "None" : meshValue.name, meshOptions)
         ];
+        for (index in 0...materialsValue.length) {
+            var slot = materialsValue[index];
+            properties.push(ComponentPropertyData.asset(
+                materialPropertyId(index), index == 0 ? "Material" : 'Material ${index}',
+                AssetType.MaterialAsset, slot.id, slot.name, materialOptions));
+        }
         // Geometry controls are generated from the primitive's own schema, so
         // MeshRenderer stays independent of any specific primitive type.
         if (meshValue != null) {
@@ -124,10 +144,15 @@ class MeshRenderer extends Component {
                 var next = assetId == null || assetId.length == 0
                     ? Material.defaultMaterial() : Material.find(assetId);
                 // An unknown/material-less reference falls back to Default.
-                material = next == null ? Material.defaultMaterial() : next;
+                setMaterial(0, next == null ? Material.defaultMaterial() : next);
                 return true;
             default:
-                return false;
+                var index = materialIndexFromPropertyId(propertyId);
+                if (index < 0 || index >= materialsValue.length) return false;
+                var next = assetId == null || assetId.length == 0
+                    ? Material.defaultMaterial() : Material.find(assetId);
+                setMaterial(index, next == null ? Material.defaultMaterial() : next);
+                return true;
         }
     }
 
@@ -211,7 +236,11 @@ class MeshRenderer extends Component {
                 Reflect.deleteField(data, "primitive");
             }
         }
-        Reflect.setField(data, "material", materialValue.id);
+        // Keep the legacy slot-0 field for older scenes and write the full
+        // slot array additively for readers that understand material indexes.
+        Reflect.setField(data, "material", materialsValue[0].id);
+        Reflect.setField(data, "materials",
+            [for (slot in materialsValue) slot.id]);
         if (meshValue != null) {
             Reflect.setField(data, "primitiveSettings", settingsValue.toData());
         } else {
@@ -241,15 +270,28 @@ class MeshRenderer extends Component {
                 Reflect.field(data.data, "primitiveSettings"));
         }
 
-        var material = Material.defaultMaterial();
-        if (Reflect.hasField(data.data, "material")) {
+        var slotCount = materialSlotsFor(mesh);
+        var materials:Array<Material> = [];
+        for (_ in 0...slotCount) materials.push(Material.defaultMaterial());
+        if (Reflect.hasField(data.data, "materials")) {
+            var rawMaterials = Reflect.field(data.data, "materials");
+            if (Std.isOfType(rawMaterials, Array)) {
+                var stored:Array<Dynamic> = cast rawMaterials;
+                for (index in 0...slotCount) {
+                    if (index >= stored.length) break;
+                    var found = Material.find(Std.string(stored[index]));
+                    if (found != null) materials[index] = found;
+                }
+            }
+        } else if (Reflect.hasField(data.data, "material")) {
             var rawMaterial = Reflect.field(data.data, "material");
             if (Std.isOfType(rawMaterial, String)) {
                 var found = Material.find(rawMaterial);
-                if (found != null) material = found;
+                if (found != null) materials[0] = found;
             }
         }
-        return new MeshRenderer(mesh, material, data.data, data.extraFields, settings);
+        return new MeshRenderer(mesh, materials[0], data.data, data.extraFields,
+            settings, materials);
     }
 
     inline function get_mesh():Null<Mesh> return meshValue;
@@ -260,6 +302,11 @@ class MeshRenderer extends Component {
         meshValue = value;
         if (previousPrimitive != nextPrimitive) {
             settingsValue = PrimitiveMeshes.defaultSettings(nextPrimitive);
+        }
+        var slotCount = materialSlotsFor(value);
+        while (materialsValue.length > slotCount) materialsValue.pop();
+        while (materialsValue.length < slotCount) {
+            materialsValue.push(Material.defaultMaterial());
         }
         changed();
         return value;
@@ -273,12 +320,38 @@ class MeshRenderer extends Component {
         return settingsValue;
     }
 
-    inline function get_material():Material return materialValue;
-    function set_material(value:Material):Material {
+    inline function get_material():Material return materialsValue[0];
+    function set_material(value:Material):Material return setMaterial(0, value);
+
+    inline function get_materialCount():Int return materialsValue.length;
+
+    /** Material assigned to a slot, or null for an out-of-range index. */
+    public function getMaterial(index:Int):Null<Material> {
+        return index < 0 || index >= materialsValue.length ? null : materialsValue[index];
+    }
+
+    /** Assign a material to a slot. Index 0 is what `material` aliases. */
+    public function setMaterial(index:Int, value:Material):Material {
         if (value == null) throw "MeshRenderer material cannot be null";
-        if (materialValue == value) return value;
-        materialValue = value;
+        if (index < 0 || index >= materialsValue.length) return value;
+        if (materialsValue[index] == value) return value;
+        materialsValue[index] = value;
         changed();
         return value;
+    }
+
+    static function materialSlotsFor(mesh:Null<Mesh>):Int {
+        return mesh == null || mesh.materialSlots < 1 ? 1 : mesh.materialSlots;
+    }
+
+    /** Inspector property id for a slot. Slot 0 keeps the historical id. */
+    public static function materialPropertyId(index:Int):String {
+        return index == 0 ? "material" : 'material:${index}';
+    }
+
+    static function materialIndexFromPropertyId(propertyId:String):Int {
+        if (propertyId == null || !StringTools.startsWith(propertyId, "material:")) return -1;
+        var index = Std.parseInt(propertyId.substr("material:".length));
+        return index == null || index < 1 ? -1 : index;
     }
 }

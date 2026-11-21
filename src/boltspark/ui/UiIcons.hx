@@ -43,6 +43,7 @@ enum abstract UiIconKind(Int) from Int to Int {
     var Camera = 39;
     var Check = 40;
     var Minus = 41;
+    var Eraser = 42;
 }
 
 /**
@@ -56,7 +57,7 @@ enum abstract UiIconKind(Int) from Int to Int {
  */
 class UiIcons {
     static inline var CELL_SIZE:Int = 16;
-    static inline var ICON_COLUMNS:Int = 42;
+    static inline var ICON_COLUMNS:Int = 43;
     static inline var MIN_SIZE:Int = 6;
     static inline var MAX_SIZE:Int = 16;
 

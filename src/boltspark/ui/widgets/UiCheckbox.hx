@@ -23,7 +23,8 @@ class UiCheckbox extends h2d.Object {
     final hit:h2d.Interactive;
     var currentValue:Bool;
 
-    public function new(ctx:UiContext, text:String, ?parent:h2d.Object) {
+    public function new(ctx:UiContext, text:String, ?parent:h2d.Object,
+            ?font:h2d.Font) {
         super(parent);
         currentValue = false;
 
@@ -34,7 +35,7 @@ class UiCheckbox extends h2d.Object {
         var markInset = Math.round((BOX_SIZE - MARK_SIZE) * 0.5);
         mark.x = markInset;
         mark.y = box.y + markInset;
-        label = new UiText(ctx.font, this);
+        label = new UiText(font == null ? ctx.font : font, this);
         label.text = text;
         label.textColor = Theme.TEXT_SECONDARY;
         label.lineBreak = false;

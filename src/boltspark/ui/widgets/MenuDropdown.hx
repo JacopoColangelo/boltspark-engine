@@ -114,14 +114,21 @@ class MenuDropdown extends h2d.Object {
         // would otherwise leave the popup open while focus was already lost.
         dismissCatch.enableRightButton = true;
         dismissCatch.onPush = function(event) {
-            // Keep the catch alive through ERelease. Buttons fire their action
-            // on release, so closing on push lets that release fall through to
-            // whatever control sits underneath the menu.
+            // Keep the catch alive through ERelease for left clicks: buttons
+            // fire their action on release, so closing on push would let that
+            // release fall through to a control underneath the menu.
             event.propagate = false;
+            // Right-click menus open during push, so their own release arrives
+            // after the catch became visible. Dismiss right clicks on push
+            // instead, otherwise the opening release would close the menu
+            // immediately (or after dragging the pointer elsewhere).
+            if (event.button == 1) close();
         };
         dismissCatch.onRelease = function(event) {
             event.propagate = false;
-            close();
+            // Ignore the release of a right-click: that press either opened
+            // this menu or already dismissed it above.
+            if (event.button != 1) close();
         };
         // While open, swallow wheel events that reach the catch so masked
         // inspector content cannot scroll underneath the popup.
@@ -153,9 +160,12 @@ class MenuDropdown extends h2d.Object {
             var above = preferAboveY - height;
             if (above >= 4) y = above;
         }
-        // Clamp inside the window frame.
-        this.x = Math.max(4, Math.min(x, context.width - width - 4));
-        this.y = Math.max(4, Math.min(y, context.height - height - 4));
+        // Clamp inside the window frame and snap to whole pixels. Anchored
+        // menus inherit fractional layout/scroll coordinates, and subpixel
+        // origins make the FreeType atlas glyphs (including search fields)
+        // sample between texels and look blurry.
+        this.x = Math.round(Math.max(4, Math.min(x, context.width - width - 4)));
+        this.y = Math.round(Math.max(4, Math.min(y, context.height - height - 4)));
         // The menu object itself is offset to the popup position; pull the
         // catch back so it covers the whole window in screen coordinates.
         dismissCatch.x = -this.x;
@@ -469,15 +479,19 @@ class MenuDropdown extends h2d.Object {
         }
         var parent = level.parent;
         // Prefer a right-opening cascade, flipping left near the window edge.
-        var parentScreenX = this.x + parent.object.x;
-        var rightX = parent.object.x + parent.width - 2;
-        var leftX = parent.object.x - level.width + 2;
-        level.object.x = parentScreenX + rightX + level.width <= context.width - 4
-            ? rightX : leftX;
-        var desiredY = parent.object.y + level.rowY - parent.scrollY;
+        // Both offsets are in this object's coordinate space; keep a small gap
+        // from the parent edge so the two panels never overlap.
+        var rightX = parent.object.x + parent.width + 2;
+        var leftX = parent.object.x - level.width - 2;
+        level.object.x = Math.round(this.x + rightX + level.width <= context.width - 4
+            ? rightX : leftX);
+        // Rows live inside the parent's rowMask, which is inset by the search
+        // area / padding. Include that offset or the cascade sits slightly
+        // above the row that opened it.
+        var desiredY = parent.object.y + parent.rowMask.y + level.rowY - parent.scrollY;
         var minY = 4 - this.y;
         var maxY = context.height - this.y - level.height - 4;
-        level.object.y = Math.max(minY, Math.min(desiredY, maxY));
+        level.object.y = Math.round(Math.max(minY, Math.min(desiredY, maxY)));
     }
 
     function openSubmenuFrom(parent:MenuLevel, item:MenuItem, rowY:Float):Void {

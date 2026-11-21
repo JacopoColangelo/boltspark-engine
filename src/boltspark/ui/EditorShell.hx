@@ -1,12 +1,17 @@
 package boltspark.ui;
 
+import boltspark.diagnostics.FrameStats;
 import boltspark.editor.EditorCameraController;
 import boltspark.editor.EditorViewport;
 import boltspark.editor.GridSnapping;
 import boltspark.engine.ComponentTypeInfo;
 import boltspark.engine.PrimitiveMeshes;
+import boltspark.engine.inspector.AssetType;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.engine.inspector.ComponentPropertyData;
+import boltspark.ui.AssetDragSession;
+import boltspark.ui.AssetDropRect;
+import boltspark.ui.AssetDropTarget;
 import boltspark.ui.UiIcons.UiIconKind;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayoutStore;
@@ -107,19 +112,26 @@ class EditorShell {
     final viewportHintText:h2d.Text;
     final viewportHintHit:h2d.Interactive;
     final snapBar:ViewportSnapBar;
-    /** View-mode popup: transform-style FOV field plus the grid toggle. */
+    /** View-mode popup: FOV field plus the grid and performance-stats toggles. */
     final fovPopupRoot:h2d.Object;
     final fovPopupSurface:UiSurface;
     final fovPopupCatch:h2d.Interactive;
     final fovTitleText:UiText;
     final fovInput:NumericDragField;
     final fovDegreeText:UiText;
-    final fovGridSurface:UiSurface;
-    final fovGridHit:h2d.Interactive;
-    final fovGridText:UiText;
+    final fovGridCheck:UiCheckbox;
+    final fovPerfCheck:UiCheckbox;
     var fovPopupOpen:Bool = false;
+    /** Optional viewport overlay driven by the camera-settings toggle. */
+    final perfText:UiText;
+    var perfStats:FrameStats = new FrameStats(0.5);
+    var perfVisible:Bool = false;
     final cameraSpeedSurface:UiSurface;
     final cameraSpeedText:UiText;
+    /** Floating label naming the object/material slot under an asset drag. */
+    final viewportDropHintSurface:UiSurface;
+    final viewportDropHint:UiText;
+    var viewportDropHintWidth:Float = 96;
     /** Speed chip flash state: visible briefly after each speed change. */
     var speedChipShown:Bool = false;
     var speedChipTimer:Float = 0;
@@ -128,10 +140,22 @@ class EditorShell {
     /** Closing fade duration at the end of the flash. */
     static inline var SPEED_CHIP_FADE:Float = 0.35;
     /** FOV popup geometry and the continuous range offered by its slider. */
-    static inline var FOV_POPUP_WIDTH:Int = 200;
-    static inline var FOV_POPUP_HEIGHT:Int = 96;
+    static inline var FOV_POPUP_WIDTH:Int = 220;
+    static inline var POPUP_MARGIN:Int = 8;
+    static inline var POPUP_TITLE_H:Int = 14;
+    static inline var POPUP_ROW_H:Int = 24;
+    static inline var POPUP_ROW_GAP:Int = 8;
+    static inline var FOV_POPUP_HEIGHT:Int = POPUP_MARGIN * 2 + POPUP_TITLE_H
+        + POPUP_ROW_GAP + 3 * POPUP_ROW_H + 2 * POPUP_ROW_GAP;
     static inline var FOV_MIN_DEG:Float = 30.0;
     static inline var FOV_MAX_DEG:Float = 140.0;
+    /** Viewport performance readout. */
+    static inline var PERF_WIDTH:Int = 176;
+
+    static inline function popupRowY(index:Int):Int {
+        return POPUP_MARGIN + POPUP_TITLE_H + POPUP_ROW_GAP
+            + index * (POPUP_ROW_H + POPUP_ROW_GAP);
+    }
     final console:ConsolePanel;
     final bottomTabs:h2d.Object;
     final logTab:UiButton;
@@ -157,6 +181,8 @@ class EditorShell {
     public var onAddEmptyObjectInFront:Null<Void->Void>;
     /** Create a primitive by mesh asset id at viewport coordinates (menu drag/drop). */
     public var onDropPrimitive:Null<String->Float->Float->Void>;
+    /** Create a primitive dropped on the hierarchy: mesh id + target parent id. */
+    public var onCreatePrimitiveInHierarchy:Null<String->Int->Void>;
     public var onDeleteObjects:Null<Array<Int>->Void>;
     public var onObjectsSelected:Null<Array<Int>->Int->Void>;
     public var onObjectNameChanged:Null<String->Void>;
@@ -252,6 +278,8 @@ class EditorShell {
     public var onWindowFocusLost:Null<Void->Void>;
     /** G: toggle the independent editor grid. */
     public var onToggleGrid:Null<Void->Void>;
+    /** Current grid visibility, used to mirror the checkbox state. */
+    public var onQueryGridVisible:Null<Void->Bool>;
     /** Fired with the new horizontal FOV whenever the FOV field is edited. */
     public var onFovChanged:Null<Float->Void>;
     /** F: frame the primary selection in the active viewport. */
@@ -275,6 +303,10 @@ class EditorShell {
     var hierarchyDropMode:Int = HierarchyRow.DROP_NONE;
     var hierarchyDropValid:Bool = false;
     var hierarchyDropRow:Null<HierarchyRow>;
+    /** True while an engine mesh asset is being dragged over the editor. */
+    var hierarchyAssetDragActive:Bool = false;
+    var hierarchyAssetDropTarget:Null<AssetDropTarget>;
+    var hierarchyFeedbackDrawn:Bool = false;
     var selectionStatusValue:String = "Select an object to inspect";
     var localTransformSpace:Bool = false;
     var transformSpaceHovered:Bool = false;
@@ -552,6 +584,23 @@ class EditorShell {
         hierarchyScrollBar.onWheel = scrollHierarchy;
         hierarchyDropFeedback = new h2d.Graphics(leftContentMask);
 
+        // Engine primitive assets can be dropped here to create a new object
+        // in front of the camera, parented to the hovered hierarchy row.
+        hierarchyAssetDropTarget = new AssetDropTarget(
+            AssetType.MeshAsset, hierarchyHit, hierarchyAssetDropRect,
+            function(active) {
+                hierarchyAssetDragActive = active;
+                if (!active) clearHierarchyDropFeedback();
+            }, function(payload) {
+                var parentId = hierarchyAssetParentAt(ctx.window.mouseX,
+                    ctx.window.mouseY);
+                clearHierarchyDropFeedback();
+                if (onCreatePrimitiveInHierarchy != null) {
+                    onCreatePrimitiveInHierarchy(payload.assetId, parentId);
+                }
+            });
+        AssetDragSession.add(hierarchyAssetDropTarget);
+
         // Inspector panel header.
         inspectorTitleIcon = new h2d.Graphics(rightContentMask);
         UiIcons.draw(inspectorTitleIcon, Sliders, 0, 0, 14, Theme.TEXT_SECONDARY);
@@ -674,15 +723,15 @@ class EditorShell {
         fovTitleText.text = "Field of View";
         fovTitleText.textColor = Theme.TEXT;
         fovTitleText.lineBreak = false;
-        fovTitleText.x = 10;
-        fovTitleText.y = 8;
+        fovTitleText.x = POPUP_MARGIN;
+        fovTitleText.y = POPUP_MARGIN;
 
-        fovInput = new NumericDragField(ctx, 128, 24,
+        fovInput = new NumericDragField(ctx, 128, POPUP_ROW_H,
             FOV_MIN_DEG, FOV_MAX_DEG, 1, EditorViewport.VIEW_FOV_DEG,
             function(value:Float):String return Std.string(Std.int(Math.round(value))),
             "", Theme.TEXT, fovPopupRoot);
-        fovInput.x = 10;
-        fovInput.y = 30;
+        fovInput.x = POPUP_MARGIN;
+        fovInput.y = popupRowY(0);
         fovInput.onValueChanged = applyFov;
         fovInput.onEditRejected = function(message) log("viewport: " + message);
 
@@ -690,40 +739,28 @@ class EditorShell {
         fovDegreeText.text = "°";
         fovDegreeText.textColor = Theme.MUTED;
         fovDegreeText.lineBreak = false;
-        fovDegreeText.x = 144;
-        fovDegreeText.y = 36;
+        fovDegreeText.x = POPUP_MARGIN + 128 + 6;
+        fovDegreeText.y = popupRowY(0)
+            + Math.round((POPUP_ROW_H - fovDegreeText.textHeight) * 0.5);
 
-        fovGridSurface = new UiSurface(ctx, fovPopupRoot);
-        fovGridSurface.setSize(FOV_POPUP_WIDTH - 12, 22);
-        fovGridSurface.x = 6;
-        fovGridSurface.y = FOV_POPUP_HEIGHT - 28;
-        fovGridSurface.setStyle(Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
-        fovGridHit = new h2d.Interactive(
-            FOV_POPUP_WIDTH - 12, 22, fovPopupRoot);
-        fovGridHit.backgroundColor = 0;
-        fovGridHit.cursor = hxd.Cursor.Default;
-        fovGridHit.x = 6;
-        fovGridHit.y = FOV_POPUP_HEIGHT - 28;
-        fovGridHit.onOver = function(_) fovGridSurface.setStyle(
-            Theme.SURFACE_3, Theme.ACCENT, 0);
-        fovGridHit.onOut = function(_) fovGridSurface.setStyle(
-            Theme.PANEL_ALT, Theme.PANEL_ALT, 0);
-        fovGridHit.onPush = function(event) {
-            // Swallow the press; act on release so the closing popup does not
-            // let the release click a control underneath it.
-            event.propagate = false;
-        };
-        fovGridHit.onRelease = function(event) {
-            event.propagate = false;
-            closeFovPopup();
+        var toggleWidth = FOV_POPUP_WIDTH - POPUP_MARGIN * 2;
+        var checkboxY = POPUP_ROW_H - 22; // UiCheckbox uses a 22px inner row.
+
+        fovGridCheck = new UiCheckbox(ctx, "Editor Grid  (G)", fovPopupRoot,
+            ctx.captionFont);
+        fovGridCheck.x = POPUP_MARGIN;
+        fovGridCheck.y = popupRowY(1) + Math.round(checkboxY * 0.5);
+        fovGridCheck.setWidth(toggleWidth);
+        fovGridCheck.onChanged = function(value) {
             if (onToggleGrid != null) onToggleGrid();
         };
-        fovGridText = new UiText(ctx.captionFont, fovPopupRoot);
-        fovGridText.text = "Toggle Editor Grid  (G)";
-        fovGridText.textColor = Theme.TEXT_SECONDARY;
-        fovGridText.lineBreak = false;
-        fovGridText.x = 16;
-        fovGridText.y = FOV_POPUP_HEIGHT - 22;
+
+        fovPerfCheck = new UiCheckbox(ctx, "Performance Stats", fovPopupRoot,
+            ctx.captionFont);
+        fovPerfCheck.x = POPUP_MARGIN;
+        fovPerfCheck.y = popupRowY(2) + Math.round(checkboxY * 0.5);
+        fovPerfCheck.setWidth(toggleWidth);
+        fovPerfCheck.onChanged = setPerfVisible;
 
         viewportHintSurface = new UiSurface(ctx, viewportHud);
         viewportHintSurface.setStyle(Theme.TITLE_BAR, Theme.BORDER_STRONG, 0);
@@ -780,6 +817,26 @@ class EditorShell {
         // Hidden until a real speed change flashes it (see setCameraSpeedLabel).
         cameraSpeedSurface.visible = false;
         cameraSpeedText.visible = false;
+
+        viewportDropHintSurface = new UiSurface(ctx, root);
+        // Opaque fill: the label must never let panel text show through it.
+        viewportDropHintSurface.setStyle(Theme.PANEL_ALT, Theme.ACCENT, 0);
+        viewportDropHintSurface.setSize(viewportDropHintWidth, 22);
+        viewportDropHint = new UiText(ctx.captionFont, viewportDropHintSurface);
+        viewportDropHint.textColor = Theme.TEXT;
+        viewportDropHint.lineBreak = false;
+        viewportDropHint.x = 6;
+        viewportDropHint.y = 4;
+        viewportDropHintSurface.visible = false;
+
+        // Optional performance readout in the viewport's top-right corner.
+        // Plain text with no surface/frame, placed on whole pixels so the
+        // exact-size FreeType atlas stays crisp.
+        perfText = new UiText(ctx.monoFont, viewportHud);
+        perfText.textColor = Theme.TEXT_SECONDARY;
+        perfText.lineBreak = true;
+        perfText.visible = false;
+
         // Ctrl+End routes from the window-level input adapter, which sees key
         // events even when full-window interactives consume pointer input.
         input.onSnapToGridPressed = function() {
@@ -908,11 +965,12 @@ class EditorShell {
             }
             closePaletteIfOpen();
         };
-        // G (rebindable) toggles the independent editor grid; only accepted
-        // while the viewport owns focus, never while typing into a field.
+        // G (rebindable) toggles the independent editor grid from anywhere in
+        // the editor; only active text entry suppresses it.
         input.onToggleGridPressed = function() {
-            if (!isViewportFocused()) return;
+            if (anyTextCaptureActive()) return;
             if (onToggleGrid != null) onToggleGrid();
+            fovGridCheck.value = onQueryGridVisible != null && onQueryGridVisible();
         };
         // Focus is a selection command, not viewport navigation: it stays
         // available while the pointer is over any panel, as long as something
@@ -1183,6 +1241,32 @@ class EditorShell {
     public inline function log(line:String):Void console.log(line);
 
     /**
+     * Show the viewport drop hint near the cursor, clamped inside the viewport
+     * so it never covers the hierarchy or Inspector panels.
+     */
+    public function showViewportDropHint(text:String, x:Float, y:Float,
+            viewport:LayoutRect):Void {
+        if (viewportDropHint.text != text) {
+            viewportDropHint.text = text;
+            viewportDropHintWidth = Math.max(96,
+                Math.round(viewportDropHint.textWidth + 20));
+            viewportDropHintSurface.setSize(viewportDropHintWidth, 22);
+        }
+        var margin = 6.0;
+        var px = Math.max(viewport.x + margin,
+            Math.min(x, viewport.x + viewport.width - viewportDropHintWidth - margin));
+        var py = Math.max(viewport.y + margin,
+            Math.min(y, viewport.y + viewport.height - 22 - margin));
+        viewportDropHintSurface.x = Math.round(px);
+        viewportDropHintSurface.y = Math.round(py);
+        viewportDropHintSurface.visible = true;
+    }
+
+    public function hideViewportDropHint():Void {
+        if (viewportDropHintSurface.visible) viewportDropHintSurface.visible = false;
+    }
+
+    /**
      * PERSPECTIVE · LIT strip: camera and visualization settings. The field
      * of view applies to the shared horizontal FOV that the viewport pass
      * and the camera controller's pan scale both read. It is edited with a
@@ -1210,9 +1294,36 @@ class EditorShell {
         input.clearFocus();
     }
 
-    /** Keep the numeric field in sync with the shared FOV. */
+    /** Toggle the viewport performance overlay from the camera settings popup. */
+    function setPerfVisible(value:Bool):Void {
+        if (perfVisible == value) return;
+        perfVisible = value;
+        perfText.visible = value;
+        if (value) {
+            // Start a fresh window so the first readout is not skewed by the
+            // time the overlay spent hidden.
+            perfStats = new FrameStats(0.5);
+            perfText.text = "FPS     --\nFRAME   -- ms\nMIN/MAX -- / -- ms";
+        }
+    }
+
+    static inline function oneDecimal(value:Float):String {
+        var text = Std.string(Math.round(value * 10) / 10);
+        return text.indexOf(".") < 0 ? text + ".0" : text;
+    }
+
+    function refreshPerfText(report:FrameStatsReport):Void {
+        perfText.text = 'FPS     ${oneDecimal(report.fps)}'
+            + '\nFRAME   ${oneDecimal(report.averageMs)} ms'
+            + '\nMIN/MAX ${oneDecimal(report.minimumMs)} / '
+            + '${oneDecimal(report.maximumMs)} ms';
+    }
+
+    /** Keep the numeric field and both checkboxes in sync with editor state. */
     function refreshFovPopupValue():Void {
         fovInput.setValue(EditorViewport.VIEW_FOV_DEG);
+        fovGridCheck.value = onQueryGridVisible != null && onQueryGridVisible();
+        fovPerfCheck.value = perfVisible;
     }
 
     /** Single write path for FOV edits from the transform-style field. */
@@ -1302,6 +1413,13 @@ class EditorShell {
 
     public function update(dt:Float):Void {
         if (ctx.width != lastWidth || ctx.height != lastHeight) resize();
+        if (hierarchyAssetDragActive) {
+            updateHierarchyAssetDropFeedback(ctx.window.mouseX, ctx.window.mouseY);
+        }
+        if (perfVisible) {
+            var report = perfStats.sample(dt);
+            if (report != null) refreshPerfText(report);
+        }
         if (speedChipShown) {
             speedChipTimer -= dt;
             if (speedChipTimer <= 0) {
@@ -1405,6 +1523,12 @@ class EditorShell {
         viewportHintText.y = 4;
         viewportHintHit.x = viewportHintSurface.x;
         viewportHintHit.y = 0;
+
+        // Frameless performance readout sits under the WORLD strip at the
+        // viewport's top-right, inset from the same whole-pixel HUD origin.
+        perfText.x = Math.round(Math.max(0,
+            geometry.viewport.width - PERF_WIDTH - 16));
+        perfText.y = 30;
 
         // Snap toolbar sits right of the view-mode strip and before the
         // right-aligned World/Local control; hidden on very narrow viewports.
@@ -2038,6 +2162,73 @@ class EditorShell {
         }
     }
 
+    /** Window-space rectangle of the hierarchy rows, used as an asset drop slot. */
+    function hierarchyAssetDropRect():AssetDropRect {
+        var origin = hierarchyHit.localToGlobal(new h2d.col.Point(0, 0));
+        return {
+            x: origin.x, y: origin.y,
+            width: hierarchyHit.width, height: hierarchyHit.height
+        };
+    }
+
+    /** Parent the dropped primitive would get from the current cursor row. */
+    function hierarchyAssetParentAt(mouseX:Float, mouseY:Float):Int {
+        if (mouseX < hierarchyHit.x || mouseX > hierarchyHit.x + hierarchyHit.width
+                || mouseY < hierarchyHit.y
+                || mouseY > hierarchyHit.y + hierarchyHit.height) return -1;
+        for (row in hierarchyRows) {
+            if (!row.visible || mouseY < row.y
+                    || mouseY >= row.y + HIERARCHY_ROW_HEIGHT) continue;
+            var entry = findVisibleHierarchyEntry(row.objectId);
+            if (entry == null) return -1;
+            var relativeY = mouseY - row.y;
+            if (relativeY < HIERARCHY_ROW_HEIGHT * 0.28) return entry.parentId;
+            if (relativeY > HIERARCHY_ROW_HEIGHT * 0.72) return entry.parentId;
+            return entry.id;
+        }
+        return -1;
+    }
+
+    /** Show the same before/after/child feedback used by object reparenting. */
+    function updateHierarchyAssetDropFeedback(mouseX:Float, mouseY:Float):Void {
+        clearHierarchyDropFeedback();
+        if (mouseX < hierarchyHit.x || mouseX > hierarchyHit.x + hierarchyHit.width
+                || mouseY < hierarchyHit.y
+                || mouseY > hierarchyHit.y + hierarchyHit.height) return;
+
+        var targetRow:Null<HierarchyRow> = null;
+        for (row in hierarchyRows) {
+            if (!row.visible) continue;
+            if (mouseY >= row.y && mouseY < row.y + HIERARCHY_ROW_HEIGHT) {
+                targetRow = row;
+                break;
+            }
+        }
+        if (targetRow == null) {
+            var lineY = hierarchyHit.y + Math.min(hierarchyHit.height - 2,
+                Math.max(2, visibleRowsHeight()));
+            hierarchyDropFeedback.lineStyle(2, Theme.ACCENT, 1);
+            hierarchyDropFeedback.moveTo(4, lineY);
+            hierarchyDropFeedback.lineTo(Math.max(4, hierarchyHit.width - 4), lineY);
+            hierarchyDropFeedback.lineStyle();
+            hierarchyFeedbackDrawn = true;
+            return;
+        }
+        var entry = findVisibleHierarchyEntry(targetRow.objectId);
+        if (entry == null) return;
+        var relativeY = mouseY - targetRow.y;
+        if (relativeY < HIERARCHY_ROW_HEIGHT * 0.28) {
+            hierarchyDropMode = HierarchyRow.DROP_BEFORE;
+        } else if (relativeY > HIERARCHY_ROW_HEIGHT * 0.72) {
+            hierarchyDropMode = HierarchyRow.DROP_AFTER;
+        } else {
+            hierarchyDropMode = HierarchyRow.DROP_CHILD;
+        }
+        hierarchyDropValid = true;
+        hierarchyDropRow = targetRow;
+        targetRow.setDropFeedback(hierarchyDropMode, true);
+    }
+
     function beginHierarchyDrag(sourceId:Int):Void {
         closePaletteIfOpen();
         hierarchyDragIds = selectedObjectIds.indexOf(sourceId) >= 0
@@ -2142,7 +2333,10 @@ class EditorShell {
         hierarchyDropRow = null;
         hierarchyDropMode = HierarchyRow.DROP_NONE;
         hierarchyDropValid = false;
-        hierarchyDropFeedback.clear();
+        if (hierarchyFeedbackDrawn) {
+            hierarchyFeedbackDrawn = false;
+            hierarchyDropFeedback.clear();
+        }
     }
 
     function findVisibleHierarchyEntry(id:Int):Null<HierarchyEntry> {

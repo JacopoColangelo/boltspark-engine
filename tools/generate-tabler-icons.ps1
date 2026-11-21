@@ -8,7 +8,7 @@ $version = '3.52.0'
 $cellSize = 16
 $minimumSize = 6
 $maximumSize = 16
-$expectedAtlasSha256 = '5F51E2AB778DB236866B417FDF6DBF087C09F665D321E807DA96851C755D9DB6'
+$expectedAtlasSha256 = 'F07E185C74DE57BA2BF0811E3DE24697533738DB5DDC56AE55BE39B9165DB542'
 $sourceRoot = Join-Path $repoRoot "src\res\.tmp\tabler-icons\$version"
 $outputPath = Join-Path $repoRoot 'src\res\icons\tabler_ui.png'
 # A separate, larger alpha mask for asset-browser scene thumbnails: the UI
@@ -64,14 +64,15 @@ $icons = @(
     @{ Column = 38; Variant = 'outline'; Name = 'eye-off' },
     @{ Column = 39; Variant = 'outline'; Name = 'camera' },
     @{ Column = 40; Variant = 'outline'; Name = 'check' },
-    @{ Column = 41; Variant = 'outline'; Name = 'minus' }
+    @{ Column = 41; Variant = 'outline'; Name = 'minus' },
+    @{ Column = 42; Variant = 'outline'; Name = 'eraser' }
 )
 
 Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Force $sourceRoot | Out-Null
 New-Item -ItemType Directory -Force (Split-Path -Parent $outputPath) | Out-Null
 
-$width = 42 * $cellSize
+$width = 43 * $cellSize
 $height = ($maximumSize - $minimumSize + 1) * $cellSize
 $pixelFormat = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
 $atlas = New-Object System.Drawing.Bitmap($width, $height, $pixelFormat)

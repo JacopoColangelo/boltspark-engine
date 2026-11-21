@@ -58,9 +58,12 @@ session.createObject("Cube", new EditorTransform(), -1,
 ```
 
 `MeshRenderer.mesh` accepts any registered `Mesh`, and
-`MeshRenderer.material` accepts any `Material`. `HeapsMeshFactory` maps mesh
-asset IDs to concrete Heaps primitives; adding another primitive does not
-require a new GameObject class.
+`MeshRenderer.material` is a convenience alias for material slot 0. A mesh
+declares `materialSlots` (1 for all built-in primitives), and the renderer keeps
+one material per slot via `getMaterial(index)` / `setMaterial(index, material)`;
+each slot gets its own Inspector picker with property id `material` (slot 0) or
+`material:<index>`. `HeapsMeshFactory` maps mesh asset IDs to concrete Heaps
+primitives; adding another primitive does not require a new GameObject class.
 
 `Mesh3D.is(object)` recognizes both runtime `Mesh3D` instances and editor scene
 objects whose components include a `MeshRenderer`. Editor object construction
@@ -73,9 +76,15 @@ Plane assets (and any future imported static meshes registered with
 `PrimitiveMeshes.register()`), while `Material.all()` lists the built-in Default
 Material plus any registered materials. A new `MeshRenderer` automatically uses
 the Default Material when none is supplied. Each renderer owns its own
-`h3d.scene.Mesh` and material instance; geometry is cached per (mesh asset id +
-`PrimitiveSettings`) pair, so multiple entities can share a mesh/material asset
-without sharing transforms or mutable renderer state.
+`h3d.scene.MultiMaterial` (one Heaps material per slot); geometry is cached per
+(mesh asset id + `PrimitiveSettings`) pair, so multiple entities can share a
+mesh/material asset without sharing transforms or mutable renderer state.
+
+Engine assets can also be dragged straight into the 3D viewport: a mesh creates
+a new object at the ground point under the cursor, and a material is applied to
+the hovered object's material slot (an accent outline shows the target before
+release). Dropping a mesh onto the Scene Hierarchy instead creates the object in
+front of the camera, like the Add menu, parented to the hovered row.
 
 ### Primitive settings
 

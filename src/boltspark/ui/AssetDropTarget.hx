@@ -15,6 +15,8 @@ class AssetDropTarget {
     public final onDrop:AssetDragPayload->Void;
     /** Optional liveness override for headless tests; production uses the scene. */
     public var aliveProvider:Null<Void->Bool> = null;
+    /** True for large-area targets (the viewport) whose own hint replaces the ghost. */
+    public var hideGhostOnHover:Bool = false;
 
     public function new(assetType:AssetType, owner:h2d.Object,
             rectProvider:Void->AssetDropRect, onHighlight:Bool->Void,

@@ -15,6 +15,7 @@ class MultiSelectionRepro {
     static function main():Void {
         testSelectionClicks();
         testSharedDelta();
+        testNestedSharedDrag();
         testMergedInspector();
         testCompositeTransformHistory();
         Sys.println("[multi-selection] viewport selection, shared gizmo delta, "
@@ -74,6 +75,84 @@ class MultiSelectionRepro {
             SharedGizmoDelta.SCALE);
         assertTrue(close(scaled.positionX, 2) && close(scaled.scaleX, 2)
             && close(scaled.scaleY, 1), "shared scale did not scale offset and size");
+    }
+
+    /**
+     * Selecting a parent and its child and moving them together must keep the
+     * child's local offset intact. Resolving against the stale session parent
+     * instead of the previewed one applies the delta twice.
+     */
+    static function testNestedSharedDrag():Void {
+        var parentStart = new EditorTransform(2, 0, 3);
+        var childStart = new EditorTransform(5, 0, 3);
+        var pivotStart = new EditorTransform();
+        var movedPivot = new EditorTransform(4, 0, 0);
+        var parentDesired = SharedGizmoDelta.apply(parentStart, pivotStart,
+            movedPivot, SharedGizmoDelta.MOVE);
+        var childDesired = SharedGizmoDelta.apply(childStart, pivotStart,
+            movedPivot, SharedGizmoDelta.MOVE);
+
+        var childLocal = SharedGizmoDelta.localForWorld(childDesired,
+            parentDesired.toMatrix(), childStart);
+        assertTrue(close(childLocal.positionX, 3) && close(childLocal.positionY, 0)
+            && close(childLocal.positionZ, 0),
+            "nested child local offset changed under a shared move");
+        assertTrue(close(childLocal.positionX, childStart.positionX - parentStart.positionX),
+            "nested child did not keep its parent-relative position");
+
+        // Composing with the previewed parent world must land on the desired
+        // child world, not on a double-translated one.
+        var composed = parentDesired.toMatrix().multiplied(childLocal.toMatrix());
+        var composedTransform = EditorTransform.fromMatrix(composed);
+        assertTrue(close(composedTransform.positionX, childDesired.positionX),
+            "nested child world position was multiplied by the parent delta");
+
+        // The Inspector slider path: editing a selected parent's local X must
+        // move the selected child by the same world amount, leaving its local
+        // offset intact (no multiplied location offset).
+        var parentWorldMatrix = new EditorTransform(10, 0, 0).toMatrix();
+        var parentLocal = new EditorTransform(2, 0, 0);
+        var childLocal = new EditorTransform(3, 0, 0);
+        var startParentWorld = SharedGizmoDelta.worldFromParent(
+            parentLocal, parentWorldMatrix);
+        // The child's parent is the selected parent, not the same grandparent.
+        var startChildWorld = SharedGizmoDelta.worldFromParent(
+            childLocal, startParentWorld.toMatrix());
+        var editedParentLocal = parentLocal.clone();
+        editedParentLocal.positionX = 6;
+        var editedParentWorld = SharedGizmoDelta.worldFromParent(
+            editedParentLocal, parentWorldMatrix);
+        var editedChildWorld = SharedGizmoDelta.apply(startChildWorld,
+            startParentWorld, editedParentWorld, SharedGizmoDelta.MOVE);
+        var editedChildLocal = SharedGizmoDelta.localForWorld(editedChildWorld,
+            editedParentWorld.toMatrix(), childLocal);
+        assertTrue(close(editedChildLocal.positionX, childLocal.positionX),
+            "Inspector slider multiplied the child's local position offset");
+        var composedChild = SharedGizmoDelta.worldFromParent(
+            editedChildLocal, editedParentWorld.toMatrix());
+        assertTrue(close(composedChild.positionX, editedChildWorld.positionX),
+            "Inspector slider child world position did not match the shared delta");
+
+        // World-space slider edits on a rotated nested object must change the
+        // world axis, which means composing several local channels at once.
+        var rotatedParent = new EditorTransform(0, 0, 0, 0, 0.7071067811865476,
+            0, 0.7071067811865476);
+        var rotatedWorld = rotatedParent.toMatrix();
+        var nestedLocal = new EditorTransform(3, 0, 0);
+        var nestedWorld = SharedGizmoDelta.worldFromParent(
+            nestedLocal, rotatedWorld);
+        var worldEdited = nestedWorld.clone();
+        worldEdited.positionX += 2;
+        var localEdited = SharedGizmoDelta.localForWorld(
+            worldEdited, rotatedWorld, nestedLocal);
+        var recomposed = SharedGizmoDelta.worldFromParent(
+            localEdited, rotatedWorld);
+        assertTrue(close(recomposed.positionX, worldEdited.positionX)
+            && close(recomposed.positionY, nestedWorld.positionY)
+            && close(recomposed.positionZ, nestedWorld.positionZ),
+            "world-space slider edit did not stay axis-aligned in world space");
+        assertTrue(Math.abs(localEdited.positionZ - nestedLocal.positionZ) > 0.5,
+            "world-space edit on a rotated parent did not compose local axes");
     }
 
     static function testMergedInspector():Void {
