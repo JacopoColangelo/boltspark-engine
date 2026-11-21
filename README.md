@@ -106,6 +106,18 @@ The single script sets the Haxe/HashLink environment per-session and uses projec
 
 The development build runs through `hl.exe` and retains its command window for logs and crash diagnostics. The packaged `release\Boltspark.exe` uses the Windows GUI subsystem and starts without a command window.
 
+### Engine thumbnail bake
+
+Engine-content thumbnails are baked offline; the editor never renders a 3D scene just to draw a thumbnail. The bake command renders each primitive at 1024x1024 into a depth-buffered offscreen target, smooths it with a `ScreenFx` tent filter plus FXAA (no MSAA — the DX12 backend does not support MSAA offscreen targets), builds a premultiplied-linear mip pyramid and writes `res\thumbnails\bundles\*.bundle` (including a transparent-background `material.bundle`). `ThumbnailLoader` then uploads those mips into one trilinearly filtered texture so the Asset Browser size slider scales smoothly. The thumbnail `h2d.Graphics` opts into `smooth = true` so Heaps selects `MIN_MAG_MIP_LINEAR` instead of point sampling inside a mip level. Baked geometry uses a denser mesh than the editor default (64 segments / 48 rings), the key light comes from the upper right, and the camera is framed tightly inside the card without clipping.
+
+```powershell
+.\tools\bake-thumbnails.ps1                  # re-bake all built-in primitives
+.\tools\bake-thumbnails.ps1 -OutputDirectory D:\tmp\thumbs
+.\tools\build.ps1                            # rebuild to embed the new bundles
+```
+
+Bundles are optional: until one is baked, the UI keeps using the legacy single-resolution PNGs in `res\thumbnails`. The CPU half of the pipeline (halo-free mips + bundle round-trip) is covered by `ThumbnailPipelineRepro`.
+
 To open a project from the command line or a file association, pass the manifest path:
 
 ```powershell
@@ -161,6 +173,7 @@ src/
     windows/                  — native top-level editor-window routing and H2D content
   boltspark/project/          — versioned project/scene data, validation, atomic storage
   boltspark/engine/           — GameObject, Component, Transform, rendering components/assets
+  boltspark/thumbnails/       — offline mesh thumbnail baker and mipmapped UI loader
   boltspark/editor/           — pure editor session/model plus viewport and gizmos
     commands/                 — object, transform, duplicate, and hierarchy history
   res/fonts/                  — embedded Inter and JetBrains Mono TTF faces
@@ -171,6 +184,8 @@ tests/
   native/                     — tracked HWND, layout, DPI, reset, and performance probes
 tools/
   build.ps1                   — install dependencies, check, build, and run
+  bake-thumbnails.ps1         — offline DX12 thumbnail bake command
+  bake/                       — bake command host and its hxml
   test.ps1                    — portable CI and full native regression entry point
   check-policy.ps1            — native-only backend/dependency policy guard
   register-project-association.ps1 — opt-in user-level .boltproject association

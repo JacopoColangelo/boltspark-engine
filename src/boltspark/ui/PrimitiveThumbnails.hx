@@ -2,14 +2,19 @@ package boltspark.ui;
 
 import boltspark.engine.Material;
 import boltspark.engine.PrimitiveMeshes;
+import boltspark.thumbnails.ThumbnailLoader;
 import boltspark.ui.UiIcons;
 
 /**
- * Draws the pre-baked asset thumbnails shipped in `res/thumbnails`.
+ * Draws the engine-content thumbnails in the Asset Browser and asset pickers.
  *
- * The PNGs are real in-engine renders captured ahead of time, so the editor
- * never spins up a render target or draws 3D geometry at runtime. The 512px
- * sources are loaded directly so no mip filtering softens them.
+ * Preferred source is the offline-baked mipmapped bundle produced by
+ * `ThumbnailBaker` (see `res/thumbnails/bundles/*.bundle`). Those bundles carry
+ * a complete pre-filtered pyramid, so the continuous thumbnail-size slider can
+ * rescale them with trilinear filtering and zero runtime 3D rendering.
+ *
+ * The original single-resolution PNGs remain as a fallback for builds that
+ * have not run the bake step yet, so this stays drop-in compatible.
  */
 class PrimitiveThumbnails {
     static var cache:Map<String, h2d.Tile> = new Map();
@@ -19,34 +24,63 @@ class PrimitiveThumbnails {
         if (width <= 0 || height <= 0) return;
         var tile = tileFor(assetId);
         if (tile != null) {
+            // h2d.RenderContext rewrites texture.filter from the drawing
+            // object's `smooth` flag on every draw. The editor sets
+            // defaultSmooth = false for pixel-exact icons, which would give
+            // the mipmapped thumbnail MIN_MAG_POINT_MIP_LINEAR (point sampling
+            // inside a mip) and make it blocky when the slider shrinks it.
+            // These Graphics objects are dedicated to the thumbnail, so opting
+            // just them into smooth sampling yields true trilinear filtering.
+            g.smooth = true;
             g.beginTileFill(x, y, width / tile.width, height / tile.height, tile);
             g.drawRect(x, y, width, height);
             g.endFill();
         } else {
-            // Unknown/custom assets get a neutral document glyph.
+            // Unknown/custom assets get a neutral document glyph. Keep the
+            // pixel-exact atlas sampling for icons in reused Graphics objects.
+            g.smooth = false;
             var size = Math.min(width, height);
             UiIcons.draw(g, Document, x + (width - size) * 0.5,
                 y + (height - size) * 0.5, size, accent);
         }
     }
 
+    /** Drop cached tiles, e.g. alongside `ThumbnailLoader.clear()` on teardown. */
+    public static function clearCache():Void {
+        cache.clear();
+    }
+
     static function tileFor(assetId:String):Null<h2d.Tile> {
         if (assetId == null) return null;
-        var source:hxd.res.Image = switch (assetId) {
-            case PrimitiveMeshes.CUBE_ID: hxd.Res.thumbnails.cube;
-            case PrimitiveMeshes.SPHERE_ID: hxd.Res.thumbnails.sphere;
-            case PrimitiveMeshes.CYLINDER_ID: hxd.Res.thumbnails.cylinder;
-            case PrimitiveMeshes.CAPSULE_ID: hxd.Res.thumbnails.capsule;
-            case PrimitiveMeshes.PLANE_ID: hxd.Res.thumbnails.plane;
-            default: Material.find(assetId) != null
-                ? hxd.Res.thumbnails.material : null;
-        };
-        if (source == null) return null;
         var found = cache.get(assetId);
         if (found != null) return found;
+
+        var resourceName:String = switch (assetId) {
+            case PrimitiveMeshes.CUBE_ID: "cube";
+            case PrimitiveMeshes.SPHERE_ID: "sphere";
+            case PrimitiveMeshes.CYLINDER_ID: "cylinder";
+            case PrimitiveMeshes.CAPSULE_ID: "capsule";
+            case PrimitiveMeshes.PLANE_ID: "plane";
+            default: Material.find(assetId) != null ? "material" : null;
+        };
+
+        // Mipmapped bundle (produced by the offline bake command).
+        if (resourceName != null) {
+            var baked = ThumbnailLoader.get(assetId, resourceName);
+            if (baked != null) {
+                cache.set(assetId, baked);
+                return baked;
+            }
+        }
+
+        // Legacy fallback: the original single-resolution in-engine renders.
+        // Loaded by path because `hxd.Res.load()` returns a generic Any and the
+        // bundles/ subfolder prevents stable generated hxd.Res field names.
+        if (resourceName == null) return null;
+        var source = hxd.Res.loader.loadCache(
+            "thumbnails/" + resourceName + ".png", hxd.res.Image);
         var tile = source.toTile();
         cache.set(assetId, tile);
         return tile;
     }
-
 }
