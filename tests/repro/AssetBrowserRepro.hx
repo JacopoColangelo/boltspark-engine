@@ -58,12 +58,15 @@ class AssetBrowserRepro {
         for (entry in engine) {
             assertTrue(entry.kind == AssetTypeRegistry.KIND_ENGINE,
                 "catalog entry is not an engine asset");
-            assertTrue(entry.folder == EngineAssetCatalog.FOLDER
-                    && entry.kindLabel == AssetTypeRegistry.ENGINE_INFO_LABEL,
-                "engine asset lost its Engine folder / display metadata");
+            assertTrue(entry.folder == EngineAssetCatalog.MESH_FOLDER
+                    || entry.folder == EngineAssetCatalog.MATERIAL_FOLDER,
+                "engine asset lost its typed Engine folder");
             var payload = EngineAssetCatalog.dragPayload(entry);
             assertTrue(payload != null && payload.assetId.length > 0,
                 "engine asset could not produce a drag payload");
+            assertTrue(entry.folder == EngineAssetCatalog.folderFor(payload.assetType)
+                    && entry.kindLabel == EngineAssetCatalog.labelFor(payload.assetType),
+                "engine asset folder / type caption does not match its asset type");
             if (payload.assetType == AssetType.MeshAsset) {
                 meshCount++;
                 if (payload.assetId == PrimitiveMeshes.CUBE_ID) cubePayload = payload;

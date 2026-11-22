@@ -97,6 +97,7 @@ public static class BoltsparkFloatDragApi {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
     public static IntPtr LParam(int x, int y) { return (IntPtr)((y << 16) | (x & 0xFFFF)); }
 
     public static IntPtr[] FindWindows(uint pid, string className) {
@@ -190,6 +191,16 @@ function Send-Mouse([IntPtr]$window, [uint32]$message, [int]$x, [int]$y) {
         [BoltsparkFloatDragApi]::LParam($x, $y), 0, 3000, [ref]$result)
 }
 
+function Send-FocusLoss([IntPtr]$window) {
+    # Queue WA_INACTIVE instead of invoking WndProc with SendMessage: this
+    # verifies that winfloat_pump latches the native notification, returns from
+    # its callback, and only then lets Haxe tear down the captured H2D gesture.
+    if (-not [BoltsparkFloatDragApi]::PostMessage(
+            $window, 0x0006, [IntPtr]::Zero, [IntPtr]::Zero)) {
+        throw 'Could not queue floating-window focus loss.'
+    }
+}
+
 function Read-Log() {
     if (-not (Test-Path $stdout)) { return '' }
     return Get-Content $stdout -Raw
@@ -234,7 +245,6 @@ try {
         throw 'Floating Asset Browser and editor HWNDs did not appear.'
     }
     Write-Host "[float-drag] float=$floatWindow editor=$main" -ForegroundColor DarkGray
-
     # The settings popover is a custom group of overlay siblings (not a
     # MenuDropdown). It must be reparented into the float-owned scene.
     Send-Mouse $floatWindow 0x0200 405 38
@@ -261,6 +271,23 @@ try {
     Start-Sleep -Milliseconds 300
     if ((Read-Log) -notmatch '\[probe\] asset browser navigate folder=Engine') {
         throw 'Could not open the Engine folder in the floating Asset Browser.'
+    }
+
+    # Engine content is split into Meshes/Materials subfolders. Expand Engine
+    # and open Meshes so the grid contains draggable mesh tiles again.
+    Send-Mouse $floatWindow 0x0200 55 110
+    Send-Mouse $floatWindow 0x0201 55 110
+    Send-Mouse $floatWindow 0x0202 55 110
+    Send-Mouse $floatWindow 0x0201 55 110
+    Send-Mouse $floatWindow 0x0202 55 110
+    Start-Sleep -Milliseconds 200
+    Send-Mouse $floatWindow 0x0200 69 154
+    Send-Mouse $floatWindow 0x0201 69 154
+    Send-Mouse $floatWindow 0x0202 69 154
+    Start-Sleep -Milliseconds 300
+    if ((Read-Log) -notmatch
+            '\[probe\] asset browser navigate folder=Engine/Meshes') {
+        throw 'Could not open the Engine/Meshes folder in the floating Asset Browser.'
     }
 
     # WM_MOUSEWHEEL carries screen coordinates, unlike ordinary mouse
@@ -299,6 +326,33 @@ try {
         throw 'The press on the first engine tile did not begin an asset drag.'
     }
 
+    # Losing activation halfway through a captured drag used to leave Heaps'
+    # capture pointing at a rebuilt tile. The float then stopped accepting
+    # input and could access-violate on the next event. Cancel outside event
+    # dispatch, release the old press, and prove a second drag can start.
+    Send-FocusLoss $floatWindow
+    Start-Sleep -Milliseconds 250
+    $process.Refresh()
+    if ($process.HasExited) {
+        throw "Editor crashed after float focus loss (exit code $($process.ExitCode))."
+    }
+    $log = Read-Log
+    if ($log -notmatch '\[probe\] float drag cancelled focus loss panel=boltspark.assets') {
+        throw 'Focus loss did not cancel the floating Asset Browser drag.'
+    }
+    Send-Mouse $floatWindow 0x0202 ($tx + 12) ($ty + 12)
+    Send-Mouse $floatWindow 0x0200 $tx $ty
+    Send-Mouse $floatWindow 0x0201 $tx $ty
+    Send-Mouse $floatWindow 0x0200 ($tx + 12) ($ty + 12)
+    Start-Sleep -Milliseconds 350
+    $log = Read-Log
+    $dragBegins = ([regex]::Matches(
+        $log, '\[probe\] asset drag begin source=\S+ at=')).Count
+    if ($dragBegins -lt 2) {
+        throw 'Floating Asset Browser did not accept input after drag focus loss.'
+    }
+    Write-Host '[float-drag] Focus-loss drag cancellation passed.' -ForegroundColor DarkGray
+
     $slotMatch = [regex]::Match($log, '\[probe\] asset slot type=(\w+) rect=(-?\d+),(-?\d+) (\d+)x(\d+)')
     if (-not $slotMatch.Success) {
         throw "Dragging did not highlight an Inspector slot. Log: $($log.Substring([Math]::Max(0, $log.Length - 1200)))"
@@ -315,10 +369,19 @@ try {
         (Join-Path $outputDir 'float-drag-label.png'))
     $beforeShot = Join-Path $outputDir 'main-before.png'
     [BoltsparkDragShot]::Save($main, $beforeShot)
+    # The label is now a single always-on-top overlay HWND rather than a hint
+    # inside the main editor scene, so inspect that window directly.
+    $labelWindows = [BoltsparkFloatDragApi]::FindWindows(
+        [uint32]$process.Id, 'BoltSparkDragLabel')
+    if ($labelWindows.Length -eq 0) {
+        throw 'Drag label overlay HWND was not created.'
+    }
+    $labelShot = Join-Path $outputDir 'drag-label-overlay.png'
+    [BoltsparkDragShot]::Save($labelWindows[0], $labelShot)
     $labelPixels = [BoltsparkDragShot]::CountRgb(
-        $beforeShot, 480, 312, 130, 40, 0x45C7A1)
+        $labelShot, 0, 0, 300, 40, 0x45C7A1)
     if ($labelPixels -lt 20) {
-        throw 'Translated drag label was not visible beside the cursor in the main editor.'
+        throw 'The topmost drag label overlay did not draw its frame.'
     }
 
     # Convert the main-editor scene target into float client coordinates. The

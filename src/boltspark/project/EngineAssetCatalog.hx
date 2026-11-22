@@ -3,6 +3,7 @@ package boltspark.project;
 import boltspark.engine.Material;
 import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.inspector.AssetType;
+import boltspark.project.AssetTypeRegistry;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.AssetDragPayload;
 
@@ -16,17 +17,41 @@ class EngineAssetCatalog {
     public static inline var SOURCE_PREFIX:String = "engine://";
     /** Virtual root folder that groups engine assets in the browser. */
     public static inline var FOLDER:String = "Engine";
+    /** Engine meshes and materials get their own virtual subfolders. */
+    public static inline var MESH_FOLDER:String = FOLDER + "/Meshes";
+    public static inline var MATERIAL_FOLDER:String = FOLDER + "/Materials";
+    public static inline var MESH_LABEL:String = "Mesh";
+    public static inline var MATERIAL_LABEL:String = "Material";
 
     public static function all():Array<AssetFileInfo> {
         var result:Array<AssetFileInfo> = [];
         for (mesh in PrimitiveMeshes.all()) {
-            result.push(make(sourceFor(AssetType.MeshAsset, mesh.id), mesh.name));
+            result.push(make(sourceFor(AssetType.MeshAsset, mesh.id), mesh.name,
+                AssetType.MeshAsset));
         }
         for (material in Material.all()) {
             result.push(make(sourceFor(AssetType.MaterialAsset, material.id),
-                material.name));
+                material.name, AssetType.MaterialAsset));
         }
         return result;
+    }
+
+    /** Virtual folder for one engine asset family. */
+    public static function folderFor(assetType:AssetType):String {
+        return switch (assetType) {
+            case AssetType.MeshAsset: MESH_FOLDER;
+            case AssetType.MaterialAsset: MATERIAL_FOLDER;
+            default: FOLDER;
+        };
+    }
+
+    /** Caption shown under an engine asset's name in the browser. */
+    public static function labelFor(assetType:AssetType):String {
+        return switch (assetType) {
+            case AssetType.MeshAsset: MESH_LABEL;
+            case AssetType.MaterialAsset: MATERIAL_LABEL;
+            default: AssetTypeRegistry.ENGINE_INFO_LABEL;
+        };
     }
 
     public static function sourceFor(assetType:AssetType, id:String):String {
@@ -62,16 +87,17 @@ class EngineAssetCatalog {
         };
     }
 
-    static function make(source:String, name:String):AssetFileInfo {
+    static function make(source:String, name:String,
+            assetType:AssetType):AssetFileInfo {
         return {
             source: source,
             name: name,
-            folder: FOLDER,
+            folder: folderFor(assetType),
             kind: AssetTypeRegistry.KIND_ENGINE,
             active: false,
             registered: false,
             extension: "",
-            kindLabel: AssetTypeRegistry.ENGINE_INFO_LABEL,
+            kindLabel: labelFor(assetType),
             loadable: true
         };
     }

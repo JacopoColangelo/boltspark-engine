@@ -43,7 +43,6 @@ import boltspark.ui.AssetDropTarget;
 import boltspark.ui.BoltUI;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
-import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.windows.ApplicationWindowKind;
 import boltspark.ui.windows.ApplicationWindowManager;
 import boltspark.ui.windows.DockPanelWindowApp;
@@ -2532,18 +2531,12 @@ class Main extends hxd.App {
     }
 
     /**
-     * One consistent label follows the cursor for every drag, including drags
-     * started in a floating panel (whose own HWND occludes this overlay).
+     * The label lives in a single always-on-top overlay HWND managed by
+     * FloatWindowManager, so it stays above docked panels and native floats
+     * alike. The old viewport hint would duplicate it and sit under floats.
      */
     function updateDragLabel():Void {
-        var label = boltspark.ui.UiContext.dragLabel;
-        if (label == null) {
-            boltUI.hideViewportDropHint();
-            return;
-        }
-        var pointer = currentDragPointer();
-        boltUI.showViewportDropHint(label, pointer.x + 14, pointer.y + 12,
-            new LayoutRect(0, 0, nativeWindow.width, nativeWindow.height));
+        boltUI.hideViewportDropHint();
     }
 
     function clearViewportDropHover():Void {

@@ -65,6 +65,13 @@ class SearchField extends h2d.Object {
 
     public inline function isFocused():Bool return focused;
 
+    /** Programmatically replace the query (used when revealing an asset). */
+    public function setText(value:String):Void {
+        input.text = value;
+        placeholder.visible = value.length == 0;
+        if (onChange != null) onChange(value);
+    }
+
     /** Focus the underlying text input (used by the Asset Browser Ctrl+F). */
     public function focusInput():Void {
         input.focus();

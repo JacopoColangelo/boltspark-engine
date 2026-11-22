@@ -209,6 +209,10 @@ class AssetBrowser extends h2d.Object {
     var clipboardIsCut:Bool = false;
     var dragSources:Array<String> = [];
     var dragging:Bool = false;
+    /** The browser owns the current SceneEvents capture. Keep only lifecycle
+     *  state here: a tile can be destroyed by refresh while its capture closure
+     *  is still installed, so retaining/dereferencing that Interactive is unsafe. */
+    var dragCaptureActive:Bool = false;
     var dragStartX:Float = 0;
     var dragStartY:Float = 0;
     var widthValue:Float = 0;
@@ -234,9 +238,11 @@ class AssetBrowser extends h2d.Object {
         sortAsc = store.sortAsc;
         typeFilter = store.typeFilter;
         showEngineAssets = store.showEngineAssets;
-        // The virtual Engine folder starts closed so its assets don't crowd
-        // the root tree; users expand it explicitly when they need it.
+        // The virtual Engine folder and its type subfolders start closed so
+        // their assets don't crowd the root tree; users expand them when needed.
         expandedFolders.set(EngineAssetCatalog.FOLDER, false);
+        expandedFolders.set(EngineAssetCatalog.MESH_FOLDER, false);
+        expandedFolders.set(EngineAssetCatalog.MATERIAL_FOLDER, false);
         foldersFirst = store.foldersFirst;
         preferredFolderWidth = folderWidth = store.folderWidth;
 
@@ -633,6 +639,80 @@ class AssetBrowser extends h2d.Object {
         if (selectedSource == "") return;
         setSelected([]);
         Sys.println('[probe] asset browser selection cleared');
+    }
+
+    /**
+     * Reveal one asset: navigate to its folder, expand the Engine tree branch
+     * when needed and select its tile. Engine assets are hidden until the
+     * settings opt-in or the Engine Asset filter is active, so browsing to one
+     * enables the opt-in instead of silently showing nothing.
+     */
+    public function revealAsset(source:String):Bool {
+        if (source == null || source == "") {
+            showStatus("No asset assigned to this slot");
+            return false;
+        }
+        var isEngine = StringTools.startsWith(source, EngineAssetCatalog.SOURCE_PREFIX);
+        var changed = false;
+        if (isEngine && !showEngineAssets && typeFilter != AssetTypeRegistry.KIND_ENGINE) {
+            showEngineAssets = true;
+            store.showEngineAssets = true;
+            store.save();
+            showEngineAssetsCheckbox.value = true;
+            changed = true;
+        }
+        if (!isEngine && typeFilter == AssetTypeRegistry.KIND_ENGINE) {
+            typeFilter = "all";
+            store.typeFilter = typeFilter;
+            store.save();
+            changed = true;
+        }
+        if (searchText != "") {
+            searchText = "";
+            searchField.setText("");
+        }
+        if (changed) refresh();
+
+        var entry = findEntry(source);
+        if (entry == null) {
+            showStatus("Asset is not in the current project");
+            return false;
+        }
+        // Expand every ancestor of a virtual Engine subfolder so the revealed
+        // asset is visible in the hierarchy, not just in the grid.
+        if (isEngineFolder(entry.folder)) {
+            var path = "";
+            for (part in entry.folder.split("/")) {
+                path = path == "" ? part : path + "/" + part;
+                expandedFolders.set(path, true);
+            }
+        }
+        applyFolder(entry.folder, true);
+        setSelected([source]);
+
+        // Scroll the selected tile into view before the final rebuild so the
+        // highlight is actually visible in a small Asset Browser panel.
+        var index = -1;
+        for (i in 0...shownItems.length) {
+            if (!shownItems[i].isFolder && shownItems[i].path == source) {
+                index = i;
+                break;
+            }
+        }
+        if (index >= 0) {
+            var row = viewMode == 0 ? Std.int(index / Math.max(1, gridColumns())) : index;
+            var itemY = 4 + row * rowHeight();
+            var view = gridViewportHeight();
+            var maxScroll = Math.max(0, contentHeight(shownItems.length) - view);
+            if (maxScroll > 0) {
+                scrollValue = Math.max(0, Math.min(1,
+                    (itemY - view * 0.35) / maxScroll));
+            }
+        }
+        buildAssets();
+        showStatus('Browsed to ${entry.name}');
+        Sys.println('[probe] asset browser reveal source=${source} folder=${entry.folder}');
+        return true;
     }
 
     /** Backspace navigates to the current folder's parent. */
@@ -1297,6 +1377,13 @@ class AssetBrowser extends h2d.Object {
             if (entry.folder == "" || folders.indexOf(entry.folder) >= 0) continue;
             folders.push(entry.folder);
         }
+        // Virtual Engine folders stay in the tree even while engine content is
+        // hidden by the filter, so their layout does not jump when enabled.
+        for (folder in [EngineAssetCatalog.FOLDER,
+                EngineAssetCatalog.MESH_FOLDER,
+                EngineAssetCatalog.MATERIAL_FOLDER]) {
+            if (folders.indexOf(folder) < 0) folders.push(folder);
+        }
         folders.sort(function(a, b) return a < b ? -1 : (a == b ? 0 : 1));
     }
 
@@ -1336,9 +1423,9 @@ class AssetBrowser extends h2d.Object {
         var items:Array<BrowserItem> = [];
         var prefix = selectedFolder == "" ? "" : selectedFolder + "/";
         for (folder in folders) {
-            // The Engine folder is a hierarchy-only grouping: it stays in the
-            // project tree but has no tile in the main Asset Panel.
-            if (isEngineFolder(folder)) continue;
+            // The Engine root is a hierarchy-only grouping; its type children
+            // (Meshes/Materials) do get tiles when browsing inside Engine.
+            if (folder == EngineAssetCatalog.FOLDER) continue;
             if (selectedFolder == "") {
                 if (folder.indexOf("/") >= 0) continue;
             } else {
@@ -1356,10 +1443,10 @@ class AssetBrowser extends h2d.Object {
         var result:Array<AssetFileInfo> = [];
         for (entry in entries) {
             if (selectedFolder != "" && entry.folder != selectedFolder) continue;
-            // Engine assets live in their own virtual folder: at the Content
-            // root only the "Engine" folder tile is shown, never its contents.
+            // Engine assets only appear while browsing an Engine folder, never
+            // mixed into project folders at the Content root.
             if (entry.kind == AssetTypeRegistry.KIND_ENGINE
-                    && selectedFolder != EngineAssetCatalog.FOLDER) continue;
+                    && !isEngineFolder(selectedFolder)) continue;
             if (!matchesSearch(entry) || !matchesFilter(entry)) continue;
             result.push(entry);
         }
@@ -1403,9 +1490,10 @@ class AssetBrowser extends h2d.Object {
             ? key.substring(FOLDER_KEY_PREFIX.length) : null;
     }
 
-    /** The Engine folder is virtual: it can be browsed but not moved/renamed. */
+    /** Engine folders are virtual: browsable but never moved/renamed/deleted. */
     static inline function isEngineFolder(path:String):Bool {
-        return path == EngineAssetCatalog.FOLDER;
+        return path == EngineAssetCatalog.FOLDER
+            || StringTools.startsWith(path, EngineAssetCatalog.FOLDER + "/");
     }
 
     static function compareFloat(a:Float, b:Float):Int {
@@ -1471,6 +1559,11 @@ class AssetBrowser extends h2d.Object {
     static function sortTreeNodes(nodes:Array<AssetTreeNode>):Void {
         nodes.sort(function(a, b) {
             if (a.isFolder != b.isFolder) return a.isFolder ? -1 : 1;
+            // Real project folders come first; the virtual Engine branch stays
+            // at the bottom so its rows never shift the project tree layout.
+            var aEngine = isEngineFolder(a.path);
+            var bEngine = isEngineFolder(b.path);
+            if (aEngine != bEngine) return aEngine ? 1 : -1;
             return a.name < b.name ? -1 : (a.name == b.name ? 0 : 1);
         });
         for (node in nodes) sortTreeNodes(node.children);
@@ -1773,6 +1866,9 @@ class AssetBrowser extends h2d.Object {
         var content = contentHeight(items.length);
         var view = gridViewportHeight();
         var ratio = content <= 0 ? 1.0 : Math.min(1.0, view / content);
+        if (ratio < 1 && Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] asset browser scrollable=true tiles=${items.length}');
+        }
         gridScroll.setMetrics(ratio, scrollValue);
         gridScroll.setBounds(Math.max(0, folderWidth + centerWidth() - 10),
             TOOLBAR_HEIGHT + 2, 6, Math.max(0, view - 4));
@@ -2324,28 +2420,73 @@ class AssetBrowser extends h2d.Object {
     }
 
     function moveDragGhost():Void {
-        dragGhostSurface.x = ctx.mouseX - this.x + 14;
-        dragGhostSurface.y = ctx.mouseY - this.y + 12;
-        // The main editor draws the same framed label for the translated
-        // pointer. The local copy is only needed where the float HWND covers
-        // that editor overlay; hide it as soon as capture carries the pointer
-        // outside the float client.
-        dragGhostSurface.visible = dragging && ctx.floatMode
-            && ctx.mouseX >= 0 && ctx.mouseX < ctx.width
-            && ctx.mouseY >= 0 && ctx.mouseY < ctx.height;
+        // The shared DragLabelOverlay draws one label in an always-on-top HWND.
+        // Keeping this per-browser ghost would duplicate it and disappear under
+        // the float's own header, so it stays hidden.
+        dragGhostSurface.visible = false;
     }
 
-    function clearDrag(hit:h2d.Interactive):Void {
+    function resetDragState():Void {
         UiContext.dragLabel = null;
         dragGhostSurface.visible = false;
         dropHighlight.visible = false;
         dropTargetFolder = null;
         folderDragSource = "";
         dragging = false;
-        hit.stopCapture();
+    }
+
+    /**
+     * Stop capture through the browser's stable scene, never through the tile
+     * that began the gesture. Asset refreshes remove tile Interactives and set
+     * their `scene` field to null while SceneEvents can still own the closure.
+     */
+    function stopDragCapture():Void {
+        if (!dragCaptureActive) return;
+        // Clear the guard first because SceneEvents.stopCapture() invokes the
+        // capture's onCancel callback synchronously.
+        dragCaptureActive = false;
+        var owner = getScene();
+        if (owner != null) owner.stopCapture();
+    }
+
+    /** Cosmetic fallback if another widget replaces this capture. */
+    function onDragCaptureCancelled():Void {
+        if (!dragCaptureActive) return;
+        dragCaptureActive = false;
+        resetDragState();
+        AssetDragSession.cancel();
+    }
+
+    function clearDrag():Void {
+        stopDragCapture();
+        resetDragState();
         buildFolders();
         buildAssets();
         positionRenameOverlay();
+    }
+
+    /**
+     * Abort the current gesture the same way the docked browser does when the
+     * editor window loses focus. Called by the native float host on focus loss;
+     * it must not dispatch synthetic H2D events, which re-enters event handling
+     * and can leave the panel unresponsive.
+     */
+    public function abortDrag():Bool {
+        var hadDrag = dragCaptureActive || dragging
+            || UiContext.dragLabel != null || AssetDragSession.current() != null;
+        stopDragCapture();
+        resetDragState();
+        AssetDragSession.cancel();
+        if (hadDrag) {
+            buildFolders();
+            buildAssets();
+            positionRenameOverlay();
+        }
+        return hadDrag;
+    }
+
+    public inline function hasActiveDrag():Bool {
+        return dragCaptureActive || dragging;
     }
 
     function beginAssetDrag(source:String, hit:h2d.Interactive, event:hxd.Event):Void {
@@ -2373,12 +2514,12 @@ class AssetBrowser extends h2d.Object {
                     moveDragGhost();
                     updateDropTarget();
                     capturedEvent.propagate = false;
-                case ERelease, EReleaseOutside, EFocusLost:
+                case ERelease, EReleaseOutside:
                     var target = dropTargetFolder;
                     var wasDragging = dragging;
                     var copy = hxd.Key.isDown(hxd.Key.CTRL);
                     UiContext.dragLabel = null;
-                    clearDrag(hit);
+                    clearDrag();
                     if (wasDragging && target != null) {
                         var mode = copy ? "copy" : "move";
                         Sys.println('[probe] asset browser drop source=${labels[0]}'
@@ -2392,10 +2533,14 @@ class AssetBrowser extends h2d.Object {
                         }
                     }
                     capturedEvent.propagate = false;
+                case EFocusLost:
+                    abortDrag();
+                    capturedEvent.propagate = false;
                 case _:
                     capturedEvent.propagate = false;
             }
-        });
+        }, onDragCaptureCancelled);
+        dragCaptureActive = true;
     }
 
     /**
@@ -2437,33 +2582,29 @@ class AssetBrowser extends h2d.Object {
                         AssetDragSession.update(ctx.mouseX, ctx.mouseY);
                     }
                     capturedEvent.propagate = false;
-                case ERelease, EReleaseOutside, EFocusLost:
+                case ERelease, EReleaseOutside:
                     var wasDragging = dragging;
                     var mouseX = ctx.mouseX;
                     var mouseY = ctx.mouseY;
                     // Stop capture FIRST. The drop rebuilds the inspector and
                     // refreshes this browser, which destroys `hit`; calling
                     // stopCapture() afterwards would dereference a dead
-                    // Interactive. The onCancel callback below only does
-                    // cosmetic cleanup, so the payload survives until drop().
-                    hit.stopCapture();
+                    // Interactive. The payload survives until drop() because
+                    // stopDragCapture clears its guard before onCancel runs.
+                    stopDragCapture();
                     UiContext.dragLabel = null;
                     if (wasDragging) AssetDragSession.drop(mouseX, mouseY);
                     else AssetDragSession.cancel();
                     dragging = false;
                     capturedEvent.propagate = false;
+                case EFocusLost:
+                    abortDrag();
+                    capturedEvent.propagate = false;
                 case _:
                     capturedEvent.propagate = false;
             }
-        }, function() {
-            // Invoked by stopCapture() or by an external capture loss. Hiding
-            // the ghost and refreshing tiles is safe in both cases; resolving
-            // the drag session belongs to the release handler above.
-            UiContext.dragLabel = null;
-            dragGhostSurface.visible = false;
-            dragGhost.text = "";
-            buildAssets();
-        });
+        }, onDragCaptureCancelled);
+        dragCaptureActive = true;
     }
 
     function beginFolderDrag(source:String, hit:h2d.Interactive, event:hxd.Event):Void {
@@ -2484,21 +2625,25 @@ class AssetBrowser extends h2d.Object {
                     moveDragGhost();
                     updateDropTarget();
                     capturedEvent.propagate = false;
-                case ERelease, EReleaseOutside, EFocusLost:
+                case ERelease, EReleaseOutside:
                     var target = dropTargetFolder;
                     var wasDragging = dragging;
                     UiContext.dragLabel = null;
-                    clearDrag(hit);
+                    clearDrag();
                     if (wasDragging && target != null) {
                         Sys.println('[probe] asset browser folder drop source=${source}'
                             + ' folder=${target}');
                         if (onMoveFolder != null) onMoveFolder(source, target);
                     }
                     capturedEvent.propagate = false;
+                case EFocusLost:
+                    abortDrag();
+                    capturedEvent.propagate = false;
                 case _:
                     capturedEvent.propagate = false;
             }
-        });
+        }, onDragCaptureCancelled);
+        dragCaptureActive = true;
     }
 
     // ------------------------------------------------------------------

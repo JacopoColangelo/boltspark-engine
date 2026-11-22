@@ -104,6 +104,11 @@ class FloatWindowManager {
     var mainMenuOverlay:Null<h2d.Object> = null;
     var dragging:Null<{key:String, sx:Int, sy:Int, wx:Int, wy:Int}> = null;
     var dragCapturePanel:Null<String> = null;
+    /** Focus/capture loss is reported from a Win32 WndProc. Never mutate the
+     *  H2D scene from that callback; process each latched panel on update(). */
+    final pendingFocusLoss:Map<String, Bool> = new Map();
+    /** Single always-on-top label shared by the editor and every float. */
+    var dragOverlay:Null<DragLabelOverlay> = null;
 
     public function new(ctx:UiContext) {
         this.ctx = ctx;
@@ -374,10 +379,20 @@ class FloatWindowManager {
     public function closeDockPanel(key:String):Void {
         var panel = panels.get(key);
         if (panel == null) return;
+        // A float closed mid-drag owns the H2D capture; tear the gesture down
+        // while its view is still bound, otherwise its widget never gets the
+        // release and the shared drag state lingers forever.
+        var bound = boundViews.get(key);
+        if (dragCapturePanel == key
+                || (bound != null && bound.assetBrowser != null
+                    && bound.assetBrowser.hasActiveDrag())) {
+            cancelFloatDrag(panel);
+        }
+        pendingFocusLoss.remove(key);
         panels.remove(key);
         if (dragCapturePanel == key) {
-            NativeFloatWindow.releaseCapture();
             dragCapturePanel = null;
+            NativeFloatWindow.releaseCapture();
         }
         unbindView(key);
         try {
@@ -395,8 +410,32 @@ class FloatWindowManager {
 
     /** Pump/draw all floats. Called from DockingManager.update() each frame. */
     public function update(dt:Float):Void {
-        if (UiContext.dragLabel == null && UiContext.dragPointerOverride != null) {
-            UiContext.dragPointerOverride = null;
+        // Focus messages can be delivered outside winfloat_pump() by Win32.
+        // Native code only latches them; consume any prior-frame notification
+        // before touching the drag overlay or repainting a captured scene.
+        flushFocusLoss();
+        if (UiContext.dragLabel == null) {
+            if (UiContext.dragPointerOverride != null) {
+                UiContext.dragPointerOverride = null;
+            }
+            if (dragOverlay != null) dragOverlay.hide();
+        } else {
+            if (dragOverlay == null) {
+                try {
+                    dragOverlay = DragLabelOverlay.create();
+                } catch (error:Dynamic) {
+                    logError('drag label overlay: ${Std.string(error)}');
+                }
+            }
+            if (dragOverlay != null) {
+                try {
+                    dragOverlay.update(UiContext.dragLabel,
+                        NativeFloatWindow.cursorX() + 14,
+                        NativeFloatWindow.cursorY() + 12);
+                } catch (error:Dynamic) {
+                    logError('drag label update: ${Std.string(error)}');
+                }
+            }
         }
         for (bound in boundViews) bound.tooltip.update(dt);
         for (key => panel in panels) {
@@ -407,6 +446,9 @@ class FloatWindowManager {
                 logError('pump: ${Std.string(error)}');
                 continue;
             }
+            // Messages drained by pump() may have latched a cancellation. The
+            // WndProc and its HashLink callback have returned at this point.
+            flushFocusLoss();
             if (panel.closed) continue;
 
             syncNativeSize(panel);
@@ -427,6 +469,11 @@ class FloatWindowManager {
         for (key in panels.keys()) keys.push(key);
         for (key in keys) closeDockPanel(key);
         pending.resize(0);
+        pendingFocusLoss.clear();
+        if (dragOverlay != null) {
+            dragOverlay.destroy();
+            dragOverlay = null;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -443,6 +490,10 @@ class FloatWindowManager {
                 case NativeFloatWindow.EVENT_DESTROY:
                     // Window is already gone; "closed" is the only message we
                     // send, so re-docking never happens twice.
+                case NativeFloatWindow.EVENT_FOCUS_LOST:
+                    // This callback still runs inside winfloat_pump(). Defer
+                    // scene/capture teardown until the native call unwinds.
+                    pendingFocusLoss.set(key, true);
                 case NativeFloatWindow.EVENT_RESIZE:
                     // A modal Win32 sizing loop does not re-enter Heaps'
                     // update(), so repaint synchronously from the WndProc
@@ -464,8 +515,8 @@ class FloatWindowManager {
                         // it exists so leaving the HWND keeps delivering events.
                         if (UiContext.dragLabel != null
                                 && dragCapturePanel != key) {
-                            NativeFloatWindow.setCapture(panel.handle);
                             dragCapturePanel = key;
+                            NativeFloatWindow.setCapture(panel.handle);
                         }
                     }
                 case NativeFloatWindow.EVENT_LBUTTONDOWN:
@@ -485,8 +536,8 @@ class FloatWindowManager {
                         // motion/releases after the pointer leaves its bounds
                         // (e.g. dropping an asset onto the main editor viewport).
                         if (UiContext.dragLabel != null) {
-                            NativeFloatWindow.setCapture(panel.handle);
                             dragCapturePanel = key;
+                            NativeFloatWindow.setCapture(panel.handle);
                         }
                     } else if (isCloseBox(panel, a, b)) {
                         handleClick(panel, a, b);
@@ -500,8 +551,8 @@ class FloatWindowManager {
                     } else {
                         dispatchMouse(panel, hxd.Event.EventKind.ERelease, a, b, 0);
                         if (dragCapturePanel == key) {
-                            NativeFloatWindow.releaseCapture();
                             dragCapturePanel = null;
+                            NativeFloatWindow.releaseCapture();
                         }
                         invalidateLayout(key);
                     }
@@ -510,7 +561,10 @@ class FloatWindowManager {
                     dispatchMouse(panel, hxd.Event.EventKind.EPush, a, b, 0, 1);
                 case NativeFloatWindow.EVENT_RBUTTONUP:
                     dispatchMouse(panel, hxd.Event.EventKind.ERelease, a, b, 0, 1);
-                    NativeFloatWindow.releaseCapture();
+                    if (dragCapturePanel == key) {
+                        dragCapturePanel = null;
+                        NativeFloatWindow.releaseCapture();
+                    }
                     invalidateLayout(key);
                 case NativeFloatWindow.EVENT_WHEEL:
                     // a/b are client coordinates, c is the wheel delta
@@ -539,6 +593,56 @@ class FloatWindowManager {
             }
         } catch (error:Dynamic) {
             logError('event ${kind}: ${Std.string(error)}');
+        }
+    }
+
+    /** Consume deduplicated focus-loss notifications at a safe frame boundary. */
+    function flushFocusLoss():Void {
+        if (!pendingFocusLoss.iterator().hasNext()) return;
+        var keys:Array<String> = [];
+        for (key in pendingFocusLoss.keys()) keys.push(key);
+        for (key in keys) {
+            pendingFocusLoss.remove(key);
+            var panel = panels.get(key);
+            if (panel != null) cancelFloatDrag(panel);
+        }
+    }
+
+    /**
+     * Match the docked browser: focus loss cancels the gesture. This runs only
+     * after the native WndProc/pump callback has returned, so stopping capture
+     * and rebuilding browser rows cannot invalidate an active native/H2D stack.
+     */
+    function cancelFloatDrag(panel:FloatPanel):Void {
+        var bound = boundViews.get(panel.key);
+        var hadDrag = UiContext.dragLabel != null
+            || AssetDragSession.current() != null
+            || (bound != null && bound.assetBrowser != null
+                && bound.assetBrowser.hasActiveDrag());
+        if (dragCapturePanel == panel.key) {
+            // Clear ownership first: ReleaseCapture can synchronously produce
+            // WM_CAPTURECHANGED/WM_CANCELMODE.
+            dragCapturePanel = null;
+            NativeFloatWindow.releaseCapture();
+        }
+        if (dragging != null && dragging.key == panel.key) {
+            dragging = null;
+            hadDrag = true;
+            // Clear DockingManager's preview without resolving a drop.
+            if (onHeaderDrag != null) {
+                onHeaderDrag(panel.key, 2, -100000, -100000);
+            }
+        }
+        UiContext.dragLabel = null;
+        UiContext.dragPointerOverride = null;
+        if (dragOverlay != null) dragOverlay.hide();
+        if (bound != null && bound.assetBrowser != null) {
+            hadDrag = bound.assetBrowser.abortDrag() || hadDrag;
+        } else {
+            AssetDragSession.cancel();
+        }
+        if (hadDrag && Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] float drag cancelled focus loss panel=${panel.panelId}');
         }
     }
 
@@ -660,6 +764,7 @@ class FloatWindowManager {
             wx: NativeFloatWindow.windowX(panel.handle),
             wy: NativeFloatWindow.windowY(panel.handle)
         };
+        dragCapturePanel = key;
         NativeFloatWindow.setCapture(panel.handle);
         if (onHeaderDrag != null) {
             onHeaderDrag(key, 0, dragging.sx, dragging.sy);
@@ -680,6 +785,7 @@ class FloatWindowManager {
 
     function endHeaderDrag(key:String):Void {
         if (dragging == null || dragging.key != key) return;
+        if (dragCapturePanel == key) dragCapturePanel = null;
         NativeFloatWindow.releaseCapture();
         var sx = NativeFloatWindow.cursorX();
         var sy = NativeFloatWindow.cursorY();

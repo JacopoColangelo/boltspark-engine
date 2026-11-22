@@ -34,6 +34,7 @@ import boltspark.ui.widgets.AssetBrowser;
 import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
 import boltspark.ui.widgets.UiTooltip;
+import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectSession.AssetDetails;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.widgets.NumericDragField;
@@ -2233,9 +2234,17 @@ class EditorShell {
             section.onAssetPick = function(propertyId) {
                 openAssetPicker(component, propertyId, componentIndex);
             };
+            section.onAssetBrowse = function(propertyId) {
+                browseInspectorAsset(component, propertyId);
+            };
             section.onAssetDrop = function(propertyId, assetId) {
                 if (onInspectorAssetChanged != null) {
                     onInspectorAssetChanged(componentIndex, propertyId, assetId);
+                }
+            };
+            section.onAssetClear = function(propertyId) {
+                if (onInspectorAssetChanged != null) {
+                    onInspectorAssetChanged(componentIndex, propertyId, "");
                 }
             };
             section.onBoolCommit = function(propertyId, value) {
@@ -2301,6 +2310,44 @@ class EditorShell {
         }
         closePaletteIfOpen();
         menuDropdown.open(ctx.mouseX, ctx.mouseY, items);
+    }
+
+    /**
+     * Magnifier action on an asset slot: open (or focus) the Asset Browser and
+     * select the assigned asset. Engine assets use their virtual `engine://`
+     * source; the browser enables the engine-content opt-in when necessary.
+     */
+    function browseInspectorAsset(component:ComponentInspectorData,
+            propertyId:String):Void {
+        var property:Null<ComponentPropertyData> = null;
+        for (candidate in component.properties) {
+            if (candidate.id == propertyId) {
+                property = candidate;
+                break;
+            }
+        }
+        if (property == null) return;
+        dockManager.open("boltspark.assets");
+        assetBrowser.revealAsset(assetSourceFor(property));
+        // A floated Asset Browser renders from pushed snapshots; refresh it so
+        // the newly selected tile appears there too.
+        dockManager.refreshNativePanels();
+    }
+
+    /** Browser source for an inspector asset property, or "" when unassigned. */
+    static function assetSourceFor(property:ComponentPropertyData):String {
+        var id = property.assetId;
+        if (id == null || id == "") return "";
+        if (property.assetType == AssetType.MeshAsset
+                && PrimitiveMeshes.find(id) != null) {
+            return EngineAssetCatalog.sourceFor(AssetType.MeshAsset, id);
+        }
+        if (property.assetType == AssetType.MaterialAsset
+                && boltspark.engine.Material.find(id) != null) {
+            return EngineAssetCatalog.sourceFor(AssetType.MaterialAsset, id);
+        }
+        // Project assets carry their browser source directly.
+        return id;
     }
 
     static inline function componentSectionKey(index:Int, typeId:String):String {

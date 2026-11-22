@@ -11,6 +11,8 @@ import boltspark.ui.UiText;
 /** Generic retained-H2D section generated from Component property metadata. */
 class ComponentInspectorSection extends InspectorSection {
     static inline var ROW_HEIGHT:Int = 28;
+    /** Breathing room below a large asset slot before the next property row. */
+    static inline var ASSET_ROW_GAP:Int = 4;
     static inline var ACTION_WIDTH:Int = 22;
 
     public final componentIndex:Int;
@@ -22,8 +24,12 @@ class ComponentInspectorSection extends InspectorSection {
     public var onBoolCommit:Null<String->Bool->Void>;
     /** Fired when an asset picker is clicked; the owner opens a typed menu. */
     public var onAssetPick:Null<String->Void>;
+    /** Fired with the property id when the slot's magnifier is used. */
+    public var onAssetBrowse:Null<String->Void>;
     /** Fired with (propertyId, assetId) when an engine asset is dropped on a slot. */
     public var onAssetDrop:Null<String->String->Void>;
+    /** Fired with the property id when the slot's clear action is used. */
+    public var onAssetClear:Null<String->Void>;
     public var onReset:Null<String->Void>;
     public var onLinkChanged:Null<String->Bool->Void>;
     public var onEditRejected:Null<String->Void>;
@@ -64,26 +70,36 @@ class ComponentInspectorSection extends InspectorSection {
             };
         }
 
-        var row = 0;
+        // Rows are positioned by an accumulated y so the asset slots can keep
+        // their larger Unreal-style thumbnail without stretching every field.
+        var y = 2.0;
+        var rowCount = 0;
         for (property in data.properties) {
             switch (property.kind) {
                 case Vector3:
-                    createVector(property, row++, linkedScale);
+                    createVector(property, y, linkedScale);
+                    y += ROW_HEIGHT;
                 case Text:
-                    createText(property, row++);
+                    createText(property, y);
+                    y += ROW_HEIGHT;
                 case Asset:
-                    createAsset(property, row++);
+                    createAsset(property, y);
+                    y += AssetSlotField.SLOT_HEIGHT + ASSET_ROW_GAP;
                 case Number, Integer:
-                    createNumber(property, row++);
+                    createNumber(property, y);
+                    y += ROW_HEIGHT;
                 case Boolean:
-                    createBoolean(property, row++);
+                    createBoolean(property, y);
+                    y += ROW_HEIGHT;
             }
+            rowCount++;
         }
-        if (row == 0) {
+        if (rowCount == 0) {
             createText(ComponentPropertyData.text("empty", "Properties",
-                "No exposed properties"), row++);
+                "No exposed properties"), y);
+            y += ROW_HEIGHT;
         }
-        contentHeight = row * ROW_HEIGHT;
+        contentHeight = y;
     }
 
     override public function setWidth(width:Float):Void {
@@ -142,9 +158,9 @@ class ComponentInspectorSection extends InspectorSection {
         return false;
     }
 
-    function createVector(property:ComponentPropertyData, rowIndex:Int,
+    function createVector(property:ComponentPropertyData, rowY:Float,
             linkedScale:Bool):Void {
-        var row = new VectorPropertyControls(property.id, rowIndex);
+        var row = new VectorPropertyControls(property.id, rowY);
         row.label = new UiText(ctx.labelFont, content);
         row.label.text = property.label;
         row.label.textColor = Theme.TEXT_SECONDARY;
@@ -208,8 +224,8 @@ class ComponentInspectorSection extends InspectorSection {
         vectors.push(row);
     }
 
-    function createText(property:ComponentPropertyData, rowIndex:Int):Void {
-        var row = new TextPropertyControls(property.id, rowIndex);
+    function createText(property:ComponentPropertyData, rowY:Float):Void {
+        var row = new TextPropertyControls(property.id, rowY);
         if (property.isMixed(0)) {
             // Text components currently published by the engine are read-only;
             // show the mixed placeholder instead of a misleading single value.
@@ -242,24 +258,29 @@ class ComponentInspectorSection extends InspectorSection {
         texts.push(row);
     }
 
-    function createAsset(property:ComponentPropertyData, rowIndex:Int):Void {
-        var row = new AssetPropertyControls(property.id, rowIndex);
+    function createAsset(property:ComponentPropertyData, rowY:Float):Void {
+        var row = new AssetPropertyControls(property.id, rowY);
         row.label = new UiText(ctx.labelFont, content);
         row.label.text = property.label;
         row.label.textColor = Theme.TEXT_SECONDARY;
         row.label.lineBreak = false;
         var display = property.isMixed(0)
             ? NumericDragField.MULTIPLE_TEXT : property.textValue;
-        row.field = new AssetPickerField(ctx, 100, Theme.CONTROL_HEIGHT,
-            display, content);
+        row.field = new AssetSlotField(ctx, 100, display, content);
         var propertyId = property.id;
         row.field.assetType = property.assetType;
         row.field.assetId = property.assetId;
         row.field.onPick = function() {
             if (onAssetPick != null) onAssetPick(propertyId);
         };
+        row.field.onBrowse = function() {
+            if (onAssetBrowse != null) onAssetBrowse(propertyId);
+        };
         row.field.onAssetDrop = function(assetId) {
             if (onAssetDrop != null) onAssetDrop(propertyId, assetId);
+        };
+        row.field.onClear = function() {
+            if (onAssetClear != null) onAssetClear(propertyId);
         };
         assets.push(row);
     }
@@ -270,13 +291,16 @@ class ComponentInspectorSection extends InspectorSection {
         for (row in assets) {
             if (row.propertyId != propertyId) continue;
             row.field.setValue(mixed ? NumericDragField.MULTIPLE_TEXT : label);
+            // A mixed selection keeps the primary thumbnail; a concrete label
+            // is the asset name, so it cannot be used as an id. Leave assetId
+            // untouched here — a real assignment rebuilds the section.
             return true;
         }
         return false;
     }
 
-    function createNumber(property:ComponentPropertyData, rowIndex:Int):Void {
-        var row = new NumberPropertyControls(property.id, rowIndex);
+    function createNumber(property:ComponentPropertyData, rowY:Float):Void {
+        var row = new NumberPropertyControls(property.id, rowY);
         row.label = new UiText(ctx.labelFont, content);
         row.label.text = property.label;
         row.label.textColor = Theme.TEXT_SECONDARY;
@@ -317,8 +341,8 @@ class ComponentInspectorSection extends InspectorSection {
         numbers.push(row);
     }
 
-    function createBoolean(property:ComponentPropertyData, rowIndex:Int):Void {
-        var row = new BoolPropertyControls(property.id, rowIndex);
+    function createBoolean(property:ComponentPropertyData, rowY:Float):Void {
+        var row = new BoolPropertyControls(property.id, rowY);
         row.label = new UiText(ctx.labelFont, content);
         row.label.text = property.label;
         row.label.textColor = Theme.TEXT_SECONDARY;
@@ -387,7 +411,7 @@ class ComponentInspectorSection extends InspectorSection {
             (fieldEnd - fieldStart - axisGap * 2) / 3);
 
         for (row in vectors) {
-            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            var rowY = row.rowY;
             row.label.x = 8;
             row.label.y = rowY + Math.round(
                 (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
@@ -407,7 +431,7 @@ class ComponentInspectorSection extends InspectorSection {
         }
 
         for (row in texts) {
-            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            var rowY = row.rowY;
             if (row.input != null) {
                 row.input.x = 8;
                 row.input.y = rowY;
@@ -425,10 +449,10 @@ class ComponentInspectorSection extends InspectorSection {
         }
 
         for (row in assets) {
-            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            var rowY = row.rowY;
             row.label.x = 8;
-            row.label.y = rowY + Math.round(
-                (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
+            // Align the caption with the top of the large thumbnail.
+            row.label.y = rowY + 2;
             row.field.x = fieldStart;
             row.field.y = rowY;
             row.field.setWidth(Math.max(0, widthValue - fieldStart - 8));
@@ -439,7 +463,7 @@ class ComponentInspectorSection extends InspectorSection {
         var numberReset = false;
         for (row in numbers) if (row.resetButton != null) numberReset = true;
         for (row in numbers) {
-            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            var rowY = row.rowY;
             row.label.x = 8;
             row.label.y = rowY + Math.round(
                 (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
@@ -456,7 +480,7 @@ class ComponentInspectorSection extends InspectorSection {
         var boolReset = false;
         for (row in bools) if (row.resetButton != null) boolReset = true;
         for (row in bools) {
-            var rowY = 2 + row.rowIndex * ROW_HEIGHT;
+            var rowY = row.rowY;
             row.label.x = 8;
             row.label.y = rowY + Math.round(
                 (Theme.CONTROL_HEIGHT - row.label.textHeight) * 0.5 - 1);
@@ -492,68 +516,68 @@ class ComponentInspectorSection extends InspectorSection {
 
 private class VectorPropertyControls {
     public final propertyId:String;
-    public final rowIndex:Int;
+    public final rowY:Float;
     public var label:h2d.Text;
     public final fields:Array<AxisValue> = [];
     public var resetButton:Null<UiButton>;
     public var linkButton:Null<UiButton>;
     public var linked:Bool = false;
 
-    public function new(propertyId:String, rowIndex:Int) {
+    public function new(propertyId:String, rowY:Float) {
         this.propertyId = propertyId;
-        this.rowIndex = rowIndex;
+        this.rowY = rowY;
     }
 }
 
 private class AssetPropertyControls {
     public final propertyId:String;
-    public final rowIndex:Int;
+    public final rowY:Float;
     public var label:Null<h2d.Text>;
-    public var field:Null<AssetPickerField>;
+    public var field:Null<AssetSlotField>;
 
-    public function new(propertyId:String, rowIndex:Int) {
+    public function new(propertyId:String, rowY:Float) {
         this.propertyId = propertyId;
-        this.rowIndex = rowIndex;
+        this.rowY = rowY;
     }
 }
 
 private class NumberPropertyControls {
     public final propertyId:String;
-    public final rowIndex:Int;
+    public final rowY:Float;
     public var label:Null<h2d.Text>;
     public var field:Null<NumericDragField>;
     public var resetButton:Null<UiButton>;
 
-    public function new(propertyId:String, rowIndex:Int) {
+    public function new(propertyId:String, rowY:Float) {
         this.propertyId = propertyId;
-        this.rowIndex = rowIndex;
+        this.rowY = rowY;
     }
 }
 
 private class BoolPropertyControls {
     public final propertyId:String;
-    public final rowIndex:Int;
+    public final rowY:Float;
     public var label:Null<h2d.Text>;
     public var field:Null<UiButton>;
     public var resetButton:Null<UiButton>;
     public var value:Bool = false;
     public var mixed:Bool = false;
 
-    public function new(propertyId:String, rowIndex:Int) {
+    public function new(propertyId:String, rowY:Float) {
         this.propertyId = propertyId;
-        this.rowIndex = rowIndex;
+        this.rowY = rowY;
     }
 }
 
 private class TextPropertyControls {
     public final propertyId:String;
-    public final rowIndex:Int;
+    public final rowY:Float;
     public var label:Null<h2d.Text>;
     public var value:Null<h2d.Text>;
     public var input:Null<TextInputField>;
 
-    public function new(propertyId:String, rowIndex:Int) {
+    public function new(propertyId:String, rowY:Float) {
         this.propertyId = propertyId;
-        this.rowIndex = rowIndex;
+        this.rowY = rowY;
     }
 }

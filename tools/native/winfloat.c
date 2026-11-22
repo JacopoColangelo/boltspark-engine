@@ -31,11 +31,17 @@
 #include <string.h>
 
 #define _WINFLOAT _ABSTRACT(winfloat_panel)
+#define _WINFLOAT_LABEL _ABSTRACT(winfloat_label)
 
 typedef struct {
     HWND hwnd;
     vclosure *on_event;
     int destroyed;
+    /* Focus/capture messages can be sent synchronously while HashLink is
+     * already inside another native call. Latch them and notify Haxe only from
+     * winfloat_pump(), never by re-entering the VM from that WndProc stack. */
+    int pending_focus_lost;
+    int pending_focus_gained;
     /* Buffer handed to paint() for the next WM_PAINT. Only valid during the
      * synchronous UpdateWindow() call in winfloat_paint(). */
     void *pixels;
@@ -44,6 +50,11 @@ typedef struct {
     int header_h; /* client rows treated as the draggable title strip */
     int buttons_x; /* rightmost header region owned by the H2D close/minimize buttons */
 } Panel;
+
+/* ReleaseCapture() synchronously sends WM_CAPTURECHANGED. A release requested
+ * by Haxe is the successful end/cancellation of a gesture, not a new external
+ * interruption that should be delivered on the next frame. */
+static int intentional_capture_release = 0;
 
 static void blit_panel(Panel *panel, HDC dc, void *pixels, int width,
         int height) {
@@ -75,7 +86,12 @@ enum {
     WF_KEYUP = 9,
     WF_CHAR = 10,
     WF_RBUTTONDOWN = 11,
-    WF_RBUTTONUP = 12
+    WF_RBUTTONUP = 12,
+    /* Focus/capture changes: the OS stole the mouse (Alt+Tab, Win key,
+     * screenshot overlay). Haxe cancels any active gesture after WndProc and
+     * winfloat_pump() have returned to a safe frame boundary. */
+    WF_FOCUS_LOST = 13,
+    WF_FOCUS_GAINED = 14
 };
 
 static void fire(Panel *panel, int kind, int a, int b, int c) {
@@ -107,6 +123,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (panel != NULL) panel->destroyed = 1;
             fire(panel, WF_DESTROY, 0, 0, 0);
             return 0; /* never PostQuitMessage: that would kill Heaps' loop */
+        case WM_ACTIVATE:
+            if (panel != NULL) {
+                if (LOWORD(wp) == WA_INACTIVE)
+                    panel->pending_focus_lost = 1;
+                else
+                    panel->pending_focus_gained = 1;
+            }
+            break;
+        case WM_SETFOCUS:
+            if (panel != NULL) panel->pending_focus_gained = 1;
+            break;
+        case WM_KILLFOCUS:
+            if (panel != NULL) panel->pending_focus_lost = 1;
+            break;
+        case WM_CANCELMODE:
+            /* Windows sends this when it revokes mouse capture. */
+            if (panel != NULL) panel->pending_focus_lost = 1;
+            break;
+        case WM_CAPTURECHANGED:
+            /* Capture can be stolen without an activation transition. This is
+             * still terminal for any H2D gesture owned by this float. */
+            if (panel != NULL && !intentional_capture_release
+                    && (HWND)lp != hwnd)
+                panel->pending_focus_lost = 1;
+            break;
         case WM_SIZE:
             fire(panel, WF_RESIZE, LOWORD(lp), HIWORD(lp), 0);
             return 0;
@@ -263,6 +304,109 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProc(hwnd, msg, wp, lp);
 }
 
+/* ---------------------------------------------------------------------------
+ * Drag-label overlay: one small, always-on-top, click-through HWND that draws
+ * the shared drag label above every window. Keeping it in its own HWND avoids
+ * duplicate labels (main editor + float scene) and stops the float's header
+ * from covering the label when the pointer crosses the title bar.
+ * --------------------------------------------------------------------------- */
+
+static LRESULT CALLBACK LabelWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    Panel *panel = (Panel *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    switch (msg) {
+        case WM_NCHITTEST:
+            return HTTRANSPARENT; /* never steal clicks from the editor/floats */
+        case WM_NCPAINT:
+        case WM_ERASEBKGND:
+            return 0;
+        case WM_PAINT: {
+            PAINTSTRUCT paint;
+            HDC dc = BeginPaint(hwnd, &paint);
+            blit_panel(panel, dc, panel == NULL ? NULL : panel->pixels,
+                panel == NULL ? 0 : panel->pixel_w,
+                panel == NULL ? 0 : panel->pixel_h);
+            EndPaint(hwnd, &paint);
+            return 0;
+        }
+        case WM_CLOSE:
+            return 0;
+        case WM_DESTROY:
+            return 0;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+
+HL_PRIM void *HL_NAME(overlay_create)(void) {
+    static bool registered = false;
+    Panel *panel;
+
+    if (!registered) {
+        WNDCLASSEXA cls;
+        memset(&cls, 0, sizeof(cls));
+        cls.cbSize = sizeof(cls);
+        cls.lpfnWndProc = LabelWndProc;
+        cls.hInstance = GetModuleHandleA(NULL);
+        cls.lpszClassName = "BoltSparkDragLabel";
+        cls.hCursor = LoadCursorA(NULL, IDC_ARROW);
+        if (RegisterClassExA(&cls) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+            return NULL;
+        registered = true;
+    }
+    panel = (Panel *)calloc(1, sizeof(Panel));
+    if (panel == NULL)
+        return NULL;
+    panel->hwnd = CreateWindowExA(
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+        "BoltSparkDragLabel", "Boltspark Drag Label", WS_POPUP,
+        0, 0, 1, 1, NULL, NULL, GetModuleHandleA(NULL), NULL);
+    if (panel->hwnd == NULL) {
+        free(panel);
+        return NULL;
+    }
+    SetWindowLongPtr(panel->hwnd, GWLP_USERDATA, (LONG_PTR)panel);
+    /* Magenta is the transparent key; Haxe fills the rest of the buffer with
+     * it and paints the label frame/text in real colours. */
+    SetLayeredWindowAttributes(panel->hwnd, RGB(255, 0, 255), 0, LWA_COLORKEY);
+    return panel;
+}
+
+HL_PRIM void HL_NAME(overlay_paint)(void *handle, vbyte *pixels, int w, int h,
+        int x, int y) {
+    Panel *panel = (Panel *)handle;
+    if (panel == NULL || pixels == NULL || !IsWindow(panel->hwnd)
+            || w <= 0 || h <= 0)
+        return;
+    if (w != panel->pixel_w || h != panel->pixel_h || panel->pixels == NULL) {
+        free(panel->pixels);
+        panel->pixels = malloc((size_t)w * h * 4);
+        panel->pixel_w = w;
+        panel->pixel_h = h;
+    }
+    if (panel->pixels == NULL)
+        return;
+    memcpy(panel->pixels, pixels, (size_t)w * h * 4);
+    SetWindowPos(panel->hwnd, HWND_TOPMOST, x, y, w, h,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    InvalidateRect(panel->hwnd, NULL, FALSE);
+    UpdateWindow(panel->hwnd);
+}
+
+HL_PRIM void HL_NAME(overlay_hide)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    if (panel != NULL && IsWindow(panel->hwnd))
+        ShowWindow(panel->hwnd, SW_HIDE);
+}
+
+HL_PRIM void HL_NAME(overlay_destroy)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    if (panel == NULL)
+        return;
+    if (IsWindow(panel->hwnd))
+        DestroyWindow(panel->hwnd);
+    free(panel->pixels);
+    free(panel);
+}
+
 HL_PRIM void *HL_NAME(create)(vbyte *title, int x, int y, int w, int h,
         vclosure *on_event) {
     static bool registered = false;
@@ -315,15 +459,39 @@ HL_PRIM void *HL_NAME(create)(vbyte *title, int x, int y, int w, int h,
 HL_PRIM void HL_NAME(pump)(void *handle) {
     Panel *panel = (Panel *)handle;
     MSG msg;
+    int focus_lost;
+    int focus_gained;
 
     if (panel == NULL)
         return;
-    /* IsWindow check matters after WM_CLOSE destroyed the HWND mid-drain. */
-    while (IsWindow(panel->hwnd)
-            && PeekMessageA(&msg, panel->hwnd, 0, 0, PM_REMOVE)) {
+    /* IsWindow check matters after WM_CLOSE destroyed the HWND mid-drain.
+     * PM_NOREMOVE first gives Windows a chance to deliver cross-thread sent
+     * focus messages. Once focus loss is latched, leave later pointer input in
+     * the queue until Haxe has cancelled the old gesture. */
+    while (IsWindow(panel->hwnd)) {
+        if (!PeekMessageA(&msg, panel->hwnd, 0, 0, PM_NOREMOVE))
+            break;
+        if (panel->pending_focus_lost)
+            break;
+        if (!PeekMessageA(&msg, panel->hwnd, 0, 0, PM_REMOVE))
+            continue;
         TranslateMessage(&msg);
         DispatchMessageA(&msg);
+        if (panel->pending_focus_lost)
+            break;
     }
+    /* Focus notifications are intentionally emitted only here. In particular,
+     * ReleaseCapture/SetForegroundWindow can invoke WndProc synchronously from
+     * arbitrary native calls, where calling back into HashLink can corrupt the
+     * active VM/event stack. */
+    focus_lost = panel->pending_focus_lost;
+    focus_gained = panel->pending_focus_gained;
+    panel->pending_focus_lost = 0;
+    panel->pending_focus_gained = 0;
+    if (!panel->destroyed && focus_lost)
+        fire(panel, WF_FOCUS_LOST, 0, 0, 0);
+    if (!panel->destroyed && focus_gained)
+        fire(panel, WF_FOCUS_GAINED, 0, 0, 0);
 }
 
 HL_PRIM void HL_NAME(paint)(void *handle, vbyte *pixels, int width, int height) {
@@ -463,7 +631,9 @@ HL_PRIM void HL_NAME(set_capture)(void *handle) {
 }
 
 HL_PRIM void HL_NAME(release_capture)(void) {
+    intentional_capture_release = 1;
     ReleaseCapture();
+    intentional_capture_release = 0;
 }
 
 HL_PRIM void HL_NAME(set_title)(void *handle, vbyte *title) {
@@ -505,3 +675,7 @@ DEFINE_PRIM(_VOID, move_window, _WINFLOAT _I32 _I32);
 DEFINE_PRIM(_VOID, set_capture, _WINFLOAT);
 DEFINE_PRIM(_VOID, release_capture,);
 DEFINE_PRIM(_VOID, destroy, _WINFLOAT);
+DEFINE_PRIM(_WINFLOAT_LABEL, overlay_create,);
+DEFINE_PRIM(_VOID, overlay_paint, _WINFLOAT_LABEL _BYTES _I32 _I32 _I32 _I32);
+DEFINE_PRIM(_VOID, overlay_hide, _WINFLOAT_LABEL);
+DEFINE_PRIM(_VOID, overlay_destroy, _WINFLOAT_LABEL);

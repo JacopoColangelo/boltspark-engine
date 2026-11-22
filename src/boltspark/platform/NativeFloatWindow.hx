@@ -2,6 +2,8 @@ package boltspark.platform;
 
 /** Opaque handle to a floating-panel HWND owned by tools/native/winfloat.c. */
 typedef WinFloatHandle = hl.Abstract<"winfloat_panel">;
+/** Opaque handle to the always-on-top drag-label overlay HWND. */
+typedef WinFloatLabelHandle = hl.Abstract<"winfloat_label">;
 
 /**
  * Thin Haxe binding for the raw-Win32 floating panel module. The module is
@@ -24,6 +26,10 @@ class NativeFloatWindow {
     public static inline var EVENT_CHAR:Int = 10;
     public static inline var EVENT_RBUTTONDOWN:Int = 11;
     public static inline var EVENT_RBUTTONUP:Int = 12;
+    /** OS stole focus/capture (Alt+Tab, Windows key, screenshot overlay). */
+    public static inline var EVENT_FOCUS_LOST:Int = 13;
+    /** Focus returned after any interrupted gesture has been cancelled. */
+    public static inline var EVENT_FOCUS_GAINED:Int = 14;
 
     @:hlNative("winfloat", "create")
     public static function create(title:hl.Bytes, x:Int, y:Int, width:Int,

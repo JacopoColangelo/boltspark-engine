@@ -337,18 +337,22 @@ class ProjectSession {
 
     function engineAssetDetails(source:String):AssetDetails {
         var name = source;
+        var folder = EngineAssetCatalog.FOLDER;
+        var kindLabel = AssetTypeRegistry.ENGINE_INFO_LABEL;
         for (entry in EngineAssetCatalog.all()) {
             if (entry.source == source) {
                 name = entry.name;
+                folder = entry.folder;
+                kindLabel = entry.kindLabel;
                 break;
             }
         }
         return {
             source: source,
             name: name,
-            folder: EngineAssetCatalog.FOLDER,
+            folder: folder,
             kind: AssetTypeRegistry.KIND_ENGINE,
-            kindLabel: AssetTypeRegistry.ENGINE_INFO_LABEL,
+            kindLabel: kindLabel,
             extension: "",
             loadable: true,
             registered: false,

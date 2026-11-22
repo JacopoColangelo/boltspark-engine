@@ -452,15 +452,15 @@ try {
 
     # Wheel over the grid scrolls down with a positive delta.
     $scrollBefore = [regex]::Matches((Get-Content $stdout -Raw),
-        '\[probe\] asset browser scroll=').Count
+        '\[probe\] asset browser grid scroll=').Count
     Send-Message $window 0x020A ([IntPtr](-120 -shl 16)) `
         ([BoltsparkAssetBrowserApi]::MakeLParam($tile0X, $tileY))
     Start-Sleep -Milliseconds 300
     $scrollLog = (Get-Content $stdout -Raw)
-    if ([regex]::Matches($scrollLog, '\[probe\] asset browser scroll=').Count -le $scrollBefore) {
+    if ([regex]::Matches($scrollLog, '\[probe\] asset browser grid scroll=').Count -le $scrollBefore) {
         throw 'Wheel over the asset grid did not scroll.'
     }
-    if ($scrollLog -notmatch '\[probe\] asset browser scroll=0\.(0*[1-9])') {
+    if ($scrollLog -notmatch '\[probe\] asset browser grid scroll=0\.(0*[1-9])') {
         throw 'Wheel down did not move the scroll position forward.'
     }
 
