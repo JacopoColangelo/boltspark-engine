@@ -12,6 +12,13 @@ import boltspark.ui.UiText;
  * window so a hover near the right or bottom edge stays fully visible.
  */
 class UiTooltip {
+    /** Tooltip owned by the float currently dispatching input, if any. */
+    public static var current:Null<UiTooltip> = null;
+
+    public static inline function active(?fallback:UiTooltip):Null<UiTooltip> {
+        return current != null ? current : fallback;
+    }
+
     static inline var DELAY:Float = 0.55;
     static inline var PADDING:Int = 7;
     static inline var OFFSET_X:Float = 14;
@@ -24,6 +31,8 @@ class UiTooltip {
     var remaining:Float = 0;
     var anchorX:Float = 0;
     var anchorY:Float = 0;
+    /** Float panels clamp tooltips to their own client area. */
+    public var boundsOverride:Null<{width:Int, height:Int}> = null;
 
     public function new(ctx:UiContext, parent:h2d.Object) {
         this.ctx = ctx;
@@ -51,6 +60,11 @@ class UiTooltip {
         anchorY = mouseY;
     }
 
+    public function dispose():Void {
+        cancel();
+        surface.remove();
+    }
+
     public function cancel():Void {
         pendingText = "";
         remaining = 0;
@@ -66,8 +80,10 @@ class UiTooltip {
         var width = label.textWidth + PADDING * 2;
         var height = label.textHeight + PADDING * 2;
         surface.setSize(width, height);
-        surface.x = Math.max(2, Math.min(anchorX + OFFSET_X, ctx.width - width - 2));
-        surface.y = Math.max(2, Math.min(anchorY + OFFSET_Y, ctx.height - height - 2));
+        var maxW = boundsOverride == null ? ctx.width : boundsOverride.width;
+        var maxH = boundsOverride == null ? ctx.height : boundsOverride.height;
+        surface.x = Math.max(2, Math.min(anchorX + OFFSET_X, maxW - width - 2));
+        surface.y = Math.max(2, Math.min(anchorY + OFFSET_Y, maxH - height - 2));
         surface.visible = true;
         Sys.println('[probe] tooltip ${pendingText}');
         pendingText = "";

@@ -68,6 +68,8 @@ class MenuDropdown extends h2d.Object {
      * docked panels are not covered by dock tab bars and split handles.
      */
     public static var overlayLayer:Null<h2d.Object> = null;
+    /** True while any dropdown is open (used to keep float overlays alive). */
+    public static var hasOpenMenu:Bool = false;
 
     static inline var ROW_HEIGHT:Int = 22;
     static inline var SECTION_HEIGHT:Int = 21;
@@ -189,6 +191,7 @@ class MenuDropdown extends h2d.Object {
         buildLevel(items, null, 0, withSearch, width, maxMenuHeight);
         visible = true;
         isOpen = true;
+        hasOpenMenu = true;
         Sys.println('[probe] menu open');
     }
 
@@ -208,6 +211,7 @@ class MenuDropdown extends h2d.Object {
         hideDragGhost();
         visible = false;
         isOpen = false;
+        hasOpenMenu = false;
         Sys.println('[probe] menu close');
     }
 
@@ -239,14 +243,14 @@ class MenuDropdown extends h2d.Object {
             activate();
             return;
         }
-        var startX = context.window.mouseX;
-        var startY = context.window.mouseY;
+        var startX = context.mouseX;
+        var startY = context.mouseY;
         hideDragGhost();
         hit.startCapture(function(event) {
             switch (event.kind) {
                 case EMove:
-                    var mouseX = context.window.mouseX;
-                    var mouseY = context.window.mouseY;
+                    var mouseX = context.mouseX;
+                    var mouseY = context.mouseY;
                     if (!dragBackground.visible
                         && Math.abs(mouseX - startX) + Math.abs(mouseY - startY) > 5) {
                         dragBackground.visible = true;
@@ -272,8 +276,8 @@ class MenuDropdown extends h2d.Object {
                     event.propagate = false;
                 case ERelease, EReleaseOutside:
                     var dragged = dragBackground.visible;
-                    var mouseX = context.window.mouseX;
-                    var mouseY = context.window.mouseY;
+                    var mouseX = context.mouseX;
+                    var mouseY = context.mouseY;
                     hit.stopCapture();
                     releaseDragCapture();
                     hideDragGhost();

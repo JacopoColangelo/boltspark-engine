@@ -114,6 +114,7 @@ class AssetBrowser extends h2d.Object {
     final folderSurface:UiSurface;
     final folderTitle:UiText;
     final folderSplitter:h2d.Interactive;
+    final folderSplitterGrip:h2d.Graphics;
     final treeMask:h2d.Mask;
     final treeScroll:ScrollBar;
     final listSurface:UiSurface;
@@ -135,6 +136,7 @@ class AssetBrowser extends h2d.Object {
     final settingsButton:UiButton;
     final settingsPanel:UiSurface;
     final settingsCatch:h2d.Interactive;
+    final defaultOverlayParent:h2d.Object;
     final settingsViewTitle:UiText;
     final settingsTitle:UiText;
     final settingsSlider:UiSlider;
@@ -151,6 +153,7 @@ class AssetBrowser extends h2d.Object {
 
     final renameSurface:UiSurface;
     final renameInput:UiTextInput;
+    final dragGhostSurface:UiSurface;
     final dragGhost:UiText;
     final dropHighlight:UiSurface;
     final breadcrumbObjects:Array<h2d.Object> = [];
@@ -221,6 +224,7 @@ class AssetBrowser extends h2d.Object {
         super(parent);
         this.ctx = ctx;
         var menus = menuParent == null ? this : menuParent;
+        defaultOverlayParent = menus;
         store = new AssetBrowserStore();
         var loadError = store.load();
         if (loadError != null) Sys.println('[probe] asset browser store load=${loadError}');
@@ -424,10 +428,18 @@ class AssetBrowser extends h2d.Object {
 
         folderSurface = new UiSurface(ctx, this);
         folderSurface.setStyle(Theme.PANEL_ALT, Theme.BORDER, 0);
-        folderSplitter = new h2d.Interactive(5, 1, this);
+        folderSplitterGrip = new h2d.Graphics(this);
+        // A 5px hit strip was nearly impossible to grab, especially in a
+        // floating panel. Use a 14px hit area centered on the pane boundary
+        // and keep a visible grip so the target is obvious.
+        folderSplitter = new h2d.Interactive(14, 1, this);
         folderSplitter.backgroundColor = 0;
         folderSplitter.cursor = ctx.resizeHorizontal;
-        folderSplitter.onOut = function(_) ctx.restoreArrowCursor();
+        folderSplitter.onOver = function(_) drawFolderSplitterGrip(true);
+        folderSplitter.onOut = function(_) {
+            drawFolderSplitterGrip(false);
+            ctx.restoreArrowCursor();
+        };
         folderSplitter.onPush = function(_) beginFolderSplitterDrag();
 
         folderTitle = new UiText(ctx.captionFont, this);
@@ -483,10 +495,15 @@ class AssetBrowser extends h2d.Object {
             if (renaming) commitRename();
         };
 
-        dragGhost = new UiText(ctx.captionFont, this);
-        dragGhost.textColor = Theme.ACCENT;
+        dragGhostSurface = new UiSurface(ctx, this);
+        dragGhostSurface.setStyle(Theme.PANEL_ALT, Theme.ACCENT, 0);
+        dragGhostSurface.setSize(96, 22);
+        dragGhost = new UiText(ctx.captionFont, dragGhostSurface);
+        dragGhost.textColor = Theme.TEXT;
         dragGhost.lineBreak = false;
-        dragGhost.visible = false;
+        dragGhost.x = 6;
+        dragGhost.y = 4;
+        dragGhostSurface.visible = false;
 
         // Drop feedback is a separate overlay: rebuilding folder rows during a
         // drag would detach the captured Interactive and cancel the gesture.
@@ -745,10 +762,13 @@ class AssetBrowser extends h2d.Object {
         listMask.height = Std.int(gridViewportHeight());
         gridScroll.setBounds(Math.max(0, folderWidth + centerWidth - 10),
             TOOLBAR_HEIGHT + 2, 6, Math.max(0, gridViewportHeight() - 4));
-        folderSplitter.x = folderWidth - 2;
+        folderSplitter.x = folderWidth - 7;
         folderSplitter.y = TOOLBAR_HEIGHT;
-        folderSplitter.width = 5;
+        folderSplitter.width = 14;
         folderSplitter.height = Math.max(0, heightValue - TOOLBAR_HEIGHT);
+        folderSplitterGrip.y = TOOLBAR_HEIGHT;
+        drawFolderSplitterGrip(false);
+        addChild(folderSplitterGrip);
         addChild(folderSplitter);
 
         buildFolders();
@@ -765,8 +785,17 @@ class AssetBrowser extends h2d.Object {
         return Math.max(MIN_FOLDER_WIDTH, widthValue - MIN_FOLDER_WIDTH);
     }
 
+    function drawFolderSplitterGrip(hover:Bool):Void {
+        folderSplitterGrip.clear();
+        folderSplitterGrip.x = Math.round(folderWidth) - 1;
+        folderSplitterGrip.beginFill(hover ? Theme.ACCENT : Theme.BORDER_STRONG, 1);
+        folderSplitterGrip.drawRect(0, 0, 2,
+            Math.max(0, heightValue - TOOLBAR_HEIGHT));
+        folderSplitterGrip.endFill();
+    }
+
     function beginFolderSplitterDrag():Void {
-        var startX = ctx.window.mouseX;
+        var startX = ctx.mouseX;
         var startWidth = preferredFolderWidth;
         var maxWidth = maxFolderWidth();
         var minWidth = Math.min(MIN_FOLDER_WIDTH, maxWidth);
@@ -775,7 +804,7 @@ class AssetBrowser extends h2d.Object {
                 case EMove:
                     preferredFolderWidth = Math.max(minWidth,
                         Math.min(maxWidth,
-                            startWidth + (ctx.window.mouseX - startX)));
+                            startWidth + (ctx.mouseX - startX)));
                     folderWidth = preferredFolderWidth;
                     store.folderWidth = preferredFolderWidth;
                     refreshLayout();
@@ -937,7 +966,7 @@ class AssetBrowser extends h2d.Object {
                 }
             });
         }
-        filterMenu.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        filterMenu.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     function openSortMenu():Void {
@@ -977,7 +1006,7 @@ class AssetBrowser extends h2d.Object {
                 }
             });
         }
-        sortMenu.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        sortMenu.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     static inline var THUMB_MIN:Int = 64;
@@ -1004,13 +1033,17 @@ class AssetBrowser extends h2d.Object {
             return;
         }
         settingsOpen = true;
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] asset browser settings local='
+                + (settingsPanel.getScene() == getScene()));
+        }
         settingsCatch.width = ctx.width;
         settingsCatch.height = ctx.height;
         settingsCatch.visible = true;
         // The toolbar button is hidden on narrow docks; anchor the popover to
         // the invoking pointer instead of a stale offscreen button position.
         var px = toolbarSettingsHidden
-            ? ctx.window.mouseX - SETTINGS_WIDTH * 0.5
+            ? ctx.mouseX - SETTINGS_WIDTH * 0.5
             : this.x + settingsButton.x - 96;
         var py = this.y + TOOLBAR_HEIGHT;
         settingsPanel.x = Math.max(4, Math.min(px, ctx.width - SETTINGS_WIDTH - 4));
@@ -1081,7 +1114,7 @@ class AssetBrowser extends h2d.Object {
                 });
             }
         }
-        favoriteMenu.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        favoriteMenu.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     function saveViewState():Void {
@@ -1238,7 +1271,7 @@ class AssetBrowser extends h2d.Object {
             hit.onPush = function(event) {
                 event.propagate = false;
                 if (isEllipsis) {
-                    breadcrumbMenu.open(ctx.window.mouseX, ctx.window.mouseY, hiddenItems);
+                    breadcrumbMenu.open(ctx.mouseX, ctx.mouseY, hiddenItems);
                     return;
                 }
                 navigateTo(captured);
@@ -1596,7 +1629,7 @@ class AssetBrowser extends h2d.Object {
             applyStyle();
             if (tooltip != null) {
                 tooltip.schedule(isFolder ? (path == "" ? "All" : path) : path,
-                    ctx.window.mouseX, ctx.window.mouseY);
+                    ctx.mouseX, ctx.mouseY);
             }
         };
         hit.onOut = function(_) {
@@ -1810,15 +1843,15 @@ class AssetBrowser extends h2d.Object {
                 else null;
             if (hit != null) {
                 hit.onOver = function(_) {
-                    card.setStyle(selected ? 0x356B5C : Theme.SURFACE_3,
+                                        card.setStyle(selected ? 0x356B5C : Theme.SURFACE_3,
                         Theme.ACCENT, 0, 0);
                     if (tooltip != null) {
                         tooltip.schedule(assetTooltipText(item),
-                            ctx.window.mouseX, ctx.window.mouseY);
+                            ctx.mouseX, ctx.mouseY);
                     }
                 };
                 hit.onOut = function(_) {
-                    card.setStyle(selected ? Theme.ACCENT_MUTED : Theme.PANEL_ALT,
+                                        card.setStyle(selected ? Theme.ACCENT_MUTED : Theme.PANEL_ALT,
                         selected ? Theme.ACCENT : Theme.BORDER, 0, 0);
                     if (tooltip != null) tooltip.cancel();
                 };
@@ -2124,7 +2157,7 @@ class AssetBrowser extends h2d.Object {
             if (!selected) surface.setStyle(Theme.SURFACE_3, Theme.ACCENT, 0);
             if (tooltip != null) {
                 tooltip.schedule(assetTooltipText(item),
-                    ctx.window.mouseX, ctx.window.mouseY);
+                    ctx.mouseX, ctx.mouseY);
             }
         };
         hit.onOut = function(_) {
@@ -2199,7 +2232,13 @@ class AssetBrowser extends h2d.Object {
 
     function handleWheelDelta(delta:Float):Void {
         var over = Math.max(0, contentHeight(shownItems.length) - gridViewportHeight());
-        if (over <= 0) return;
+        if (over <= 0) {
+            if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+                Sys.println('[probe] asset browser grid wheel no-overflow'
+                    + ' items=${shownItems.length} viewport=${gridViewportHeight()}');
+            }
+            return;
+        }
         // Windows WM_MOUSEWHEEL: wheel-down is a negative WPARAM. hldx divides
         // by 120 and hxd.Window negates again, so wheel-down arrives here as a
         // positive delta. Adding it moves the viewport toward the end.
@@ -2207,7 +2246,33 @@ class AssetBrowser extends h2d.Object {
         // less and less as the item count grew, which felt sluggish.
         scrollValue = Math.max(0, Math.min(1,
             scrollValue + delta * WHEEL_STEP / over));
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] asset browser grid scroll=${scrollValue}'
+                + ' delta=${delta}');
+        }
         buildAssets();
+    }
+
+    /**
+     * Move the custom settings popover to the overlay owned by the window that
+     * currently hosts this browser. MenuDropdown handles this dynamically via
+     * its global overlay layer, but this non-menu popover consists of sibling
+     * objects and must be reparented explicitly.
+     */
+    public function setOverlayParent(parent:h2d.Object):Void {
+        if (parent == null || settingsPanel.parent == parent) return;
+        closeSettings();
+        // Preserve paint/hit order: dismiss catch behind the opaque panel,
+        // controls and text above it.
+        for (object in [settingsCatch, settingsPanel, settingsViewTitle,
+                settingsTitle, settingsSlider, viewGridButton, viewListButton,
+                viewDetailsButton, showEngineAssetsCheckbox]) {
+            parent.addChild(object);
+        }
+    }
+
+    public function restoreOverlayParent():Void {
+        setOverlayParent(defaultOverlayParent);
     }
 
     // ------------------------------------------------------------------
@@ -2216,7 +2281,7 @@ class AssetBrowser extends h2d.Object {
     // ------------------------------------------------------------------
 
     function updateDropTarget():Void {
-        var target = folderAt(ctx.window.mouseX - this.x, ctx.window.mouseY - this.y);
+        var target = folderAt(ctx.mouseX - this.x, ctx.mouseY - this.y);
         if (folderDragSource != "" && target != null
                 && (target == folderDragSource
                     || StringTools.startsWith(target, folderDragSource + "/"))) {
@@ -2250,8 +2315,29 @@ class AssetBrowser extends h2d.Object {
         dropHighlight.visible = false;
     }
 
+    function prepareDragGhost(label:String):Void {
+        dragGhost.text = label;
+        dragGhostSurface.setSize(Math.max(96,
+            Math.round(dragGhost.textWidth + 20)), 22);
+        dragGhostSurface.visible = false;
+        addChild(dragGhostSurface);
+    }
+
+    function moveDragGhost():Void {
+        dragGhostSurface.x = ctx.mouseX - this.x + 14;
+        dragGhostSurface.y = ctx.mouseY - this.y + 12;
+        // The main editor draws the same framed label for the translated
+        // pointer. The local copy is only needed where the float HWND covers
+        // that editor overlay; hide it as soon as capture carries the pointer
+        // outside the float client.
+        dragGhostSurface.visible = dragging && ctx.floatMode
+            && ctx.mouseX >= 0 && ctx.mouseX < ctx.width
+            && ctx.mouseY >= 0 && ctx.mouseY < ctx.height;
+    }
+
     function clearDrag(hit:h2d.Interactive):Void {
-        dragGhost.visible = false;
+        UiContext.dragLabel = null;
+        dragGhostSurface.visible = false;
         dropHighlight.visible = false;
         dropTargetFolder = null;
         folderDragSource = "";
@@ -2271,32 +2357,27 @@ class AssetBrowser extends h2d.Object {
         }
         dragSources = selectedSources.length > 1 ? selectedSources.copy() : [source];
         var labels = dragSources;
-        dragGhost.text = ProjectSession.sceneDisplayName(labels[0])
-            + (labels.length > 1 ? ' (+${labels.length - 1})' : "");
-        addChild(dragGhost);
-        // A plain click must never show the floating drag label.
-        dragGhost.visible = false;
-        dragGhost.x = event.relX + 10;
-        dragGhost.y = event.relY + 8;
+        prepareDragGhost(ProjectSession.sceneDisplayName(labels[0])
+            + (labels.length > 1 ? ' (+${labels.length - 1})' : ""));
         dragging = false;
-        dragStartX = ctx.window.mouseX;
-        dragStartY = ctx.window.mouseY;
+        dragStartX = ctx.mouseX;
+        dragStartY = ctx.mouseY;
         hit.startCapture(function(capturedEvent) {
             switch (capturedEvent.kind) {
                 case EMove:
-                    if (Math.abs(ctx.window.mouseX - dragStartX)
-                            + Math.abs(ctx.window.mouseY - dragStartY) > 6) {
-                        if (!dragging) dragGhost.visible = true;
+                    if (Math.abs(ctx.mouseX - dragStartX)
+                            + Math.abs(ctx.mouseY - dragStartY) > 6) {
+                        if (!dragging) UiContext.dragLabel = dragGhost.text;
                         dragging = true;
                     }
-                    dragGhost.x = ctx.window.mouseX - this.x + 10;
-                    dragGhost.y = ctx.window.mouseY - this.y + 8;
+                    moveDragGhost();
                     updateDropTarget();
                     capturedEvent.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
                     var target = dropTargetFolder;
                     var wasDragging = dragging;
                     var copy = hxd.Key.isDown(hxd.Key.CTRL);
+                    UiContext.dragLabel = null;
                     clearDrag(hit);
                     if (wasDragging && target != null) {
                         var mode = copy ? "copy" : "move";
@@ -2324,25 +2405,25 @@ class AssetBrowser extends h2d.Object {
      */
     function beginEngineAssetDrag(payload:AssetDragPayload, source:String,
             hit:h2d.Interactive, event:hxd.Event):Void {
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] asset drag begin source=${source}'
+                + ' at=${Std.int(event.relX)},${Std.int(event.relY)}');
+        }
         dragSources = [source];
-        dragGhost.text = payload.label;
-        addChild(dragGhost);
-        dragGhost.visible = false;
-        dragGhost.x = event.relX + 10;
-        dragGhost.y = event.relY + 8;
+        prepareDragGhost(payload.label);
         dragging = false;
-        dragStartX = ctx.window.mouseX;
-        dragStartY = ctx.window.mouseY;
+        dragStartX = ctx.mouseX;
+        dragStartY = ctx.mouseY;
         // Don't begin the drag session on press: a plain click must not light
         // up the Inspector slots. The session (and its highlights) starts only
         // once the pointer actually moves far enough to be a drag.
         hit.startCapture(function(capturedEvent) {
             switch (capturedEvent.kind) {
                 case EMove:
-                    if (Math.abs(ctx.window.mouseX - dragStartX)
-                            + Math.abs(ctx.window.mouseY - dragStartY) > 6) {
+                    if (Math.abs(ctx.mouseX - dragStartX)
+                            + Math.abs(ctx.mouseY - dragStartY) > 6) {
                         if (!dragging) {
-                            dragGhost.visible = true;
+                            UiContext.dragLabel = payload.label;
                             AssetDragSession.begin(payload);
                         }
                         dragging = true;
@@ -2351,27 +2432,22 @@ class AssetBrowser extends h2d.Object {
                     // everywhere inside the editor. Native SetCapture would
                     // add latency to every move, so it is intentionally unused
                     // for these in-window asset drags.
-                    dragGhost.x = ctx.window.mouseX - this.x + 10;
-                    dragGhost.y = ctx.window.mouseY - this.y + 8;
+                    moveDragGhost();
                     if (dragging) {
-                        var hovered = AssetDragSession.update(
-                            ctx.window.mouseX, ctx.window.mouseY);
-                        // The viewport shows its own framed hint; a second label
-                        // at the same cursor offset would clip into it.
-                        dragGhost.visible = hovered == null
-                            || !hovered.hideGhostOnHover;
+                        AssetDragSession.update(ctx.mouseX, ctx.mouseY);
                     }
                     capturedEvent.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
                     var wasDragging = dragging;
-                    var mouseX = ctx.window.mouseX;
-                    var mouseY = ctx.window.mouseY;
+                    var mouseX = ctx.mouseX;
+                    var mouseY = ctx.mouseY;
                     // Stop capture FIRST. The drop rebuilds the inspector and
                     // refreshes this browser, which destroys `hit`; calling
                     // stopCapture() afterwards would dereference a dead
                     // Interactive. The onCancel callback below only does
                     // cosmetic cleanup, so the payload survives until drop().
                     hit.stopCapture();
+                    UiContext.dragLabel = null;
                     if (wasDragging) AssetDragSession.drop(mouseX, mouseY);
                     else AssetDragSession.cancel();
                     dragging = false;
@@ -2383,7 +2459,8 @@ class AssetBrowser extends h2d.Object {
             // Invoked by stopCapture() or by an external capture loss. Hiding
             // the ghost and refreshing tiles is safe in both cases; resolving
             // the drag session belongs to the release handler above.
-            dragGhost.visible = false;
+            UiContext.dragLabel = null;
+            dragGhostSurface.visible = false;
             dragGhost.text = "";
             buildAssets();
         });
@@ -2392,30 +2469,25 @@ class AssetBrowser extends h2d.Object {
     function beginFolderDrag(source:String, hit:h2d.Interactive, event:hxd.Event):Void {
         folderDragSource = source;
         dragSources = [];
-        dragGhost.text = ProjectSession.folderDisplayName(source);
-        addChild(dragGhost);
-        // A plain click must never show the floating drag label.
-        dragGhost.visible = false;
-        dragGhost.x = event.relX + 10;
-        dragGhost.y = event.relY + 8;
+        prepareDragGhost(ProjectSession.folderDisplayName(source));
         dragging = false;
-        dragStartX = ctx.window.mouseX;
-        dragStartY = ctx.window.mouseY;
+        dragStartX = ctx.mouseX;
+        dragStartY = ctx.mouseY;
         hit.startCapture(function(capturedEvent) {
             switch (capturedEvent.kind) {
                 case EMove:
-                    if (Math.abs(ctx.window.mouseX - dragStartX)
-                            + Math.abs(ctx.window.mouseY - dragStartY) > 6) {
-                        if (!dragging) dragGhost.visible = true;
+                    if (Math.abs(ctx.mouseX - dragStartX)
+                            + Math.abs(ctx.mouseY - dragStartY) > 6) {
+                        if (!dragging) UiContext.dragLabel = dragGhost.text;
                         dragging = true;
                     }
-                    dragGhost.x = ctx.window.mouseX - this.x + 10;
-                    dragGhost.y = ctx.window.mouseY - this.y + 8;
+                    moveDragGhost();
                     updateDropTarget();
                     capturedEvent.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
                     var target = dropTargetFolder;
                     var wasDragging = dragging;
+                    UiContext.dragLabel = null;
                     clearDrag(hit);
                     if (wasDragging && target != null) {
                         Sys.println('[probe] asset browser folder drop source=${source}'
@@ -2451,7 +2523,7 @@ class AssetBrowser extends h2d.Object {
         Sys.println('[probe] asset browser context source=${selectedSource}');
         var entry = findEntry(selectedSource);
         if (entry != null && entry.kind == AssetTypeRegistry.KIND_ENGINE) {
-            contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, [{
+            contextMenu.open(ctx.mouseX, ctx.mouseY, [{
                 label: store.isFavorite(selectedSource) ? "Remove Favorite" : "Add to Favorites",
                 onClick: function() {
                     store.toggleFavorite(selectedSource);
@@ -2480,7 +2552,7 @@ class AssetBrowser extends h2d.Object {
             label: store.isFavorite(selectedSource) ? "Remove Favorite" : "Add to Favorites",
             onClick: function() { store.toggleFavorite(selectedSource); rebuildAll(); }
         }];
-        contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, [{
+        contextMenu.open(ctx.mouseX, ctx.mouseY, [{
             label: "Open",
             onClick: openSelected
         }, {
@@ -2551,12 +2623,12 @@ class AssetBrowser extends h2d.Object {
                 onClick: openSettings
             });
         }
-        contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        contextMenu.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     function openFolderContextMenu(path:String):Void {
         if (isEngineFolder(path)) {
-            contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, [{
+            contextMenu.open(ctx.mouseX, ctx.mouseY, [{
                 label: "Open Engine Assets",
                 onClick: function() navigateTo(path)
             }]);
@@ -2608,7 +2680,7 @@ class AssetBrowser extends h2d.Object {
                 if (onRevealAsset != null) onRevealAsset(path);
             }
         });
-        contextMenu.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        contextMenu.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     function openSelected():Void {

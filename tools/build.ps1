@@ -31,6 +31,9 @@ $freeTypePackageHash = 'A4C2B6F10C8C78013B410B1ED861485B1BE413F424BF9A6F92AABA84
 $freeTypeHeaderHash = 'FD45E7EE01C8F0F2419186D3FC9DD58E25CD866EF0C49F0B347C2D141665A364'
 $hlFreeTypeRoot = Join-Path $repoRoot 'third_party\hlfreetype'
 $freeTypeSource = Join-Path $hlFreeTypeRoot 'vendor\freetype'
+$winFloatSource = Join-Path $repoRoot 'tools\native\winfloat.c'
+$winFloatModule = Join-Path $repoRoot 'bin\winfloat.hdll'
+$winFloatImportLibrary = Join-Path $repoRoot 'bin\winfloat.lib'
 
 $actionCount = 0
 foreach ($requestedAction in @($InstallDependencies, $Check, $Run)) {
@@ -279,6 +282,54 @@ function Build-FreeTypeModule {
     Write-Host "Native FreeType glyph module built (hlfreetype $hlFreeTypeVersion, FreeType $freeTypeVersion)." -ForegroundColor Green
 }
 
+function Build-WinFloatModule {
+    # Raw-Win32 floating dock panels: own HWND/WndProc, GDI paint, no swapchain.
+    # Built with the same pinned MSVC toolset as the other native modules.
+    $visualStudio = Get-VisualStudioConfiguration
+    $vcvars = Join-Path $visualStudio.InstallationPath 'VC\Auxiliary\Build\vcvars64.bat'
+    if (-not (Test-Path $vcvars)) {
+        throw "vcvars64.bat was not found at $vcvars. Install the Desktop C++ workload."
+    }
+    $cl = Get-ChildItem -LiteralPath (Join-Path $visualStudio.InstallationPath 'VC\Tools\MSVC') `
+        -Recurse -Filter cl.exe |
+        Where-Object { $_.FullName -match 'Hostx64\\x64\\cl\.exe$' } |
+        Select-Object -First 1 -ExpandProperty FullName
+    if (-not $cl) { throw 'x64 cl.exe not found for the floating-panel module.' }
+    Get-RequiredFile $winFloatSource `
+        'The native floating-panel source tools\native\winfloat.c is required.' | Out-Null
+
+    $command = "`"$vcvars`" >nul && `"$cl`" /nologo /LD /MD /O2 " +
+        "/I `"$hashLinkDir\include`" `"$winFloatSource`" /Fe:`"$winFloatModule`" " +
+        "/link /LIBPATH:`"$hashLinkDir`" libhl.lib user32.lib gdi32.lib dwmapi.lib"
+    Push-Location (Join-Path $repoRoot 'bin')
+    try {
+        & cmd.exe /c $command | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $winFloatModule) `
+                -or -not (Test-Path $winFloatImportLibrary)) {
+            throw 'Building the native floating-panel module failed.'
+        }
+    }
+    finally { Pop-Location }
+    Write-Host 'Native floating-panel module built (bin\winfloat.hdll).' -ForegroundColor Green
+}
+
+function Install-TemporaryImportLibrary([string]$Source, [string]$Target,
+        [string]$Backup, [bool]$HadOriginal) {
+    if ($HadOriginal) {
+        Copy-Item -LiteralPath $Target -Destination $Backup -Force
+    }
+    Copy-Item -LiteralPath $Source -Destination $Target -Force
+}
+
+function Restore-TemporaryImportLibrary([string]$Target, [string]$Backup,
+        [bool]$HadOriginal) {
+    if ($HadOriginal) {
+        Copy-Item -LiteralPath $Backup -Destination $Target -Force
+    } elseif (Test-Path $Target) {
+        Remove-Item -LiteralPath $Target -Force
+    }
+}
+
 function Apply-HashLinkPatch([string]$SourceRoot, [string]$PatchPath, [string]$Description) {
     if (-not (Test-Path $PatchPath)) {
         throw "$Description patch was not found: $PatchPath"
@@ -449,6 +500,8 @@ function Test-Environment {
         "Restore pinned hlfreetype $hlFreeTypeVersion source at commit $hlFreeTypeCommit." | Out-Null
     Get-RequiredFile (Join-Path $hlFreeTypeRoot 'extension\freetype.c') `
         "Restore pinned hlfreetype $hlFreeTypeVersion native source." | Out-Null
+    Get-RequiredFile $winFloatSource `
+        'The native floating-panel source tools\native\winfloat.c is required.' | Out-Null
     Test-FreeTypeSource
     $monoFontSource = Get-RequiredFile `
         (Join-Path $repoRoot 'tools\font-source\JetBrainsMono.ttf') `
@@ -663,6 +716,9 @@ function New-NativeRelease {
     $hashLinkFreeTypeImportLibrary = Join-Path $hashLinkDir 'freetype.lib'
     $freeTypeImportLibraryBackup = Join-Path $nativeModuleBuild 'freetype-original.lib'
     $hadFreeTypeImportLibrary = Test-Path $hashLinkFreeTypeImportLibrary
+    $winFloatImportLibraryTarget = Join-Path $hashLinkDir 'winfloat.lib'
+    $winFloatImportLibraryBackup = Join-Path $nativeModuleBuild 'winfloat-original.lib'
+    $hadWinFloatImportLibrary = Test-Path $winFloatImportLibraryTarget
     if ($hadFreeTypeImportLibrary) {
         Copy-Item -LiteralPath $hashLinkFreeTypeImportLibrary `
             -Destination $freeTypeImportLibraryBackup -Force
@@ -696,6 +752,10 @@ function New-NativeRelease {
 
     Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
     Copy-Item -LiteralPath $freeTypeImportLibrary -Destination $hashLinkFreeTypeImportLibrary -Force
+    Get-RequiredFile $winFloatImportLibrary `
+        'Build the native floating-panel module before creating a release.' | Out-Null
+    Install-TemporaryImportLibrary $winFloatImportLibrary $winFloatImportLibraryTarget `
+        $winFloatImportLibraryBackup $hadWinFloatImportLibrary
     try {
         $previousErrorActionPreference = $ErrorActionPreference
         try {
@@ -708,6 +768,8 @@ function New-NativeRelease {
         }
     }
     finally {
+        Restore-TemporaryImportLibrary $winFloatImportLibraryTarget `
+            $winFloatImportLibraryBackup $hadWinFloatImportLibrary
         Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
         if ($hadFreeTypeImportLibrary) {
             Copy-Item -LiteralPath $freeTypeImportLibraryBackup `
@@ -753,6 +815,8 @@ function New-NativeRelease {
         throw 'Haxe produced no native runtime module list.'
     }
 
+    Install-TemporaryImportLibrary $winFloatImportLibrary $winFloatImportLibraryTarget `
+        $winFloatImportLibraryBackup $hadWinFloatImportLibrary
     try {
         Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
         Copy-Item -LiteralPath $freeTypeImportLibrary -Destination $hashLinkFreeTypeImportLibrary -Force
@@ -764,6 +828,8 @@ function New-NativeRelease {
         }
     }
     finally {
+        Restore-TemporaryImportLibrary $winFloatImportLibraryTarget `
+            $winFloatImportLibraryBackup $hadWinFloatImportLibrary
         Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
         if ($hadFreeTypeImportLibrary) {
             Copy-Item -LiteralPath $freeTypeImportLibraryBackup `
@@ -806,6 +872,8 @@ function New-NativeRelease {
         $moduleFile = "$module.hdll"
         $modulePath = if ($module -eq 'freetype') {
             $freeTypeModule
+        } elseif ($module -eq 'winfloat') {
+            $winFloatModule
         } else {
             Join-Path $hashLinkDir $moduleFile
         }
@@ -836,7 +904,8 @@ function New-NativeRelease {
         'msvcp140.dll',
         'WinPixEventRuntime.dll',
         'THIRD-PARTY-LICENSES.txt',
-        'freetype.hdll'
+        'freetype.hdll',
+        'winfloat.hdll'
     )
     $replaceNames += $legacyLicenseNames
     $replaceNames += Get-ChildItem $hashLinkDir -Filter '*.hdll' -File | Select-Object -ExpandProperty Name
@@ -884,6 +953,7 @@ try {
 
     New-Item -ItemType Directory -Force (Join-Path $repoRoot 'bin') | Out-Null
     Build-FreeTypeModule
+    Build-WinFloatModule
     & $haxeExe (Join-Path $repoRoot 'compile.hxml')
     if ($LASTEXITCODE -ne 0) { throw "Haxe compilation failed with exit code $LASTEXITCODE." }
     if (-not (Test-Path (Join-Path $repoRoot 'bin\boltspark.hl'))) {

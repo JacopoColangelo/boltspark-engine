@@ -9,7 +9,7 @@ import boltspark.ui.dock.DockLayoutRenderer.DockPreview;
 import boltspark.ui.dock.DockLayoutSerializer.DockLayoutSnapshot;
 import boltspark.ui.dock.DockPanelView.PanelSlot;
 import boltspark.platform.NativeWindow;
-import boltspark.ui.windows.ApplicationWindowManager;
+import boltspark.platform.FloatWindowManager;
 import boltspark.ui.layout.DockLayout;
 import boltspark.ui.layout.DockLayout.DockLayoutGeometry;
 import boltspark.ui.layout.LayoutRect;
@@ -54,12 +54,12 @@ class DockingManager {
     var focusedPanelId:String = "";
     var startupWarnings:Array<String> = [];
 
-    final dockWindows:ApplicationWindowManager;
+    final dockWindows:FloatWindowManager;
 
     public function new(ctx:UiContext, input:InputAdapter, registry:PanelRegistry,
             panelLayer:h2d.Object, floatPanelLayer:h2d.Object,
             chromeLayer:h2d.Object, floatLayer:h2d.Object,
-            overlayLayer:h2d.Object, dockWindows:ApplicationWindowManager) {
+            overlayLayer:h2d.Object, dockWindows:FloatWindowManager) {
         this.ctx = ctx;
         this.dockWindows = dockWindows;
         this.registry = registry;
@@ -94,6 +94,44 @@ class DockingManager {
         renderer.onFloatDockRequest = function(window) dockWindowIntoEditor(window);
         renderer.onFloatClose = function(window) closeFloat(window);
         drag = new DockDragController(this, ctx, overlayLayer);
+        // Floats re-read the live snapshot through the same callback the docked
+        // panels use, so native windows never depend on a stale pushed copy.
+        dockWindows.onSnapshotRequest = function(panelId:String):Dynamic {
+            return onSnapshotRequest != null ? onSnapshotRequest(panelId) : null;
+        };
+        dockWindows.onHeaderDrag = handleFloatHeaderDrag;
+    }
+
+    /** Screen-space header drag: show a dock preview, then dock on release. */
+    function handleFloatHeaderDrag(key:String, phase:Int,
+            screenX:Int, screenY:Int):Void {
+        var window:Null<FloatingDockWindow> = null;
+        for (candidate in floating) {
+            if (candidate.nativeKey == key) {
+                window = candidate;
+                break;
+            }
+        }
+        if (window == null) return;
+        if (phase == 0) return;
+        var origin = NativeWindow.clientOrigin(ctx.window);
+        var x = screenX - origin.x;
+        var y = screenY - origin.y;
+        var inside = x >= 0 && y >= 0 && x <= ctx.width && y <= ctx.height;
+        var plan = null;
+        if (inside) {
+            var first = window.root.firstTab();
+            var slot = first == null ? null : first.activeSlot();
+            if (slot != null) plan = resolveDrop(slot, x, y, null);
+        }
+        if (phase == 1) {
+            renderer.setPreview(plan == null ? null : plan.preview);
+            return;
+        }
+        renderer.setPreview(null);
+        if (plan != null && plan.target != null) {
+            dockWindowIntoEditor(window, plan.target, plan.side);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -114,6 +152,11 @@ class DockingManager {
         }
         for (window in floating) {
             if (window.id >= nextFloatId) nextFloatId = window.id + 1;
+        }
+        // A persisted float must become a real HWND before the first draw,
+        // otherwise it would linger as an in-app ghost rectangle.
+        if (useNativeFloats()) {
+            for (window in floating) hostNativeFloat(window);
         }
         rebuild();
         // Create the file on first launch / after recovery so later changes
@@ -215,6 +258,24 @@ class DockingManager {
     public function floatSlot(slot:PanelSlot, rect:LayoutRect):Void {
         if (slot == null || slot.locked) return;
         if (!registry.flag(slot.view.panelId, "float", true)) return;
+        // Remember where this panel came from so closing/docking the float can
+        // put it back in the same tab group and slot order.
+        var sourceTab = findTab(slot.view.panelId, slot.instanceKey);
+        var originIndex = sourceTab == null ? -1 : sourceTab.slots.indexOf(slot);
+        var tabs:Array<TabNode> = [];
+        if (root != null) root.collectTabs(tabs);
+        var neighbor:Null<TabNode> = null;
+        var side:DockSide = DockSide.Right;
+        if (sourceTab != null) {
+            var index = tabs.indexOf(sourceTab);
+            if (index > 0) neighbor = tabs[index - 1]
+            else if (index >= 0 && index + 1 < tabs.length) neighbor = tabs[index + 1];
+            if (neighbor != null) {
+                side = neighbor.rect.x < sourceTab.rect.x ? DockSide.Right
+                    : (neighbor.rect.y < sourceTab.rect.y ? DockSide.Bottom
+                    : (neighbor.rect.x > sourceTab.rect.x ? DockSide.Left : DockSide.Top));
+            }
+        }
         removeSlotFromAll(slot.view.panelId, slot.instanceKey);
         var tab = new TabNode();
         tab.add(slot);
@@ -223,31 +284,59 @@ class DockingManager {
         var geometry = DockZones.clampFloating(body, rect.x, rect.y, rect.width, rect.height);
         var window = new FloatingDockWindow(nextFloatId++, tab, geometry.x, geometry.y,
             geometry.width, geometry.height, title);
+        window.originTab = sourceTab;
+        window.originIndex = originIndex;
+        window.originNeighbor = neighbor;
+        window.originSide = side;
         floating.push(window);
-        // Real floating panels are hosted in their own native HWND process.
-        var key = "dock:" + slot.view.panelId + ":" + window.id;
-        // Native HWND hosting is opt-in: the locked hldx/DX12 driver does not
-        // reliably pump the editor's Win32 messages while a second Heaps
-        // process renders. The stable default is the in-app floating window.
-        var disableNative = Sys.getEnv("BOLTSPARK_NATIVE_DOCK_FLOATS") == null;
-        var error:Null<String> = null;
-        var screen = nativeGeometry(window);
-        if (!disableNative) {
-            error = dockWindows.openDockPanel(key, slot.view.panelId, title,
-                screen.x, screen.y, screen.w, screen.h);
-        }
-        if (error == null && !disableNative) {
-            window.nativeKey = key;
-            rememberNativeGeometry(key, screen);
-            pushSnapshot(window);
-        } else if (error != null) {
-            log(error);
+        // Raw-Win32 floats are the default. If the native module cannot create
+        // the HWND, cancel the float and put the slot back instead of leaving
+        // an in-app ghost behind. BOLTSPARK_INAPP_DOCK_FLOATS=1 restores the
+        // original in-app floating window explicitly.
+        if (useNativeFloats() && !hostNativeFloat(window)) {
+            floating.remove(window);
+            var destination = root.firstTab();
+            root = DockTree.add(root, slot, destination, DockSide.Center);
+            if (root.findTab(slot.view.panelId, slot.instanceKey) == null) {
+                root = DockTree.add(root, slot, destination, DockSide.Right);
+            }
+            rebuild();
+            save();
+            return;
         }
         rebuild();
         bringToFront(tab);
         save();
         log('floated ${slot.view.panelId} at ${Math.round(geometry.x)},'
             + '${Math.round(geometry.y)}');
+    }
+
+    static inline function useNativeFloats():Bool {
+        return Sys.getEnv("BOLTSPARK_INAPP_DOCK_FLOATS") != "1";
+    }
+
+    /** Host a floating container in its own raw-Win32 HWND. */
+    function hostNativeFloat(window:FloatingDockWindow):Bool {
+        if (window.nativeKey != "") return true;
+        var first = window.root.firstTab();
+        var slot = first == null ? null : first.activeSlot();
+        if (slot == null) return false;
+        var key = "dock:" + slot.view.panelId + ":" + window.id;
+        var screen = nativeGeometry(window);
+        var error = dockWindows.openDockPanel(key, slot.view.panelId,
+            window.title, screen.x, screen.y, screen.w, screen.h);
+        if (error != null) {
+            log(error);
+            return false;
+        }
+        window.nativeKey = key;
+        rememberNativeGeometry(key, screen);
+        // Host the real H2D view in the float so it keeps the same widgets,
+        // theme and live state as the docked panel.
+        dockWindows.bindView(key, slot.view, hostFor(slot.view),
+            slot.view.panelId, window.title);
+        pushSnapshot(window);
+        return true;
     }
 
     /** Dock an entire floating window back into the editor. */
@@ -261,12 +350,41 @@ class DockingManager {
         var direction = side == null ? DockSide.Center : side;
         var destination = target != null && root != null
             && containsTab(root, target) ? target : root.firstTab();
+        var restoreTab = target == null && root != null && window.originTab != null
+            && containsTab(root, window.originTab) ? window.originTab : null;
         floating.remove(window);
-        if (window.nativeKey != "") dockWindows.closeDockPanel(window.nativeKey);
+        if (window.nativeKey != "") {
+            dockWindows.closeDockPanel(window.nativeKey);
+            nativeGeometrySent.remove(window.nativeKey);
+            window.nativeKey = "";
+        }
         for (slot in slots) {
-            root = DockTree.add(root, slot, destination, direction);
+            if (restoreTab != null) {
+                root = DockTree.add(root, slot, restoreTab, DockSide.Center,
+                    window.originIndex);
+                if (root.findTab(slot.view.panelId, slot.instanceKey) == null
+                        && window.originNeighbor != null
+                        && containsTab(root, window.originNeighbor)) {
+                    root = DockTree.add(root, slot, window.originNeighbor,
+                        window.originSide, window.originIndex);
+                }
+            } else {
+                root = DockTree.add(root, slot, destination, direction);
+                if (root.findTab(slot.view.panelId, slot.instanceKey) == null
+                        && direction == DockSide.Center) {
+                    // A Center add is refused when the destination group holds a
+                    // fixed panel (e.g. the viewport). Split around it instead of
+                    // silently dropping the re-docked panel.
+                    root = DockTree.add(root, slot, destination, DockSide.Right);
+                }
+            }
             destination = root.findTab(slot.view.panelId, slot.instanceKey);
             direction = DockSide.Center;
+            // Re-host the view in the editor's panel layer and make it visible
+            // again; syncViews() below handles the normal case as well.
+            var host = hostFor(slot.view);
+            if (host != null && host.parent != panelLayer) panelLayer.addChild(host);
+            slot.view.setVisible(true);
         }
         rebuild();
         save();
@@ -275,7 +393,10 @@ class DockingManager {
 
     /** Float the panel last focused (used by the Window menu). */
     public function floatFocused():Bool {
-        if (focusedPanelId == "" || !isOpen(focusedPanelId)) return false;
+        if (focusedPanelId == "" || !isOpen(focusedPanelId)) {
+            log('float focused: no active panel (${focusedPanelId})');
+            return false;
+        }
         var slot = findSlotAnywhere(focusedPanelId);
         if (slot == null || slot.locked) return false;
         var rect = new LayoutRect(
@@ -305,7 +426,10 @@ class DockingManager {
     public function closeFloat(window:FloatingDockWindow):Void {
         var index = floating.indexOf(window);
         if (index < 0) return;
-        if (window.nativeKey != "") dockWindows.closeDockPanel(window.nativeKey);
+        if (window.nativeKey != "") {
+            dockWindows.closeDockPanel(window.nativeKey);
+            nativeGeometrySent.remove(window.nativeKey);
+        }
         floating.splice(index, 1);
         rebuild();
         save();
@@ -402,7 +526,18 @@ class DockingManager {
      */
     public function panelBackgroundRects():Array<LayoutRect> {
         var result:Array<LayoutRect> = [];
+        // A native float owns its pixels. Painting a background rect for its
+        // docking tab in the editor chrome would leave a ghost rectangle in
+        // the main window behind the real HWND.
+        var nativeTabs:Map<TabNode, Bool> = new Map();
+        for (window in floating) {
+            if (!window.native) continue;
+            var tabs:Array<TabNode> = [];
+            window.root.collectTabs(tabs);
+            for (tab in tabs) nativeTabs.set(tab, true);
+        }
         for (tab in allTabs()) {
+            if (nativeTabs.exists(tab)) continue;
             var slot = tab.activeSlot();
             if (slot != null && slot.view.panelId == "boltspark.viewport") continue;
             var r = tab.rect;
@@ -487,6 +622,8 @@ class DockingManager {
         for (graphic in floatBackgrounds) graphic.remove();
         floatBackgrounds.clear();
         for (window in floating) {
+            // Native floats own their pixels; an in-app frame would be a ghost.
+            if (window.native) continue;
             floatBackgrounds.set(window.id, new h2d.Graphics(floatPanelLayer));
         }
         // Refresh rectangles first: the renderer builds one hit target per
@@ -522,6 +659,7 @@ class DockingManager {
 
     function drawFloatBackgrounds():Void {
         for (window in floating) {
+            if (window.native) continue;
             var graphic = floatBackgrounds.get(window.id);
             if (graphic == null) continue;
             graphic.clear();
@@ -539,13 +677,15 @@ class DockingManager {
             var slot = tab.activeSlot();
             if (slot == null) continue;
             var inNative = isTabInNativeFloat(tab);
-            active.set(slot.view, !inNative);
-            slot.view.setVisible(!inNative);
+            // A native float renders this view offscreen into its own HWND, so
+            // keep it visible; only skip the main-editor layout/reparent path.
+            active.set(slot.view, true);
+            slot.view.setVisible(true);
             if (inNative) continue;
             // A floating panel's native content must sit above the main dock
             // chrome (tab bars / backgrounds), otherwise overlapping docked
             // panels draw over it. Reparent only when the layer changes.
-            var host = hosts.get(slot.view);
+            var host = hostFor(slot.view);
             if (host != null) {
                 var layer = isTabFloating(tab) ? floatPanelLayer : panelLayer;
                 if (host.parent != layer) layer.addChild(host);
@@ -569,8 +709,8 @@ class DockingManager {
 
     function bringToFront(tab:TabNode):Void {
         var slot = tab.activeSlot();
-        if (slot == null) return;
-        var host = hosts.get(slot.view);
+        if (slot == null || isTabInNativeFloat(tab)) return;
+        var host = hostFor(slot.view);
         if (host == null) return;
         var layer = isTabFloating(tab) ? floatPanelLayer : panelLayer;
         layer.addChild(host);
@@ -593,6 +733,8 @@ class DockingManager {
     // Host objects are registered by EditorShell so the manager can raise a
     // focused/floating panel without reparenting it outside the panel layer.
     final hosts:Map<DockPanelView, h2d.Object> = [];
+    /** Hosts registered by panel id before the serializer creates the views. */
+    final hostById:Map<String, h2d.Object> = [];
     final floatBackgrounds:Map<Int, h2d.Graphics> = [];
     final nativeGeometrySent:Map<String, String> = [];
 
@@ -601,8 +743,14 @@ class DockingManager {
     }
 
     public function bindHostId(id:String, host:h2d.Object):Void {
+        hostById.set(id, host);
         var view = registry.peek(id);
         if (view != null) bindHost(view, host);
+    }
+
+    function hostFor(view:DockPanelView):Null<h2d.Object> {
+        var host = hosts.get(view);
+        return host != null ? host : hostById.get(view.panelId);
     }
 
     // ------------------------------------------------------------------
@@ -677,7 +825,10 @@ class DockingManager {
             var pruned = DockTree.prune(window.root);
             window.root = pruned == null ? new TabNode() : pruned;
             if (DockTree.collectSlots(window.root).length == 0) {
-                if (window.nativeKey != "") dockWindows.closeDockPanel(window.nativeKey);
+                if (window.nativeKey != "") {
+                    dockWindows.closeDockPanel(window.nativeKey);
+                    nativeGeometrySent.remove(window.nativeKey);
+                }
                 floating.remove(window);
             }
             return true;
@@ -739,11 +890,11 @@ class DockingManager {
     }
 
     // ------------------------------------------------------------------
-    // Native HWND float hosts (child processes + JSON RPC)
+    // In-process native HWND float hosts
     // ------------------------------------------------------------------
 
     public function update(dt:Float):Void {
-        dockWindows.update();
+        dockWindows.update(dt);
         for (message in dockWindows.takeMessages()) {
             handleDockMessage(message.key, message.text);
         }
@@ -770,11 +921,21 @@ class DockingManager {
                         Std.string(Reflect.field(data, "id")),
                         Reflect.field(data, "value"));
                 }
+            case "dock":
+                for (window in floating.copy()) {
+                    if (window.nativeKey == key) dockWindowIntoEditor(window);
+                }
+            case "remove":
+                for (window in floating.copy()) {
+                    if (window.nativeKey == key) closeFloat(window);
+                }
             case "shown":
                 log('native panel shown ' + Std.string(Reflect.field(data, "panelId")));
             case "closed":
+                // The user pressed the float's X (or the OS close button).
+                // Return the panel to its slot rather than deleting it.
                 for (window in floating.copy()) {
-                    if (window.nativeKey == key) closeFloat(window);
+                    if (window.nativeKey == key) dockWindowIntoEditor(window);
                 }
             case _:
         }
@@ -787,7 +948,9 @@ class DockingManager {
     }
 
     function nativeGeometry(window:FloatingDockWindow):{x:Float, y:Float, w:Float, h:Float} {
-        var origin = NativeWindow.screenOrigin(ctx.window);
+        // Docking rects are client-space, so place the HWND at the editor's
+        // client origin (not its frame origin, which is off by the title bar).
+        var origin = NativeWindow.clientOrigin(ctx.window);
         return {x: origin.x + window.x, y: origin.y + window.y,
             w: window.width, h: window.height};
     }

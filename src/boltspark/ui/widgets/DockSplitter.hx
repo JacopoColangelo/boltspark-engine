@@ -51,12 +51,12 @@ class DockSplitter extends h2d.Object {
     function beginDrag():Void {
         if (dragging) return;
         dragging = true;
-        lastPointer = vertical ? context.window.mouseX : context.window.mouseY;
+        lastPointer = vertical ? context.mouseX : context.mouseY;
         redraw(hit.width, hit.height);
         hit.startCapture(function(event) {
             switch (event.kind) {
                 case EMove:
-                    var pointer = vertical ? context.window.mouseX : context.window.mouseY;
+                    var pointer = vertical ? context.mouseX : context.mouseY;
                     var delta = pointer - lastPointer;
                     lastPointer = pointer;
                     if (delta != 0 && onDrag != null) onDrag(delta);

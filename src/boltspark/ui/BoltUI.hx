@@ -399,7 +399,7 @@ class BoltUI {
     public function update(dt:Float):Void {
         ctx.beginFrame();
         ctx.frame.register("editor-shell",
-            new LayoutRect(0, 0, ctx.width, ctx.height));
+            new LayoutRect(0, 0, ctx.windowWidth, ctx.windowHeight));
         shell.update(dt);
         shell.registerFrame(ctx.frame);
         var diagnostics = ctx.endFrame();

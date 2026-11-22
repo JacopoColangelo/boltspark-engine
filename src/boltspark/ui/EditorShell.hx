@@ -23,7 +23,7 @@ import boltspark.ui.dock.DockEnums.DockSide;
 import boltspark.ui.dock.PanelRegistry;
 import boltspark.ui.core.UiFrame;
 import boltspark.ui.windows.ApplicationWindowKind;
-import boltspark.ui.windows.ApplicationWindowManager;
+import boltspark.platform.FloatWindowManager;
 import boltspark.ui.widgets.BottomDockTab;
 import boltspark.ui.widgets.ConsolePanel;
 import boltspark.ui.widgets.ComponentInspectorSection;
@@ -181,7 +181,7 @@ class EditorShell {
     final dockLayout:DockLayout;
     final layoutStore:DockLayoutStore;
     final dockRegistry:PanelRegistry;
-    final dockWindowManager:ApplicationWindowManager;
+    final dockWindowManager:FloatWindowManager;
     public var dockManager(default, null):DockingManager;
     var hierarchyDockHost:h2d.Object;
     var inspectorDockHost:h2d.Object;
@@ -686,8 +686,8 @@ class EditorShell {
                 hierarchyAssetDragActive = active;
                 if (!active) clearHierarchyDropFeedback();
             }, function(payload) {
-                var parentId = hierarchyAssetParentAt(ctx.window.mouseX,
-                    ctx.window.mouseY);
+                var parentId = hierarchyAssetParentAt(ctx.mouseX,
+                    ctx.mouseY);
                 clearHierarchyDropFeedback();
                 if (onCreatePrimitiveInHierarchy != null) {
                     onCreatePrimitiveInHierarchy(payload.assetId, parentId);
@@ -1179,7 +1179,7 @@ class EditorShell {
         dockOverlayLayer.addChild(fovPopupRoot);
         dockOverlayLayer.addChild(palette);
         dockOverlayLayer.addChild(viewportDropHintSurface);
-        dockWindowManager = new ApplicationWindowManager();
+        dockWindowManager = new FloatWindowManager(ctx);
         dockManager = new DockingManager(ctx, input, dockRegistry, panelLayer,
             dockFloatPanelLayer, dockChromeLayer, dockFloatLayer, dockOverlayLayer,
             dockWindowManager);
@@ -1187,17 +1187,25 @@ class EditorShell {
         dockManager.onDockPanelEdit = applyNativePanelEdit;
         dockManager.onBottomTabChanged = setBottomTabFromDock;
         dockManager.onGeometryChanged = function() {
-            drawChrome(ctx.width, ctx.height, dockManager.geometry());
+            // Geometry can change synchronously from a float event (an asset
+            // drop rebuilds the Inspector). `ctx.width/height` are temporarily
+            // overridden to the float's client size in that call stack; using
+            // them here redraws only a 480x372 slice of the main chrome and
+            // leaves dark frames over the viewport.
+            drawChrome(ctx.windowWidth, ctx.windowHeight,
+                dockManager.geometry());
         };
         dockManager.onBeforeSave = syncLegacyDockSizes;
         dockManager.onLayoutSaved = saveLayout;
         dockManager.onLayoutReset = resetLegacyLayout;
         bottomTabs.visible = false;
-        dockManager.initialize(dockLayout);
+        // Bind hosts before initialize: a restored floating panel needs its
+        // real H2D view available when the native HWND is created.
         dockManager.bindHostId("boltspark.hierarchy", hierarchyDockHost);
         dockManager.bindHostId("boltspark.inspector", inspectorDockHost);
         dockManager.bindHostId("boltspark.console", console);
         dockManager.bindHostId("boltspark.assets", assetBrowser);
+        dockManager.initialize(dockLayout);
         activeBottomTab = dockManager.legacySizes().bottomTab;
         console.visible = activeBottomTab == 1;
         assetBrowser.visible = activeBottomTab == 0;
@@ -1249,15 +1257,15 @@ class EditorShell {
             switch (captured.kind) {
                 case EMove:
                     if (onViewportDrag != null) onViewportDrag(
-                        ctx.window.mouseX - viewportRect.x,
-                        ctx.window.mouseY - viewportRect.y);
+                        ctx.mouseX - viewportRect.x,
+                        ctx.mouseY - viewportRect.y);
                     captured.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
                     captured.propagate = false;
                     endGizmoCapture();
                     if (onViewportRelease != null) onViewportRelease(
-                        ctx.window.mouseX - viewportRect.x,
-                        ctx.window.mouseY - viewportRect.y);
+                        ctx.mouseX - viewportRect.x,
+                        ctx.mouseY - viewportRect.y);
                 case _:
                     captured.propagate = true;
             }
@@ -1283,14 +1291,14 @@ class EditorShell {
             switch (captured.kind) {
                 case EMove:
                     if (onViewportCameraMove != null) onViewportCameraMove(kind,
-                        ctx.window.mouseX - viewportRect.x,
-                        ctx.window.mouseY - viewportRect.y);
+                        ctx.mouseX - viewportRect.x,
+                        ctx.mouseY - viewportRect.y);
                     captured.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
                     captured.propagate = false;
                     endViewportCameraGesture(kind,
-                        ctx.window.mouseX - viewportRect.x,
-                        ctx.window.mouseY - viewportRect.y);
+                        ctx.mouseX - viewportRect.x,
+                        ctx.mouseY - viewportRect.y);
                 case _:
                     captured.propagate = true;
             }
@@ -1356,7 +1364,15 @@ class EditorShell {
         target.text = fitted;
     }
 
-    public inline function log(line:String):Void console.log(line);
+    public inline function log(line:String):Void {
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] log: ' + line);
+        }
+        console.log(line);
+        // Mirror into native floats so Help/console output appears immediately
+        // in an already-open Output Log HWND without waiting for a snapshot.
+        if (dockWindowManager != null) dockWindowManager.log(line);
+    }
 
     /**
      * Show the viewport drop hint near the cursor, clamped inside the viewport
@@ -1364,6 +1380,12 @@ class EditorShell {
      */
     public function showViewportDropHint(text:String, x:Float, y:Float,
             viewport:LayoutRect):Void {
+        // An empty label is the "no drag" signal. Leaving the surface visible
+        // with stale text clearance paints a dark rectangle in the viewport.
+        if (text == null || text == "") {
+            hideViewportDropHint();
+            return;
+        }
         if (viewportDropHint.text != text) {
             viewportDropHint.text = text;
             viewportDropHintWidth = Math.max(96,
@@ -1539,9 +1561,9 @@ class EditorShell {
     public function update(dt:Float):Void {
         if (dockManager != null) dockManager.update(dt);
         tooltip.update(dt);
-        if (ctx.width != lastWidth || ctx.height != lastHeight) resize();
+        if (ctx.windowWidth != lastWidth || ctx.windowHeight != lastHeight) resize();
         if (hierarchyAssetDragActive) {
-            updateHierarchyAssetDropFeedback(ctx.window.mouseX, ctx.window.mouseY);
+            updateHierarchyAssetDropFeedback(ctx.mouseX, ctx.mouseY);
         }
         if (perfVisible) {
             var report = perfStats.sample(dt);
@@ -1560,12 +1582,18 @@ class EditorShell {
                 cameraSpeedText.alpha = alpha;
             }
         }
-        if (inputStatus.visible) inputStatus.x = Math.max(0, ctx.width - inputStatus.textWidth - 10);
+        if (inputStatus.visible) inputStatus.x = Math.max(0, ctx.windowWidth - inputStatus.textWidth - 10);
     }
 
     public function resize():Void {
-        var width = ctx.width;
-        var height = ctx.height;
+        // Never use ctx.width/height here: float event dispatch temporarily
+        // overrides them for menu/tooltip clamping, and an inspector rebuild
+        // inside that dispatch calls resize() synchronously.
+        var width = ctx.windowWidth;
+        var height = ctx.windowHeight;
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] editor resize ${Std.int(width)}x${Std.int(height)}');
+        }
         lastWidth = width;
         lastHeight = height;
         editorBackgroundHit.width = Math.max(0, width);
@@ -1961,7 +1989,7 @@ class EditorShell {
                 }
             });
         }
-        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        menuDropdown.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     function rebuildFilteredHierarchy():Void {
@@ -2006,10 +2034,10 @@ class EditorShell {
                 row = new HierarchyRow(ctx, entry.id, entry.name, leftContentMask);
                 row.onHover = function(id, hovering) {
                     if (hovering) {
-                        tooltip.schedule(hierarchyObjectPath(id),
-                            ctx.window.mouseX, ctx.window.mouseY);
+                        UiTooltip.active(tooltip).schedule(hierarchyObjectPath(id),
+                            ctx.mouseX, ctx.mouseY);
                     } else {
-                        tooltip.cancel();
+                        UiTooltip.active(tooltip).cancel();
                     }
                 };
                 row.onSelect = selectHierarchyRow;
@@ -2126,6 +2154,12 @@ class EditorShell {
         selectionStatus.text = selectionStatusValue;
         inspectorScrollValue = 0;
         inspectorContentMask.scrollY = 0;
+        // A float checkbox toggles on EPush and synchronously rebuilds these
+        // sections. Native-float tabs are intentionally skipped by the main
+        // dock layout pass, so lay the new children out immediately using the
+        // mask's current (float) dimensions instead of rendering one or more
+        // frames at their default 0,0 positions.
+        layoutInspectorProperties();
         layoutHierarchyRows();
         resize();
     }
@@ -2266,7 +2300,7 @@ class EditorShell {
             });
         }
         closePaletteIfOpen();
-        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        menuDropdown.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     static inline function componentSectionKey(index:Int, typeId:String):String {
@@ -2274,7 +2308,7 @@ class EditorShell {
     }
 
     function selectHierarchyRow(id:Int, control:Bool, shift:Bool):Void {
-        tooltip.cancel();
+        UiTooltip.active(tooltip).cancel();
         var clickedIndex = -1;
         for (index in 0...hierarchyRows.length) {
             if (hierarchyRows[index].objectId == id) {
@@ -2694,7 +2728,7 @@ class EditorShell {
         closeFovPopup();
         menuDropdown.dropViewport = null;
         menuDropdown.onDropPrimitive = null;
-        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        menuDropdown.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     inline function hasObjectClipboard():Bool {
@@ -2783,7 +2817,7 @@ class EditorShell {
         closeFovPopup();
         menuDropdown.dropViewport = null;
         menuDropdown.onDropPrimitive = null;
-        menuDropdown.open(ctx.window.mouseX, ctx.window.mouseY, items);
+        menuDropdown.open(ctx.mouseX, ctx.mouseY, items);
     }
 
     function handleHierarchyBackgroundClick(event:hxd.Event):Void {
@@ -2810,7 +2844,7 @@ class EditorShell {
     }
 
     function closePaletteIfOpen():Void {
-        tooltip.cancel();
+        UiTooltip.active(tooltip).cancel();
         if (palette.visible) palette.close();
         snapBar.closePopup();
         menuDropdown.close();

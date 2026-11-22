@@ -67,8 +67,8 @@ class DockDragController {
     function onCaptured(event:hxd.Event):Void {
         switch (event.kind) {
             case EMove:
-                var x = ctx.window.mouseX;
-                var y = ctx.window.mouseY;
+                var x = ctx.mouseX;
+                var y = ctx.mouseY;
                 if (!active) {
                     var distance = Math.sqrt((x - startX) * (x - startX)
                         + (y - startY) * (y - startY));
@@ -79,8 +79,8 @@ class DockDragController {
                 event.propagate = false;
             case ERelease, EReleaseOutside:
                 var committable = active;
-                var x = ctx.window.mouseX;
-                var y = ctx.window.mouseY;
+                var x = ctx.mouseX;
+                var y = ctx.mouseY;
                 if (committable) {
                     updatePreview(x, y);
                     commit();

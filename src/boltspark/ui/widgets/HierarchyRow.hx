@@ -246,14 +246,14 @@ class HierarchyRow extends h2d.Object {
         if (!deferSingleSelection && onSelect != null) {
             onSelect(objectId, control, shift);
         }
-        dragStartX = ctx.window.mouseX;
-        dragStartY = ctx.window.mouseY;
+        dragStartX = ctx.mouseX;
+        dragStartY = ctx.mouseY;
         dragging = false;
         background.startCapture(function(captured) {
             switch (captured.kind) {
                 case EMove:
-                    var mouseX = ctx.window.mouseX;
-                    var mouseY = ctx.window.mouseY;
+                    var mouseX = ctx.mouseX;
+                    var mouseY = ctx.mouseY;
                     if (!dragging && Math.abs(mouseX - dragStartX)
                             + Math.abs(mouseY - dragStartY) > 5) {
                         dragging = true;
@@ -264,8 +264,8 @@ class HierarchyRow extends h2d.Object {
                     }
                     captured.propagate = false;
                 case ERelease, EReleaseOutside:
-                    var mouseX = ctx.window.mouseX;
-                    var mouseY = ctx.window.mouseY;
+                    var mouseX = ctx.mouseX;
+                    var mouseY = ctx.mouseY;
                     background.stopCapture();
                     if (dragging) {
                         if (onDragEnd != null) onDragEnd(objectId, mouseX, mouseY);
@@ -283,7 +283,7 @@ class HierarchyRow extends h2d.Object {
                 case EFocusLost:
                     background.stopCapture();
                     if (dragging && onDragEnd != null) {
-                        onDragEnd(objectId, ctx.window.mouseX, ctx.window.mouseY);
+                        onDragEnd(objectId, ctx.mouseX, ctx.mouseY);
                     }
                     dragging = false;
                     deferSingleSelection = false;

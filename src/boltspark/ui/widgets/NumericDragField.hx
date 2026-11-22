@@ -211,7 +211,7 @@ class NumericDragField extends h2d.Object {
         // faults in HL/C.
         scrubArmed = true;
         dragging = false;
-        scrubStartX = context.window.mouseX;
+        scrubStartX = context.mouseX;
         scrubStartValue = value;
         event.propagate = false;
     }
@@ -219,7 +219,7 @@ class NumericDragField extends h2d.Object {
     /** Take capture only after real horizontal movement passes the threshold. */
     function armScrubDrag(event:hxd.Event):Void {
         if (!scrubArmed) return;
-        var delta = context.window.mouseX - scrubStartX;
+        var delta = context.mouseX - scrubStartX;
         if (Math.abs(delta) < SCRUB_THRESHOLD) return;
         scrubArmed = false;
         dragging = true;
@@ -235,7 +235,7 @@ class NumericDragField extends h2d.Object {
     function handleScrubCapture(captured:hxd.Event):Void {
         switch (captured.kind) {
             case EMove:
-                var delta = context.window.mouseX - scrubStartX;
+                var delta = context.mouseX - scrubStartX;
                 if (!dragging && Math.abs(delta) >= SCRUB_THRESHOLD) {
                     dragging = true;
                     if (onEditBegin != null) onEditBegin();
@@ -299,6 +299,9 @@ class NumericDragField extends h2d.Object {
     /** Switch from finite screen coordinates to hldx raw mouse deltas. */
     function beginUnboundedScrub():Void {
         unboundedScrub = false;
+        // Raw-input mouse modes belong to the main editor window; using one
+        // while scrubbing in a float can freeze the shared input/GPU path.
+        if (context.floatMode) return;
         try {
             // AbsoluteUnbound keeps feeding virtual absolute EMove positions
             // into the existing h2d capture while hldx hides/clips the OS
@@ -322,8 +325,8 @@ class NumericDragField extends h2d.Object {
         // Preserve the virtual endpoint before Absolute mode stops consuming
         // raw deltas. The locked hldx path does not restore this position, so
         // park the visible cursor explicitly just like the transform gizmo.
-        var endX = context.window.mouseX;
-        var endY = context.window.mouseY;
+        var endX = context.mouseX;
+        var endY = context.mouseY;
         unboundedScrub = false;
         try {
             context.window.mouseMode = hxd.impl.MouseMode.Absolute;

@@ -6,6 +6,8 @@ param(
     [switch]$ComponentRemoval,
     [switch]$RotationHandoff,
     [switch]$WindowLifecycle,
+    [switch]$FloatingWindows,
+    [switch]$FloatAssetDrag,
     [switch]$SplitterCapture,
     [switch]$DpiProbe,
     [switch]$DeviceReset,
@@ -223,6 +225,14 @@ try {
     if ($WindowLifecycle) {
         & (Join-Path $repoRoot 'tests\native\Test-WindowLifecycle.ps1')
         Assert-LastExitCode 'Window/layout lifecycle test'
+    }
+    if ($FloatingWindows) {
+        & (Join-Path $repoRoot 'tests\native\Test-FloatingWindows.ps1')
+        Assert-LastExitCode 'Native floating-panel test'
+    }
+    if ($FloatAssetDrag) {
+        & (Join-Path $repoRoot 'tests\native\Test-FloatAssetDrag.ps1')
+        Assert-LastExitCode 'Cross-window asset drag test'
     }
     if ($SplitterCapture) {
         & (Join-Path $repoRoot 'tests\native\Test-SplitterCapture.ps1')

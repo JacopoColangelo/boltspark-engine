@@ -43,6 +43,7 @@ import boltspark.ui.AssetDropTarget;
 import boltspark.ui.BoltUI;
 import boltspark.ui.HierarchyEntry;
 import boltspark.ui.Theme;
+import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.windows.ApplicationWindowKind;
 import boltspark.ui.windows.ApplicationWindowManager;
 import boltspark.ui.windows.DockPanelWindowApp;
@@ -299,6 +300,9 @@ class Main extends hxd.App {
             if (object != null) editorSession.setObjectVisible(id, !object.visible);
         };
         boltUI.onSetObjectEnabled = function(id, value) {
+            if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+                Sys.println('[probe] inspector object enabled=${value}');
+            }
             editorSession.setObjectEnabled(id, value);
         };
         boltUI.onSelectSubtree = editorSession.selectSubtree;
@@ -442,6 +446,7 @@ class Main extends hxd.App {
         boltUI.update(dt);
         axisGizmo.update();
         updateViewportDropHover();
+        updateDragLabel();
         refreshCameraSpeedLabel();
         if (verboseLogging) {
             cameraTelemetryTimer += dt;
@@ -650,6 +655,9 @@ class Main extends hxd.App {
         if (applied.length == 0) {
             boltUI.log('inspector: could not assign ${propertyId} asset ${assetId}');
             return;
+        }
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] inspector asset changed ${propertyId}=${assetId}');
         }
         var target = editorSession.findObject(applied[0]);
         var name = target == null ? "object" : target.name;
@@ -2453,10 +2461,17 @@ class Main extends hxd.App {
     }
 
     /** Cursor in viewport-local coordinates, or null when outside the viewport. */
+    function currentDragPointer():{x:Float, y:Float} {
+        var p = boltspark.ui.UiContext.dragPointerOverride;
+        return p != null ? {x: p.x, y: p.y}
+            : {x: nativeWindow.mouseX, y: nativeWindow.mouseY};
+    }
+
     function viewportLocalMouse():Null<{ x:Float, y:Float }> {
         var rect = boltUI.getViewportRect();
-        var mouseX = nativeWindow.mouseX;
-        var mouseY = nativeWindow.mouseY;
+        var pointer = currentDragPointer();
+        var mouseX = pointer.x;
+        var mouseY = pointer.y;
         if (mouseX < rect.x || mouseX >= rect.x + rect.width
                 || mouseY < rect.y || mouseY >= rect.y + rect.height) return null;
         return { x: mouseX - rect.x, y: mouseY - rect.y };
@@ -2512,11 +2527,23 @@ class Main extends hxd.App {
             }
             viewportDropOutlineDrawn = pick.object != null && materialDrag;
         }
-        // Show only the dragged asset's name, exactly as the browser ghost did.
-        var payload = AssetDragSession.current();
-        boltUI.showViewportDropHint(payload == null ? "" : payload.label,
-            nativeWindow.mouseX + 14, nativeWindow.mouseY + 12,
-            boltUI.getViewportRect());
+        // The drag label is owned by updateDragLabel() so it follows the
+        // pointer anywhere in the editor, not just inside the viewport.
+    }
+
+    /**
+     * One consistent label follows the cursor for every drag, including drags
+     * started in a floating panel (whose own HWND occludes this overlay).
+     */
+    function updateDragLabel():Void {
+        var label = boltspark.ui.UiContext.dragLabel;
+        if (label == null) {
+            boltUI.hideViewportDropHint();
+            return;
+        }
+        var pointer = currentDragPointer();
+        boltUI.showViewportDropHint(label, pointer.x + 14, pointer.y + 12,
+            new LayoutRect(0, 0, nativeWindow.width, nativeWindow.height));
     }
 
     function clearViewportDropHover():Void {

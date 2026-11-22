@@ -132,14 +132,14 @@ class GameObjectPalette extends h2d.Object {
     function beginPrimitiveDrag(row:PaletteRow, event:hxd.Event):Void {
         if (event.button != 0) return;
         activeMeshId = row.meshId;
-        dragStartX = context.window.mouseX;
-        dragStartY = context.window.mouseY;
+        dragStartX = context.mouseX;
+        dragStartY = context.mouseY;
         dragPreview.visible = false;
         row.hit.startCapture(function(captured) {
             switch (captured.kind) {
                 case EMove:
-                    var mouseX = context.window.mouseX;
-                    var mouseY = context.window.mouseY;
+                    var mouseX = context.mouseX;
+                    var mouseY = context.mouseY;
                     if (!dragPreview.visible
                         && Math.abs(mouseX - dragStartX) + Math.abs(mouseY - dragStartY) > 5) {
                         dragPreview.visible = true;
@@ -156,8 +156,8 @@ class GameObjectPalette extends h2d.Object {
                     captured.propagate = false;
                 case ERelease, EReleaseOutside:
                     var wasDrag = dragPreview.visible;
-                    var mouseX = context.window.mouseX;
-                    var mouseY = context.window.mouseY;
+                    var mouseX = context.mouseX;
+                    var mouseY = context.mouseY;
                     row.hit.stopCapture();
                     if (wasDrag && viewport != null
                         && mouseX >= viewport.x && mouseX < viewport.x + viewport.width

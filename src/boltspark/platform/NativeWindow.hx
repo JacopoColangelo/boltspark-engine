@@ -55,6 +55,29 @@ class NativeWindow {
         #end
     }
 
+    #if hldx
+    @:hlNative("winfloat", "client_origin_x")
+    static function clientOriginXHandle(window:DxWindowHandle):Int return 0;
+
+    @:hlNative("winfloat", "client_origin_y")
+    static function clientOriginYHandle(window:DxWindowHandle):Int return 0;
+    #end
+
+    /**
+     * Screen-space origin of the window's *client area*. hldx's Window.x/y are
+     * the HWND rect origin, which sits above/left of the client area by the
+     * title bar and border. UI and drag coordinates are client-space, so this
+     * is the origin that must be used when translating between windows.
+     */
+    public static function clientOrigin(window:hxd.Window):{x:Float, y:Float} {
+        #if hldx
+        return {x: clientOriginXHandle(handle(window)),
+            y: clientOriginYHandle(handle(window))};
+        #else
+        return {x: 0, y: 0};
+        #end
+    }
+
     /** Per-monitor scale reported by the locked hldx Win32 window wrapper. */
     public static function displayScale(window:hxd.Window):Float {
         #if hldx

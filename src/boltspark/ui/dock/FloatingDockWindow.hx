@@ -1,5 +1,6 @@
 package boltspark.ui.dock;
 
+import boltspark.ui.dock.DockEnums.DockSide;
 import boltspark.ui.layout.LayoutRect;
 
 /**
@@ -19,6 +20,11 @@ class FloatingDockWindow {
     public var nativeKey:String = "";
     public var maximized:Bool = false;
     public var restoreRect:Null<LayoutRect> = null;
+    /** Where the panel lived before floating, so closing can restore it. */
+    public var originTab:Null<TabNode> = null;
+    public var originIndex:Int = -1;
+    public var originNeighbor:Null<TabNode> = null;
+    public var originSide:DockSide = DockSide.Center;
     public var native(get, never):Bool;
     inline function get_native():Bool return nativeKey != "";
 

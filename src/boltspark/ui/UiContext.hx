@@ -34,6 +34,49 @@ class UiContext {
 
     public var width(get, never):Int;
     public var height(get, never):Int;
+    /**
+     * Real main-window client size. Unlike `width`/`height`, these ignore
+     * `sizeOverride`: editor layout must never be rebuilt at a floating
+     * panel's size when a float event synchronously triggers resize().
+     */
+    public var windowWidth(get, never):Int;
+    public var windowHeight(get, never):Int;
+
+    /**
+     * Mouse coordinates in scene space. Float windows temporarily override
+     * these while dispatching their own events, so widgets that position drag
+     * ghosts / tooltips follow the pointer over the float instead of using the
+     * main window's stale cursor position.
+     */
+    public var mouseX(get, never):Int;
+    public var mouseY(get, never):Int;
+    public var pointerOverride:Null<{x:Float, y:Float}> = null;
+    /** Float size used while its input is dispatched so menus clamp inside it. */
+    public var sizeOverride:Null<{width:Int, height:Int}> = null;
+    /** True while a float HWND is dispatching input into one of our scenes. */
+    public var floatMode:Bool = false;
+    /**
+     * Pointer position in main-editor scene coordinates while a drag is in
+     * progress. Float drags set this because the main HWND's mouse position is
+     * stale when the pointer is captured by a floating panel.
+     */
+    public static var dragPointerOverride:Null<{x:Float, y:Float}> = null;
+    /**
+     * Label of the drag currently in progress (asset, folder or scene object).
+     * The main editor uses it to draw one consistent cursor label even when the
+     * drag was started in a floating panel.
+     */
+    public static var dragLabel:Null<String> = null;
+
+    inline function get_mouseX():Int {
+        return pointerOverride == null
+            ? window.mouseX : Std.int(pointerOverride.x);
+    }
+
+    inline function get_mouseY():Int {
+        return pointerOverride == null
+            ? window.mouseY : Std.int(pointerOverride.y);
+    }
 
     public function new(window:hxd.Window) {
         this.window = window;
@@ -93,6 +136,10 @@ class UiContext {
 
     /** Route mouse events to this window until the active drag finishes. */
     public function setMouseCapture(enabled:Bool):Void {
+        // A float has its own HWND and its own SceneEvents capture. Capturing
+        // the main editor window instead would steal pointer input and can
+        // deadlock the shared hldx mouse path.
+        if (floatMode) return;
         #if hldx
         // h2d capture only redirects events that reach Heaps. Win32 capture is
         // also required for a windowed drag to keep receiving pointer motion
@@ -109,9 +156,17 @@ class UiContext {
         hxd.System.setCursor(hxd.Cursor.TextInput);
     }
 
-    inline function get_width():Int return window.width;
+    inline function get_width():Int {
+        return sizeOverride == null ? window.width : sizeOverride.width;
+    }
 
-    inline function get_height():Int return window.height;
+    inline function get_height():Int {
+        return sizeOverride == null ? window.height : sizeOverride.height;
+    }
+
+    inline function get_windowWidth():Int return window.width;
+
+    inline function get_windowHeight():Int return window.height;
 
     /** Center a text widget horizontally inside [x, x + width]. */
     public function centerX(label:h2d.Text, x:Float, w:Float):Void {

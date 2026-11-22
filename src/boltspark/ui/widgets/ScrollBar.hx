@@ -71,7 +71,7 @@ class ScrollBar extends h2d.Object {
     function beginDrag():Void {
         if (thumbHeight >= trackHeight || trackHeight <= 0) return;
         dragging = true;
-        dragPointerY = context.window.mouseY;
+        dragPointerY = context.mouseY;
         dragScrollValue = scrollValue;
         refresh();
         thumb.startCapture(function(event) {
@@ -80,7 +80,7 @@ class ScrollBar extends h2d.Object {
                     var travel = trackHeight - thumbHeight;
                     if (travel > 0) {
                         scrollValue = clamp01(dragScrollValue
-                            + (context.window.mouseY - dragPointerY) / travel);
+                            + (context.mouseY - dragPointerY) / travel);
                         refresh();
                         if (onChange != null) onChange(scrollValue);
                     }

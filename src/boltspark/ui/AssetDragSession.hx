@@ -12,6 +12,12 @@ class AssetDragSession {
     static var targets:Array<AssetDropTarget> = [];
     /** All live slots that accept the current payload, highlighted while dragging. */
     static var highlighted:Array<AssetDropTarget> = [];
+    /**
+     * Added to coordinates supplied by `update`/`drop`. A floating panel
+     * reports client-local coordinates; drop targets live in the main editor
+     * scene, so the float host installs the screen-space translation here.
+     */
+    public static var coordinateOffset:{x:Float, y:Float} = {x: 0, y: 0};
 
     public static function current():Null<AssetDragPayload> return payload;
 
@@ -19,6 +25,10 @@ class AssetDragSession {
         clearHighlights();
         prune();
         payload = value;
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] asset drag begin session type=${value.assetType}'
+                + ' targets=${targets.length}');
+        }
         // Show the user where this asset can go as soon as the drag starts.
         for (target in targets) {
             if (!target.isAlive() || target.assetType != value.assetType) continue;
@@ -50,11 +60,13 @@ class AssetDragSession {
     public static function update(mouseX:Float, mouseY:Float):Null<AssetDropTarget> {
         if (payload == null) return null;
         prune();
+        var x = mouseX + coordinateOffset.x;
+        var y = mouseY + coordinateOffset.y;
         for (target in targets) {
             if (!target.isAlive() || target.assetType != payload.assetType) continue;
             var rect = target.rect();
-            if (mouseX >= rect.x && mouseX < rect.x + rect.width
-                    && mouseY >= rect.y && mouseY < rect.y + rect.height) {
+            if (x >= rect.x && x < rect.x + rect.width
+                    && y >= rect.y && y < rect.y + rect.height) {
                 return target;
             }
         }
@@ -64,6 +76,11 @@ class AssetDragSession {
     /** Resolve and feed the drop, then tear the session down. */
     public static function drop(mouseX:Float, mouseY:Float):Bool {
         var target = update(mouseX, mouseY);
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] asset drop at=${Std.int(mouseX + coordinateOffset.x)}'
+                + ',${Std.int(mouseY + coordinateOffset.y)}'
+                + ' target=${target != null}');
+        }
         if (target == null || payload == null) {
             cancel();
             return false;

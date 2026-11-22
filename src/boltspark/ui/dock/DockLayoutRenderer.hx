@@ -21,6 +21,8 @@ private class TabVisuals {
     public var closes:Array<h2d.Interactive> = [];
     /** Per-tab "..." drag grip, drawn inside the tab next to its close X. */
     public var grips:Array<h2d.Interactive> = [];
+    public var hoveredCloses:Array<Bool> = [];
+    public var hoveredGrips:Array<Bool> = [];
     /** One Graphics per tab: UiIcons.draw clears its target's children. */
     public var icons:Array<h2d.Graphics> = [];
     public function new() {}
@@ -192,7 +194,7 @@ class DockLayoutRenderer {
         hit.onPush = function(event) {
             if (event.button != 0) return;
             event.propagate = false;
-            if (onTabPush != null) onTabPush(tab, index, ctx.window.mouseX, ctx.window.mouseY);
+            if (onTabPush != null) onTabPush(tab, index, ctx.mouseX, ctx.mouseY);
         };
         hit.onOver = function(_) draw();
         hit.onOut = function(_) draw();
@@ -204,6 +206,8 @@ class DockLayoutRenderer {
         visuals.labels[index] = label;
         visuals.hits[index] = hit;
         visuals.icons[index] = new h2d.Graphics(hitRoot);
+        visuals.hoveredCloses[index] = false;
+        visuals.hoveredGrips[index] = false;
 
         if (registry.flag(slot.view.panelId, "dock", true)) {
             var grip = new h2d.Interactive(1, 1, hitRoot);
@@ -213,10 +217,18 @@ class DockLayoutRenderer {
                 if (event.button != 0) return;
                 event.propagate = false;
                 if (onTabPush != null) {
-                    onTabPush(tab, index, ctx.window.mouseX, ctx.window.mouseY);
+                    onTabPush(tab, index, ctx.mouseX, ctx.mouseY);
                 }
             };
             grip.name = "tab-grip:" + index;
+            grip.onOver = function(_) {
+                visuals.hoveredGrips[index] = true;
+                draw();
+            };
+            grip.onOut = function(_) {
+                visuals.hoveredGrips[index] = false;
+                draw();
+            };
             visuals.grips[index] = grip;
         }
 
@@ -230,6 +242,14 @@ class DockLayoutRenderer {
                 if (onTabClose != null) onTabClose(tab, index);
             };
             close.name = "tab-close:" + index;
+            close.onOver = function(_) {
+                visuals.hoveredCloses[index] = true;
+                draw();
+            };
+            close.onOut = function(_) {
+                visuals.hoveredCloses[index] = false;
+                draw();
+            };
             visuals.closes[index] = close;
         }
     }
@@ -266,7 +286,7 @@ class DockLayoutRenderer {
             switch (event.kind) {
                 case EMove:
                     var pointer = split.orientation == DockOrientation.Horizontal
-                        ? ctx.window.mouseX : ctx.window.mouseY;
+                        ? ctx.mouseX : ctx.mouseY;
                     if (onSplitDrag != null) onSplitDrag(split, pointer);
                     event.propagate = false;
                 case ERelease, EReleaseOutside, EFocusLost:
@@ -324,17 +344,17 @@ class DockLayoutRenderer {
             event.propagate = false;
             visual.grabbing = true;
             activeFloatHit = visual.titleHit;
-            visual.lastX = ctx.window.mouseX;
-            visual.lastY = ctx.window.mouseY;
+            visual.lastX = ctx.mouseX;
+            visual.lastY = ctx.mouseY;
             visual.titleHit.preventClick();
             setFocusedFloat(window.id);
             visual.titleHit.startCapture(function(captured) {
                 switch (captured.kind) {
                     case EMove:
-                        window.x += ctx.window.mouseX - visual.lastX;
-                        window.y += ctx.window.mouseY - visual.lastY;
-                        visual.lastX = ctx.window.mouseX;
-                        visual.lastY = ctx.window.mouseY;
+                        window.x += ctx.mouseX - visual.lastX;
+                        window.y += ctx.mouseY - visual.lastY;
+                        visual.lastX = ctx.mouseX;
+                        visual.lastY = ctx.mouseY;
                         clampFloat(window);
                         applyFloat(visual);
                         if (onFloatChanged != null) onFloatChanged();
@@ -422,18 +442,18 @@ class DockLayoutRenderer {
             event.propagate = false;
             visual.resizing = true;
             activeFloatHit = visual.resizeHit;
-            visual.lastX = ctx.window.mouseX;
-            visual.lastY = ctx.window.mouseY;
+            visual.lastX = ctx.mouseX;
+            visual.lastY = ctx.mouseY;
             visual.resizeHit.preventClick();
             visual.resizeHit.startCapture(function(captured) {
                 switch (captured.kind) {
                     case EMove:
                         window.width = Math.max(240, window.width
-                            + ctx.window.mouseX - visual.lastX);
+                            + ctx.mouseX - visual.lastX);
                         window.height = Math.max(160, window.height
-                            + ctx.window.mouseY - visual.lastY);
-                        visual.lastX = ctx.window.mouseX;
-                        visual.lastY = ctx.window.mouseY;
+                            + ctx.mouseY - visual.lastY);
+                        visual.lastX = ctx.mouseX;
+                        visual.lastY = ctx.mouseY;
                         clampFloat(window);
                         applyFloat(visual);
                         if (onFloatChanged != null) onFloatChanged();
@@ -605,7 +625,19 @@ class DockLayoutRenderer {
                     grip.y = cell.y + 3;
                     grip.width = 14;
                     grip.height = Math.max(6, cell.height - 6);
-                    var dotColor = active ? Theme.TEXT_SECONDARY : Theme.MUTED;
+                    var gripHover = visuals.hoveredGrips[index];
+                    if (gripHover) {
+                        graphics.beginFill(Theme.SURFACE_3, 1);
+                        graphics.drawRect(grip.x - 2, grip.y,
+                            grip.width + 4, grip.height);
+                        graphics.endFill();
+                        graphics.lineStyle(1, Theme.BORDER_STRONG, 1);
+                        graphics.drawRect(grip.x - 2.5, grip.y - 0.5,
+                            grip.width + 5, grip.height + 1);
+                        graphics.lineStyle();
+                    }
+                    var dotColor = gripHover ? Theme.TEXT
+                        : (active ? Theme.TEXT_SECONDARY : Theme.MUTED);
                     graphics.beginFill(dotColor, 1);
                     var dotY = grip.y + Math.round((grip.height - 2) * 0.5);
                     for (dot in 0...3) {
@@ -622,7 +654,19 @@ class DockLayoutRenderer {
                     close.height = closeRect.height;
                     var cx = closeRect.x + closeRect.width * 0.5;
                     var cy = closeRect.y + closeRect.height * 0.5;
-                    graphics.lineStyle(1, active ? Theme.TEXT_SECONDARY : Theme.MUTED, 1);
+                    var closeHover = visuals.hoveredCloses[index];
+                    if (closeHover) {
+                        graphics.beginFill(Theme.SURFACE_3, 1);
+                        graphics.drawRect(closeRect.x - 1, closeRect.y - 1,
+                            closeRect.width + 2, closeRect.height + 2);
+                        graphics.endFill();
+                        graphics.lineStyle(1, Theme.DANGER, 1);
+                        graphics.drawRect(closeRect.x - 1.5, closeRect.y - 1.5,
+                            closeRect.width + 3, closeRect.height + 3);
+                        graphics.lineStyle();
+                    }
+                    graphics.lineStyle(1, closeHover ? Theme.DANGER
+                        : (active ? Theme.TEXT_SECONDARY : Theme.MUTED), 1);
                     graphics.moveTo(cx - 3, cy - 3);
                     graphics.lineTo(cx + 3, cy + 3);
                     graphics.moveTo(cx + 3, cy - 3);

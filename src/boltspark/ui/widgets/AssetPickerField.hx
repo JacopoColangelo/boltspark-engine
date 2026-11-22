@@ -113,6 +113,9 @@ class AssetPickerField extends h2d.Object {
                     if (onAssetDrop != null) onAssetDrop(payload.assetId);
                 });
             AssetDragSession.add(dropTarget);
+            if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+                Sys.println('[probe] asset slot registered type=${typeValue}');
+            }
         }
         return value;
     }
@@ -128,6 +131,12 @@ class AssetPickerField extends h2d.Object {
 
     function setDropHighlight(active:Bool):Void {
         if (dropHighlighted == active) return;
+        if (active && Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            var rect = dropRect();
+            Sys.println('[probe] asset slot type=${typeValue}'
+                + ' rect=${Std.int(rect.x)},${Std.int(rect.y)}'
+                + ' ${Std.int(rect.width)}x${Std.int(rect.height)}');
+        }
         dropHighlighted = active;
         chevron.visible = !active;
         redrawDropFrame();
