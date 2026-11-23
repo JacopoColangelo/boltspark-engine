@@ -374,6 +374,11 @@ folder on every run.
   the import command. Multi-file placement and the Play-mode guard pass in
   `tests/native/Test-FloatExplorerDrop.ps1` (evidence under
   `bin/test-results/float-explorer-drop/`).
+- [x] OBJ/glTF/FBX mesh import: files are copied into the project, registered as
+  `type:"mesh"` assets, parsed into assignable engine meshes, and listed in the
+  Asset Browser. Imported meshes carry typed drag payloads for mesh slots and the
+  viewport. Evidence: `tests/native/Test-ImportMeshes.ps1`,
+  `tests/repro/MeshImportRepro.hx`, and `tests/repro/FbxImportRepro.hx`.
 - [x] Project material assets with an albedo texture reference, authored in a
   dockable Material Editor panel that can also float as a native HWND.
   Double-clicking a material opens (or focuses) the editor. Albedo maps bind to

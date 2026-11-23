@@ -36,6 +36,16 @@ class HeapsMeshFactory {
         }
     }
 
+    /** Drop cached geometry and factories for imported (mesh:) assets. */
+    public static function clearImported():Void {
+        for (id in factories.keys()) {
+            if (StringTools.startsWith(id, "mesh:")) factories.remove(id);
+        }
+        for (key in cache.keys()) {
+            if (StringTools.startsWith(key, "mesh:")) cache.remove(key);
+        }
+    }
+
     public static function resolve(mesh:Mesh,
             ?settings:PrimitiveSettings):h3d.prim.Primitive {
         ensureInitialized();
@@ -155,6 +165,33 @@ class HeapsMeshFactory {
         var primitive = new h3d.prim.Polygon(points, indices);
         primitive.normals = normals;
         primitive.addUVs();
+        return primitive;
+    }
+
+    /** Build a Heaps primitive from a parsed, renderer-independent mesh file. */
+    public static function fromGeometry(
+            geometry:boltspark.assets.MeshGeometry):h3d.prim.Polygon {
+        var points:Array<h3d.col.Point> = [];
+        var normals:Array<h3d.col.Point> = [];
+        var uvs:Array<h3d.prim.UV> = [];
+        var vertexCount = Std.int(geometry.positions.length / 3);
+        for (index in 0...vertexCount) {
+            points.push(new h3d.col.Point(
+                geometry.positions[index * 3],
+                geometry.positions[index * 3 + 1],
+                geometry.positions[index * 3 + 2]));
+            normals.push(new h3d.col.Point(
+                geometry.normals[index * 3],
+                geometry.normals[index * 3 + 1],
+                geometry.normals[index * 3 + 2]));
+            uvs.push(new h3d.prim.UV(
+                geometry.uvs[index * 2], geometry.uvs[index * 2 + 1]));
+        }
+        var indices = new hxd.IndexBuffer();
+        for (index in geometry.indices) indices.push(index);
+        var primitive = new h3d.prim.Polygon(points, indices);
+        primitive.normals = normals;
+        primitive.uvs = uvs;
         return primitive;
     }
 

@@ -53,8 +53,8 @@ class AssetBrowserRepro {
         var material = AssetTypeRegistry.infoFor("Brick.boltmaterial");
         assertTrue(material.kind == AssetTypeRegistry.KIND_MATERIAL && material.loadable,
             "material documents are recognized and loadable");
-        assertTrue(AssetTypeRegistry.filterKinds().length == 5,
-            "type filter offers scene, texture, material, engine and file kinds");
+        assertTrue(AssetTypeRegistry.filterKinds().length == 6,
+            "type filter offers scene, texture, material, mesh, engine and file kinds");
         assertTrue(!AssetTypeRegistry.isInternal("Scenes"), "folders are not internal");
         assertTrue(AssetTypeRegistry.isInternal("Demo.boltproject"),
             "project manifest is internal");

@@ -112,6 +112,8 @@ class BoltUI {
     public var onCopyAssetPath:Null<String->Void>;
     /** External texture import request, with the browser's target folder. */
     public var onImportAssets:Null<String->Void>;
+    /** Native mesh import request, with the browser's target folder. */
+    public var onImportMeshes:Null<String->Void>;
     /** Explorer drop on a floating browser: paths and the resolved folder. */
     public var onFloatFilesDropped:Null<Array<String>->String->Void>;
     /** Decoded thumbnail tile for a texture asset. */
@@ -299,6 +301,9 @@ class BoltUI {
         };
         shell.onNewMaterial = function() {
             if (onNewMaterial != null) onNewMaterial();
+        };
+        shell.onImportMeshes = function(folder) {
+            if (onImportMeshes != null) onImportMeshes(folder);
         };
         shell.onDeleteMaterial = function(source) {
             if (onDeleteMaterial != null) onDeleteMaterial(source);

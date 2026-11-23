@@ -268,6 +268,18 @@ project because they need a real filesystem root to expose. Scratch content is
 not migrated when a project is later created — it is a testing sandbox, not a
 project stub.
 
+## Mesh import
+
+OBJ, glTF/GLB, and FBX files are imported through **Add → Import Mesh…** or
+Explorer drops. `ProjectSession.importMeshAssets()` copies them into the project
+and registers `type:"mesh"` asset records. `ImportedMeshLibrary` parses each file
+into renderer-independent geometry; `ImportedMeshBinding` registers the result
+with `PrimitiveMeshes` and `HeapsMeshFactory`, so imported meshes appear in the
+mesh picker and can be dragged onto mesh slots or the viewport like built-ins.
+Mesh ids are deterministic hashes of the project-relative source, so scene
+references survive save/load. Rename/move/copy/delete keep the manifest record
+in sync with the file.
+
 ## External-change watcher
 
 `AssetWatcher` re-snapshots the asset root from `Main.update()` and refreshes
@@ -298,11 +310,12 @@ native latch via numbered instruction files because a cross-process synthetic
   by filesystem assets is still browser-local; only engine assets (primitives
   and materials) carry a typed drag payload that the MeshRenderer Inspector
   slots consume.
-- **Only textures have a real importer.** Meshes (OBJ/glTF), audio, and other
-  binary files are still generic files. Project material assets can be created
-  and edited, and their albedo texture is bound to the viewport renderer, but
-  `MeshRenderer` still stores only a material reference — it has no per-slot
-  texture data.
+- **Textures, materials, and meshes have real importers.** OBJ/glTF/FBX meshes
+  are copied into the project, parsed into assignable engine meshes, and can be
+  dragged onto mesh slots or the viewport. Audio and other binary files remain
+  generic files. Project material assets can be created and edited, and their
+  albedo texture is bound to the viewport renderer; `MeshRenderer` still stores
+  only a material reference — it has no per-slot texture data.
 - **Explorer integration is Windows-shell based.** Reveal launches
   `explorer.exe /select,<native path>`; project paths use forward slashes
   internally, so the handler converts them to Windows separators before the

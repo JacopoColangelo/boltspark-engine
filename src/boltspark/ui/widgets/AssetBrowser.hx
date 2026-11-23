@@ -1,5 +1,6 @@
 package boltspark.ui.widgets;
 
+import boltspark.assets.ImportedMeshLibrary;
 import boltspark.engine.inspector.AssetType;
 import boltspark.project.AssetTypeRegistry;
 import boltspark.project.EngineAssetCatalog;
@@ -81,6 +82,8 @@ class AssetBrowser extends h2d.Object {
     public var onImportAssets:Null<String->Void>;
     /** Create a new project material asset. */
     public var onNewMaterial:Null<Void->Void>;
+    /** Native mesh import request, with the browser's target folder. */
+    public var onImportMeshes:Null<String->Void>;
     /** Decoded thumbnail tile for a texture asset, or null when unavailable. */
     public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
 
@@ -439,6 +442,12 @@ class AssetBrowser extends h2d.Object {
                 label: "Material",
                 onClick: function() {
                     if (onNewMaterial != null) onNewMaterial();
+                }
+            }, {
+                label: "Import Mesh...",
+                onClick: function() {
+                    var folder = selectedFolder == "" ? "" : selectedFolder;
+                    if (onImportMeshes != null) onImportMeshes(folder);
                 }
             }]);
         };
@@ -1045,6 +1054,8 @@ class AssetBrowser extends h2d.Object {
             {key: "all", label: "All assets"},
             {key: AssetTypeRegistry.KIND_SCENE, label: AssetTypeRegistry.SCENE_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_TEXTURE, label: AssetTypeRegistry.TEXTURE_INFO_LABEL},
+            {key: AssetTypeRegistry.KIND_MATERIAL, label: AssetTypeRegistry.MATERIAL_INFO_LABEL},
+            {key: AssetTypeRegistry.KIND_MESH, label: AssetTypeRegistry.MESH_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_ENGINE, label: AssetTypeRegistry.ENGINE_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_FILE, label: AssetTypeRegistry.FILE_INFO_LABEL},
             {key: "favorites", label: "Favorites"},
@@ -2070,6 +2081,10 @@ class AssetBrowser extends h2d.Object {
         } else if (entry.kind == AssetTypeRegistry.KIND_TEXTURE
                 && drawTextureThumb(g, entry.source, cardX, cardY, cardSize)) {
             // Real decoded image, capped to a small GPU tile by TextureCache.
+        } else if (entry.kind == AssetTypeRegistry.KIND_MESH) {
+            var iconSize = cardSize * 0.62;
+            UiIcons.draw(g, Cube, cx - iconSize * 0.5, cy - iconSize * 0.5,
+                iconSize, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
         } else if (entry.loadable && entry.kind == AssetTypeRegistry.KIND_SCENE) {
             var iconSize = cardSize * 0.86;
             UiIcons.drawSceneThumb(g, cx - iconSize * 0.5, cy - iconSize * 0.5,
@@ -2237,6 +2252,7 @@ class AssetBrowser extends h2d.Object {
 
     function iconFor(entry:AssetFileInfo):UiIconKind {
         if (entry.kind == AssetTypeRegistry.KIND_SCENE) return Scene;
+        if (entry.kind == AssetTypeRegistry.KIND_MESH) return Cube;
         return Document;
     }
 
@@ -2552,6 +2568,17 @@ class AssetBrowser extends h2d.Object {
         var enginePayload = EngineAssetCatalog.dragPayload(draggedEntry);
         if (enginePayload != null) {
             beginEngineAssetDrag(enginePayload, source, hit, event);
+            return;
+        }
+        // Imported meshes are project files, but they still carry a typed mesh
+        // payload so Inspector slots and the viewport accept them like built-ins.
+        if (draggedEntry != null && draggedEntry.kind == AssetTypeRegistry.KIND_MESH) {
+            beginEngineAssetDrag({
+                assetId: ImportedMeshLibrary.idFor(draggedEntry.source),
+                label: draggedEntry.name,
+                assetType: AssetType.MeshAsset,
+                source: draggedEntry.source
+            }, source, hit, event);
             return;
         }
         dragSources = selectedSources.length > 1 ? selectedSources.copy() : [source];

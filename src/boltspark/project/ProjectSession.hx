@@ -1,6 +1,8 @@
 package boltspark.project;
 
+import boltspark.assets.ImportedMeshLibrary;
 import boltspark.editor.EditorSession;
+import boltspark.engine.Component;
 import boltspark.engine.Material;
 import boltspark.engine.MaterialCulling;
 import boltspark.engine.MaterialTexture;
@@ -452,6 +454,21 @@ class ProjectSession {
         }
         MaterialTextureLibrary.setTextures(textures);
         MaterialTextureLibrary.resolvePath = function(path) return absoluteAssetPath(path);
+        refreshMeshAssets();
+    }
+
+    /** Parse registered mesh documents into assignable engine meshes. */
+    public function refreshMeshAssets():Int {
+        var entries:Array<{ id:String, source:String }> = [];
+        for (asset in project.assets) {
+            if (asset.type != "mesh") continue;
+            entries.push({
+                id: asset.id,
+                source: ProjectPath.normalizeRelative(asset.source)
+            });
+        }
+        return ImportedMeshLibrary.refresh(entries,
+            function(source) return absoluteAssetPath(source));
     }
 
     /** Create a material document under Materials/ and register its asset record. */
@@ -605,6 +622,8 @@ class ProjectSession {
             throw 'A file already exists at ${target}';
         }
         sys.FileSystem.rename(from, to);
+        repointAssetRecord(normalized, target);
+        refreshMaterialAssets();
         return target;
     }
 
@@ -618,6 +637,8 @@ class ProjectSession {
         requireExists(path);
         sys.FileSystem.deleteFile(path);
         removeBackup(path);
+        removeAssetRecord(normalized);
+        refreshMaterialAssets();
     }
 
     public function moveAnyAsset(source:String, targetFolder:String):String {
@@ -637,6 +658,8 @@ class ProjectSession {
         requireExists(from);
         sys.FileSystem.createDirectory(new Path(to).dir);
         sys.FileSystem.rename(from, to);
+        repointAssetRecord(normalized, destination);
+        refreshMaterialAssets();
         return destination;
     }
 
@@ -654,7 +677,55 @@ class ProjectSession {
         requireExists(from);
         sys.FileSystem.createDirectory(new Path(to).dir);
         sys.io.File.copy(from, to);
+        registerCopiedAsset(normalized, destination);
+        refreshMaterialAssets();
         return destination;
+    }
+
+    /** Keep a manifest record pointing at a file after a rename or move. */
+    function repointAssetRecord(source:String, destination:String):Void {
+        var normalized = ProjectPath.normalizeRelative(source);
+        var target = ProjectPath.normalizeRelative(destination);
+        var changed = false;
+        for (asset in project.assets) {
+            if (ProjectPath.normalizeRelative(asset.source) != normalized) continue;
+            asset.source = target;
+            changed = true;
+        }
+        if (!changed) return;
+        saveManifestIfOpen();
+        dirty = true;
+        stateChanged();
+    }
+
+    function removeAssetRecord(source:String):Void {
+        var normalized = ProjectPath.normalizeRelative(source);
+        var removed = false;
+        for (asset in project.assets) {
+            if (ProjectPath.normalizeRelative(asset.source) != normalized) continue;
+            project.assets.remove(asset);
+            removed = true;
+            break;
+        }
+        if (!removed) return;
+        saveManifestIfOpen();
+        dirty = true;
+        stateChanged();
+    }
+
+    /** A copied file gets its own durable asset id, never the source's id. */
+    function registerCopiedAsset(source:String, destination:String):Void {
+        var normalized = ProjectPath.normalizeRelative(source);
+        var target = ProjectPath.normalizeRelative(destination);
+        for (asset in project.assets) {
+            if (ProjectPath.normalizeRelative(asset.source) != normalized) continue;
+            project.assets.push(new AssetRecord(StableId.create("asset"), asset.type,
+                target, Component.copyData(asset.importSettings)));
+            saveManifestIfOpen();
+            dirty = true;
+            stateChanged();
+            return;
+        }
     }
 
     /** Copy an asset beside itself with a unique name. */
@@ -677,6 +748,16 @@ class ProjectSession {
      *         input order.
      */
     public function importAssets(paths:Array<String>, targetFolder:String):Array<String> {
+        return importFiles(paths, targetFolder, "texture", AssetTypeRegistry.isTextureExtension);
+    }
+
+    /** Copy OBJ/glTF/FBX sources into the project and register mesh assets. */
+    public function importMeshAssets(paths:Array<String>, targetFolder:String):Array<String> {
+        return importFiles(paths, targetFolder, "mesh", AssetTypeRegistry.isMeshExtension);
+    }
+
+    function importFiles(paths:Array<String>, targetFolder:String, assetType:String,
+            accepts:String->Bool):Array<String> {
         if (paths == null || paths.length == 0) return [];
         var requested = targetFolder == null ? "" : StringTools.trim(targetFolder);
         var folder = requested.length == 0 ? TEXTURE_FOLDER : normalizeFolder(requested);
@@ -691,7 +772,7 @@ class ProjectSession {
                 throw 'Import file not found: ${absolute}';
             }
             var extension = AssetTypeRegistry.extensionOf(absolute);
-            if (!AssetTypeRegistry.isTextureExtension(extension)) {
+            if (!accepts(extension)) {
                 throw 'Unsupported import format: ${extension == "" ? "(none)" : extension}';
             }
             var leaf = safeFileName(new Path(absolute).file + "." + extension);
@@ -707,11 +788,12 @@ class ProjectSession {
             var to = resolveAgainst(projectRootDir(), item.destination);
             ensureDirectory(new Path(to).dir);
             sys.io.File.copy(item.from, to);
-            project.assets.push(new AssetRecord(StableId.create("asset"), "texture",
+            project.assets.push(new AssetRecord(StableId.create("asset"), assetType,
                 item.destination, { format: item.extension }));
             imported.push(item.destination);
         }
         saveManifestIfOpen();
+        refreshMaterialAssets();
         dirty = true;
         stateChanged();
         return imported;

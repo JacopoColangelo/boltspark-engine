@@ -31,11 +31,13 @@ class AssetTypeRegistry {
     public static inline var KIND_SCENE:String = "scene";
     public static inline var KIND_TEXTURE:String = "texture";
     public static inline var KIND_MATERIAL:String = "material";
+    public static inline var KIND_MESH:String = "mesh";
     public static inline var KIND_ENGINE:String = "engine";
     public static inline var KIND_FILE:String = "file";
     public static inline var SCENE_INFO_LABEL:String = "Scene";
     public static inline var TEXTURE_INFO_LABEL:String = "Texture";
     public static inline var MATERIAL_INFO_LABEL:String = "Material";
+    public static inline var MESH_INFO_LABEL:String = "Mesh";
     public static inline var ENGINE_INFO_LABEL:String = "Engine Asset";
     public static inline var FILE_INFO_LABEL:String = "File";
     /** Canonical filter extension; the other accepted texture formats are in TEXTURE_EXTENSIONS. */
@@ -46,6 +48,9 @@ class AssetTypeRegistry {
     public static inline var TEXTURE_FILTER_LABEL:String = "Image files (PNG/JPG/TGA)";
     /** Project-authored material documents. */
     public static inline var MATERIAL_EXT:String = "boltmaterial";
+    /** Mesh formats accepted by the importer. */
+    public static final MESH_EXTENSIONS:Array<String> = ["obj", "gltf", "glb", "fbx"];
+    public static inline var MESH_FILTER_LABEL:String = "Mesh files (OBJ/glTF/FBX)";
 
     static final SCENE_INFO:AssetTypeInfo = {
         kind: KIND_SCENE,
@@ -63,6 +68,12 @@ class AssetTypeRegistry {
         kind: KIND_MATERIAL,
         label: MATERIAL_INFO_LABEL,
         extension: MATERIAL_EXT,
+        loadable: true
+    };
+    static final MESH_INFO:AssetTypeInfo = {
+        kind: KIND_MESH,
+        label: MESH_INFO_LABEL,
+        extension: "obj",
         loadable: true
     };
     static final ENGINE_INFO:AssetTypeInfo = {
@@ -84,6 +95,7 @@ class AssetTypeRegistry {
         if (extension == SCENE_EXT) return SCENE_INFO;
         if (isTextureExtension(extension)) return TEXTURE_INFO;
         if (extension == MATERIAL_EXT) return MATERIAL_INFO;
+        if (isMeshExtension(extension)) return MESH_INFO;
         return FILE_INFO;
     }
 
@@ -100,6 +112,19 @@ class AssetTypeRegistry {
         return fileName != null && isTextureExtension(extensionOf(fileName));
     }
 
+    /** True for any extension accepted by the mesh importer. */
+    public static function isMeshExtension(extension:String):Bool {
+        if (extension == null) return false;
+        var lower = extension.toLowerCase();
+        if (StringTools.startsWith(lower, ".")) lower = lower.substr(1);
+        return MESH_EXTENSIONS.indexOf(lower) >= 0;
+    }
+
+    /** Classify a full path or bare file name as an importable mesh. */
+    public static function isMeshFile(fileName:String):Bool {
+        return fileName != null && isMeshExtension(extensionOf(fileName));
+    }
+
     /** Kind string for an asset scan record. */
     public static function kindFor(fileName:String):String {
         return infoFor(fileName).kind;
@@ -113,7 +138,7 @@ class AssetTypeRegistry {
 
     /** Kinds offered by the browser's type filter. Generic files are last. */
     public static function filterKinds():Array<AssetTypeInfo> {
-        return [SCENE_INFO, TEXTURE_INFO, MATERIAL_INFO, ENGINE_INFO, FILE_INFO];
+        return [SCENE_INFO, TEXTURE_INFO, MATERIAL_INFO, MESH_INFO, ENGINE_INFO, FILE_INFO];
     }
 
     /**

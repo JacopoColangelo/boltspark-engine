@@ -30,6 +30,7 @@ import boltspark.engine.inspector.ComponentPropertyData;
 import boltspark.engine.PrimitiveGameObjects;
 import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.PrimitiveSettings;
+import boltspark.assets.ImportedMeshBinding;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
 import boltspark.platform.NativeMultiFilePicker;
@@ -206,6 +207,7 @@ class Main extends hxd.App {
         || Sys.getEnv("BOLTSPARK_VERBOSE_LOGS") != null;
 
     override function init():Void {
+        ImportedMeshBinding.install();
         InteractiveResize.install();
         // Fonts, icons, and vector UI surfaces are compiled into both the HL
         // bytecode and native release executable; no runtime asset folder is
@@ -430,6 +432,7 @@ class Main extends hxd.App {
         boltUI.onRevealAsset = revealAsset;
         boltUI.onCopyAssetPath = copyAssetPath;
         boltUI.onImportAssets = importAssets;
+        boltUI.onImportMeshes = importMeshFiles;
         boltUI.onFloatFilesDropped = handleFloatDroppedPaths;
         boltUI.onQueryTextureTile = function(source) {
             return TextureCache.get(projectSession.absoluteAssetPath(source));
@@ -3215,6 +3218,48 @@ class Main extends hxd.App {
         });
     }
 
+    function pickOpenMeshFiles():Null<Array<String>> {
+        var exts = AssetTypeRegistry.MESH_EXTENSIONS;
+        var spec = [for (ext in exts) "*." + ext].join(";");
+        printActivity('[probe] import picker exts=${exts.join(",")}'
+            + ' name="${AssetTypeRegistry.MESH_FILTER_LABEL}" spec=${spec}');
+        if (inputProbeMode) {
+            if (pickerProbeDir != "") {
+                var instruction = pickerProbeDir + "/pick-" + pickerProbeNext + ".txt";
+                if (sys.FileSystem.exists(instruction)) {
+                    var answer = StringTools.trim(sys.io.File.getContent(instruction));
+                    sys.FileSystem.deleteFile(instruction);
+                    pickerProbeNext++;
+                    var files:Array<String> = [];
+                    for (entry in answer.split("|")) {
+                        var trimmed = StringTools.trim(entry);
+                        if (trimmed.length > 0) files.push(trimmed);
+                    }
+                    printActivity('[probe] file dialog open title="Import Mesh"'
+                        + ' choice=${files.join("|")}');
+                    return files.length == 0 ? null : files;
+                }
+            }
+            var many = Sys.getEnv("BOLTSPARK_PROBE_OPEN_FILES");
+            if (many != null && StringTools.trim(many).length > 0) {
+                var paths:Array<String> = [];
+                for (entry in many.split(";")) {
+                    var trimmed = StringTools.trim(entry);
+                    if (trimmed.length > 0) paths.push(trimmed);
+                }
+                printActivity('[probe] file dialog open title="Import Mesh"'
+                    + ' choice=${paths.join("|")}');
+                return paths.length == 0 ? null : paths;
+            }
+            var single = probeFileChoice("open", "Import Mesh");
+            return single == null ? null : [single];
+        }
+        return withNativeDialogTimeout(function() {
+            return NativeMultiFilePicker.pickImages("Import Mesh",
+                AssetTypeRegistry.MESH_FILTER_LABEL, spec);
+        });
+    }
+
     function pickSaveFile(title:String, defaultName:String, extension:String,
             label:String):Null<String> {
         if (inputProbeMode) return probeFileChoice("save", title);
@@ -3364,6 +3409,29 @@ class Main extends hxd.App {
         } catch (e:Dynamic) reportProjectError('import asset', e);
     }
 
+    /** Shared write path for mesh imports and Explorer drops. */
+    function importMeshPaths(paths:Array<String>, folder:String):Void {
+        if (!canEdit() || paths == null || paths.length == 0) return;
+        try {
+            var imported = projectSession.importMeshAssets(paths, folder);
+            boltUI.refreshAssetBrowser();
+            printActivity('[probe] mesh import completed count=${imported.length} folder=${folder}');
+        } catch (e:Dynamic) reportProjectError('import mesh', e);
+    }
+
+    /** Native mesh import command. */
+    function importMeshFiles(folder:String):Void {
+        if (!canEdit()) return;
+        var picked = pickOpenMeshFiles();
+        if (picked == null || picked.length == 0) return;
+        var meshes = picked.filter(AssetTypeRegistry.isMeshFile);
+        if (meshes.length == 0) return;
+        var pickedMeshes = meshes;
+        var pickedFolder = folder;
+        importMeshPaths(pickedMeshes, pickedFolder);
+        boltUI.log('asset: imported ${pickedMeshes.length} mesh(es) to ${pickedFolder}');
+    }
+
     /**
      * Probe-only delivery for Explorer drops. `BOLTSPARK_PROBE_DROP_DIR` points
      * at a directory where a probe writes `drop-N.txt` containing
@@ -3397,7 +3465,7 @@ class Main extends hxd.App {
      * Windows Explorer drop handler. `dropX/dropY` are window-client
      * coordinates from hldx; the browser maps them to a folder so a drop lands
      * where the user aimed it. Generic files are ignored for now (only the
-     * registered texture formats are real imports).
+     * registered texture and mesh formats are real imports).
      */
     function onFilesDroppedFromShell(event:hxd.DropFileEvent):Void {
         var paths:Array<String> = [];
@@ -3413,17 +3481,19 @@ class Main extends hxd.App {
             return;
         }
         var images = paths.filter(AssetTypeRegistry.isTextureFile);
-        if (images.length != paths.length) {
-            printActivity('[probe] os file drop skipped=${paths.length - images.length}');
+        var meshes = paths.filter(AssetTypeRegistry.isMeshFile);
+        if (images.length + meshes.length != paths.length) {
+            printActivity('[probe] os file drop skipped=${paths.length - images.length - meshes.length}');
         }
-        if (images.length == 0) return;
+        if (images.length == 0 && meshes.length == 0) return;
         var folder = boltUI.folderAtWindowPoint(x, y);
         if (folder != null && StringTools.startsWith(folder, EngineAssetCatalog.FOLDER)) {
             folder = null;
         }
         var target = folder == null ? "" : folder;
         printActivity('[probe] os file drop folder=${target}');
-        importExternalFiles(images, target);
+        if (images.length > 0) importExternalFiles(images, target);
+        if (meshes.length > 0) importMeshPaths(meshes, target);
     }
 
     /**
@@ -3438,11 +3508,12 @@ class Main extends hxd.App {
             return;
         }
         var images = paths.filter(AssetTypeRegistry.isTextureFile);
-        if (images.length != paths.length) {
-            printActivity('[probe] float file drop skipped=${paths.length - images.length}');
+        var meshes = paths.filter(AssetTypeRegistry.isMeshFile);
+        if (images.length + meshes.length != paths.length) {
+            printActivity('[probe] float file drop skipped=${paths.length - images.length - meshes.length}');
         }
-        if (images.length == 0) return;
-        importExternalFiles(images, folder);
+        if (images.length > 0) importExternalFiles(images, folder);
+        if (meshes.length > 0) importMeshPaths(meshes, folder);
     }
 
     function createAssetFolder(parent:String):String {

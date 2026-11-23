@@ -22,7 +22,8 @@ param(
     [switch]$UntitledSession,
     [switch]$AssetWatcher,
     [switch]$FloatExplorerDrop,
-    [switch]$MaterialEditor
+    [switch]$MaterialEditor,
+    [switch]$ImportMeshes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -142,7 +143,8 @@ try {
             'ProjectSerializationRepro',
             'ProjectSessionRepro',
             'AssetBrowserRepro',
-            'MaterialEditorRepro'
+            'MaterialEditorRepro',
+            'MeshImportRepro'
         )) {
             Invoke-Haxe ($directClassPaths + @('--interp', '-main', $test)) `
                 "Portable $test"
@@ -189,6 +191,8 @@ try {
         @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'AssetBrowserRepro'; Output = 'asset-browser-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'format') },
         @{ Name = 'MaterialEditorRepro'; Output = 'material-editor-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
+        @{ Name = 'MeshImportRepro'; Output = 'mesh-import-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') },
+        @{ Name = 'FbxImportRepro'; Output = 'fbx-import-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') },
         @{ Name = 'ThumbnailPipelineRepro'; Output = 'thumbnail-pipeline-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') },
         @{ Name = 'TextureCacheRepro'; Output = 'texture-cache-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') }
     )
@@ -307,6 +311,10 @@ try {
     if ($MaterialEditor) {
         & (Join-Path $repoRoot 'tests\native\Test-MaterialEditor.ps1')
         Assert-LastExitCode 'Material editor probe'
+    }
+    if ($ImportMeshes) {
+        & (Join-Path $repoRoot 'tests\native\Test-ImportMeshes.ps1')
+        Assert-LastExitCode 'Mesh import probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

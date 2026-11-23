@@ -122,6 +122,13 @@ copies external PNG/JPG/JPEG/TGA files into the project before registering
 them; external absolute paths are never stored in the manifest. Folder renames
 and moves repoint texture sources exactly as they repoint scene sources.
 
+Imported meshes use the same pattern with `type: "mesh"` and
+`importSettings: { "format": "obj" | "gltf" | "glb" | "fbx" }`. Their engine mesh
+id is a deterministic hash of the project-relative source (`mesh:<hash>`), so
+scene component references remain stable across save/load without storing the
+path in the component. Generic rename/move/copy/delete operations repoint or
+remove the mesh record just like textures.
+
 Until a manifest exists, `ProjectSession` uses an **untitled session**: asset
 records stay in memory, asset operations resolve against a scratch `Content/`
 folder under the working directory, and only scene documents are written. No

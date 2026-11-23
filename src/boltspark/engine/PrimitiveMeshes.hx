@@ -63,6 +63,12 @@ class PrimitiveMeshes {
         registeredById.set(mesh.id, mesh);
     }
 
+    /** Drop all imported meshes (called before reloading a project's assets). */
+    public static function clearRegistered():Void {
+        registered.resize(0);
+        registeredById = new Map();
+    }
+
     /** Stable asset list for type-aware Inspector pickers. */
     public static function all():Array<Mesh> {
         var result = [cube(), sphere(), cylinder(), capsule(), plane()];
