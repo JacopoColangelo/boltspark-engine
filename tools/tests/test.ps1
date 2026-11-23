@@ -19,7 +19,8 @@ param(
     [switch]$AssetBrowser,
     [switch]$ImportFiles,
     [switch]$ExplorerDrop,
-    [switch]$UntitledSession
+    [switch]$UntitledSession,
+    [switch]$AssetWatcher
 )
 
 $ErrorActionPreference = 'Stop'
@@ -290,6 +291,10 @@ try {
     if ($UntitledSession) {
         & (Join-Path $repoRoot 'tests\native\Test-UntitledSession.ps1')
         Assert-LastExitCode 'Untitled session probe'
+    }
+    if ($AssetWatcher) {
+        & (Join-Path $repoRoot 'tests\native\Test-AssetWatcher.ps1')
+        Assert-LastExitCode 'Asset filesystem watcher probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

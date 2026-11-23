@@ -362,6 +362,12 @@ folder on every run.
   A documented `BOLTSPARK_PROBE_DROP_DIR` hook feeds the production drop
   handler because a cross-process synthetic `WM_DROPFILES` cannot marshal its
   `HGLOBAL` into the editor process.
+- [x] External file/folder changes refresh the Asset Browser without manual
+  refresh. `AssetWatcher` polls a bounded tree snapshot from `Main.update()`
+  (polling chosen over `hl.uv.Fs` because its Windows directory handle blocks
+  folder renaming). `tests/native/Test-AssetWatcher.ps1` asserts a top-level
+  file and a nested folder/file each produce a `[watcher]` signal and a browser
+  re-scan; evidence under `bin/test-results/asset-watcher/`.
 - [ ] Explorer drops into a *floating* Asset Browser window (deferred: the
   pinned `winfloat.c` bridge has no drop-files primitive).
 - [ ] Material albedo texture slots bound to imported textures (next milestone).

@@ -34,6 +34,7 @@ import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
 import boltspark.platform.NativeMultiFilePicker;
 import boltspark.project.AssetTypeRegistry;
+import boltspark.project.AssetWatcher;
 import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
@@ -93,6 +94,8 @@ class Main extends hxd.App {
     var editorSession:EditorSession;
     /** Owns project/scene documents, paths, and dirty state. */
     var projectSession:ProjectSession;
+    /** Watches the asset root for external edits and refreshes the browser. */
+    var assetWatcher:AssetWatcher;
     /**
      * Detached Play-mode scene copy. While non-null, component lifecycle runs
      * only here and the editor session is frozen; Stop destroys it so the
@@ -222,6 +225,7 @@ class Main extends hxd.App {
                 playSession = null;
             }
             runtimeProbes.shutdown();
+            if (assetWatcher != null) assetWatcher.stop();
             if (boltUI != null) boltUI.shutdown();
             if (editorSession != null) editorSession.destroy();
             applicationWindows.shutdown();
@@ -451,6 +455,13 @@ class Main extends hxd.App {
             printActivity('[project] title=${title}');
         };
         boltUI.setProjectTitle(projectSession.title());
+        // Re-scan the browser when files change outside the editor. The root
+        // is re-checked every frame so project open/Save As retargets it.
+        assetWatcher = new AssetWatcher(function() {
+            printActivity('[watcher] external asset change detected');
+            boltUI.refreshAssetBrowser();
+        });
+        assetWatcher.setRoot(projectSession.assetWatchRoot());
         refreshHierarchy();
         suppressProjectDirty = true;
         editorSession.selectObject(initialEditorObject.id);
@@ -505,6 +516,8 @@ class Main extends hxd.App {
             logActivity("keybindings: synchronized changes from the settings window");
         }
         if (dropProbeDir != "") pollDropProbe();
+        assetWatcher.setRoot(projectSession.assetWatchRoot());
+        assetWatcher.update();
         // Camera navigation stays live in Play mode so the running scene can
         // be inspected; it never mutates either scene graph.
         cameraController.keyboardEnabled = !gizmoDragging;

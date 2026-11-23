@@ -424,6 +424,15 @@ class ProjectSession {
         return sys.FileSystem.absolutePath(projectRootDir());
     }
 
+    /**
+     * Absolute directory the Asset Browser actually scans. Kept here so the
+     * external-change watcher follows project/untitled switches automatically
+     * instead of duplicating the scratch `Content/` rule.
+     */
+    public function assetWatchRoot():String {
+        return sys.FileSystem.absolutePath(scanRootDir());
+    }
+
     // ------------------------------------------------------------------
     // Generic asset operations
     //

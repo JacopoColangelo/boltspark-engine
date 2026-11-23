@@ -270,10 +270,13 @@ project stub.
 
 ## Remaining limitations
 
-- **No filesystem watcher.** External changes are picked up by manual refresh
-  (Ctrl+R, the context-menu Refresh entry, or tab activation). The project had no watcher
-  infrastructure to reuse, avoiding a background rescan that could block the
-  render loop.
+- **Watcher uses bounded polling, not OS notifications.** `AssetWatcher` re-snapshots the
+  asset root from `Main.update()` and refreshes the browser on a path/size/mtime
+  change. `hl.uv.Fs` was rejected: on Windows its persistent directory handle
+  blocks renaming or deleting watched folders (reproduced by the folder-reparent
+  native probe), so polling is required to keep asset operations safe. The walk
+  is capped at 4096 paths / 24 levels and skips build/VCS/dependency folders;
+  external changes appear within roughly 0.35 s without a manual refresh.
 - **Cross-panel drop is limited to engine assets.** The path-array payload used
   by filesystem assets is still browser-local; only engine assets (primitives
   and materials) carry a typed drag payload that the MeshRenderer Inspector
