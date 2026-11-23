@@ -142,7 +142,7 @@ build on those contracts without allocating a new scene tree every frame.
 
 ## Acceptance checks
 
-See [`tests/native-foundation-acceptance.md`](tests/native-foundation-acceptance.md). Do not mark the Windows DX12 gate complete until it has been run on a real Windows 11 machine with the intended GPU, driver, and HashLink modules.
+See [`tests/native-foundation-acceptance.md`](../tests/native-foundation-acceptance.md). Do not mark the Windows DX12 gate complete until it has been run on a real Windows 11 machine with the intended GPU, driver, and HashLink modules.
 
 ## Windows / DirectX 12 references
 

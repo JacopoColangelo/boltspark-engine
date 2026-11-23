@@ -13,7 +13,7 @@ Rules for AI agents (and humans) working in this repository. Read this before ma
 4. The toolchain is **project-local** (`toolchain/`). Never install anything system-wide or on `C:`. The user explicitly does not want anything on C:.
 5. Harness processes do not inherit updated registry env; set per-session env before invoking tools:
    ```powershell
-   $tc = 'D:\Giochi\BoltSpark Engine\toolchain'
+   $tc = "$PWD\toolchain"   # from the repository root
    $env:Path = "$tc\haxe-dev;$tc\neko;$tc\hashlink;$env:Path"
    $env:HAXE_STD_PATH = "$tc\haxe-dev\std"
    $env:HAXELIB_PATH  = "$tc\haxelib"

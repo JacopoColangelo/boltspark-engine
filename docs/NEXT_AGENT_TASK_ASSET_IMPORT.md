@@ -1,7 +1,7 @@
 # Handoff prompt — external asset import + Windows Explorer drag-in
 
 This document is a self-contained task prompt for the next agent working on
-`D:\Giochi\BoltSpark Engine`. It records all findings from the current
+the repository root. It records all findings from the current
 investigation so the work can continue without re-deriving the map.
 
 ---

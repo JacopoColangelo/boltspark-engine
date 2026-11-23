@@ -13,8 +13,7 @@ package hl;
 	with "Primitive or library is missing".
 	This file is adapted from the Haxe development-branch std, which compiles element access
 	natively in the compiler (`untyped this[index]`) and only requires `alloc_carray`,
-	which HashLink 1.16.0 provides. The stock 4.3.7 file is kept beside it as
-	`CArray.hx.original-4.3.7-stock`.
+	which HashLink 1.16.0 provides.
  **/
 abstract CArray<T>(Abstract<"hl_carray">) {
 

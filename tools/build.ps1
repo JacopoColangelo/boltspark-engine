@@ -584,6 +584,30 @@ function Test-Environment {
 function New-ThirdPartyLicenseBundle([string]$Destination) {
     $sections = @(
         [ordered]@{
+            Component = 'HashLink'
+            Version = '1.16.0 (runtime, hldx bindings, HashLink/C support library)'
+            Source = 'https://github.com/HaxeFoundation/hashlink'
+            License = 'MIT License'
+            Use = 'HashLink VM, DirectX 12 native modules, and Haxe bindings used by the engine.'
+            Path = (Join-Path $repoRoot 'third_party\licenses\HashLink-LICENSE.txt')
+        },
+        [ordered]@{
+            Component = 'Heaps'
+            Version = '2.1.0'
+            Source = 'https://github.com/HeapsIO/heaps'
+            License = 'MIT License'
+            Use = 'Graphics framework and H2D editor UI.'
+            Path = (Join-Path $repoRoot 'third_party\licenses\Heaps-LICENSE.txt')
+        },
+        [ordered]@{
+            Component = 'format'
+            Version = '3.8.0'
+            Source = 'https://github.com/HaxeFoundation/format'
+            License = 'BSD 2-Clause License'
+            Use = 'File-format support used by asset import and serialization.'
+            Path = (Join-Path $repoRoot 'third_party\licenses\Format-LICENSE.txt')
+        },
+        [ordered]@{
             Component = 'Tabler Icons'
             Version = '3.52.0'
             Source = 'https://github.com/tabler/tabler-icons/tree/v3.52.0'

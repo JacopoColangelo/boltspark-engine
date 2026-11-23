@@ -45,19 +45,19 @@
 
 ## Environment variables (project-local toolchain)
 
-User-level (set on 2026-11-11; nothing on C: except the unavoidable pre-existing machine-level `HAXEPATH`/`NEKO_INSTPATH` leftovers from the old installer, which are harmless dead paths and could only be removed with admin rights):
+All paths below are relative to the repository root (`<repo>`); no system-wide installation is used. Scripts under `tools/` set them per session:
 
-- `HAXEPATH` = `D:\Giochi\BoltSpark Engine\toolchain\haxe-dev`
-- `HAXE_STD_PATH` = `D:\Giochi\BoltSpark Engine\toolchain\haxe-dev\std`
-- `HAXELIB_PATH` = `D:\Giochi\BoltSpark Engine\toolchain\haxelib`
-- `NEKO_INSTPATH` = `D:\Giochi\BoltSpark Engine\toolchain\neko`
-- User `PATH` includes `toolchain\haxe-dev` and `toolchain\hashlink` (before `toolchain\haxe`)
+- `HAXEPATH` = `<repo>\toolchain\haxe-dev`
+- `HAXE_STD_PATH` = `<repo>\toolchain\haxe-dev\std`
+- `HAXELIB_PATH` = `<repo>\toolchain\haxelib`
+- `NEKO_INSTPATH` = `<repo>\toolchain\neko`
+- `PATH` includes `toolchain\haxe-dev` and `toolchain\hashlink` (before `toolchain\haxe`)
 
 Scripts under `tools/` also set these per-session and do not depend on PATH alone.
 
 ## stdlib note (CArray)
 
-The Heaps DX12 driver requires `hl.CArray`. The pinned dev compiler ships its own std with native CArray codegen (`untyped this[index]`) that only needs the `alloc_carray` primitive HashLink 1.16.0 provides. The 4.3.7 stock std at `toolchain/haxe/std/hl/CArray.hx` was locally patched during diagnosis (original kept as `CArray.hx.original-4.3.7-stock`); that patch is **not used** by the pinned compiler and exists only as diagnostic documentation. Do not build the project with `toolchain/haxe` (4.3.7).
+The Heaps DX12 driver requires `hl.CArray`. The pinned dev compiler ships its own std with native CArray codegen (`untyped this[index]`) that only needs the `alloc_carray` primitive HashLink 1.16.0 provides. The 4.3.7 stock std at `toolchain/haxe/std/hl/CArray.hx` was locally patched during diagnosis; that patch is **not used** by the pinned compiler. Do not build the project with `toolchain/haxe` (4.3.7).
 
 ## Backend compatibility rule
 

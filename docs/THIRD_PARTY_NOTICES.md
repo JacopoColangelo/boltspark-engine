@@ -21,6 +21,18 @@ official Windows binary distribution's `libmbedcrypto`, `libmbedtls`,
 
 Exact file hashes are recorded in `docs/TOOLCHAIN_VERSIONS.md`.
 
+## Vendored Haxe/HashLink libraries
+
+These packages ship under `toolchain/` and are compiled into the development bytecode and native release. Canonical upstream license texts are kept in `third_party/licenses/`.
+
+- **HashLink 1.16.0** — official win64 binary runtime in `toolchain/hashlink/`, the `hldx` 1.16.0 bindings, and the HashLink/C 1.16.0 support library. MIT, Copyright (C) 2015-2018 Haxe Foundation. Source: <https://github.com/HaxeFoundation/hashlink>. Full text: `third_party/licenses/HashLink-LICENSE.txt`.
+- **Heaps 2.1.0** — graphics framework in `toolchain/haxelib/heaps/2,1,0/`, carrying a local `h3d/Engine.hx` compatibility patch documented in `docs/TOOLCHAIN_VERSIONS.md`. MIT, Copyright (c) 2013 Nicolas Cannasse. Source: <https://github.com/HeapsIO/heaps>. Full text: `third_party/licenses/Heaps-LICENSE.txt`. (The haxelib metadata labels this package "BSD"; the upstream repository's MIT `LICENSE` is authoritative.)
+- **format 3.8.0** — file-format support in `toolchain/haxelib/format/3,8,0/`. BSD 2-Clause, Copyright (c) 2008-2024 Haxe Foundation. Source: <https://github.com/HaxeFoundation/format>. Full text: `third_party/licenses/Format-LICENSE.txt`.
+
+## WinPixEventRuntime
+
+- **WinPixEventRuntime 1.0.240308001** — pinned NuGet package installed by `tools/build.ps1 -InstallDependencies` and shipped as `WinPixEventRuntime.dll`. MIT, Copyright (c) Microsoft Corporation. Source: <https://www.nuget.org/packages/WinPixEventRuntime/1.0.240308001>. The upstream license text is downloaded to `toolchain/hashlink/WinPixEventRuntime.LICENSE.txt` and consolidated into `release/THIRD-PARTY-LICENSES.txt`.
+
 ## Tabler Icons
 
 BoltUI embeds selected **Tabler Icons 3.52.0** glyphs by Paweł Kuna and the
