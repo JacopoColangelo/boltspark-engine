@@ -119,6 +119,7 @@ class UiButton extends h2d.Object {
     }
 
     public function setSelected(value:Bool):UiButton {
+        if (selected == value) return this;
         selected = value;
         redraw();
         return this;
@@ -126,6 +127,7 @@ class UiButton extends h2d.Object {
 
     /** Reserve room for a small chevron so an icon-only button reads as a menu. */
     public function setDropdown(value:Bool = true):UiButton {
+        if (dropdown == value) return this;
         dropdown = value;
         redraw();
         return this;
@@ -142,7 +144,9 @@ class UiButton extends h2d.Object {
     inline function get_height():Float return heightValue;
 
     public function setWidth(w:Float):Void {
-        widthValue = Math.max(0, w);
+        var next = Math.max(0, w);
+        if (next == widthValue) return;
+        widthValue = next;
         hit.width = widthValue;
         surface.setSize(widthValue, heightValue);
         fitLabel();

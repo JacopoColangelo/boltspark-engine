@@ -103,7 +103,13 @@ class ComponentInspectorSection extends InspectorSection {
     }
 
     override public function setWidth(width:Float):Void {
-        widthValue = Math.max(0, width);
+        var next = Math.max(0, width);
+        // Resizing the editor re-lays out every panel repeatedly; reflowing a
+        // selected object's property rows (text elision, thumbnails, graphics)
+        // without an actual width change is pure waste. The shell still runs
+        // its cheap section stacking on every pass.
+        if (next == widthValue) return;
+        widthValue = next;
         super.setWidth(widthValue);
         if (removeButton != null) {
             removeButton.x = Math.max(0, widthValue - 4 - ACTION_WIDTH);

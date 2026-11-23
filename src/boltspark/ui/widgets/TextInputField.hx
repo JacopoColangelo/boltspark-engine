@@ -72,12 +72,16 @@ class TextInputField extends h2d.Object {
     }
 
     public function setLabelWidth(width:Float):Void {
-        labelWidth = Math.max(0, width);
+        var next = Math.max(0, width);
+        if (next == labelWidth) return;
+        labelWidth = next;
         refresh();
     }
 
     public function setWidth(width:Float):Void {
-        widthValue = Math.max(0, width);
+        var next = Math.max(0, width);
+        if (next == widthValue) return;
+        widthValue = next;
         refresh();
     }
 

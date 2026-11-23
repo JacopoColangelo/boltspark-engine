@@ -197,7 +197,12 @@ class NumericDragField extends h2d.Object {
     public inline function isMultiple():Bool return multiple;
 
     public function setWidth(width:Float):Void {
-        widthValue = Math.max(0, width);
+        var next = Math.max(0, width);
+        // refreshLayout() rebuilds graphics and recomputes glyph metrics; the
+        // many layout passes during a resize must not repeat that when the
+        // field is already this wide.
+        if (next == widthValue) return;
+        widthValue = next;
         refreshLayout();
     }
 

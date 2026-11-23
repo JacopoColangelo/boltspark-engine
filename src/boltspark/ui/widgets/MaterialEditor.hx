@@ -81,6 +81,8 @@ class MaterialEditor extends h2d.Object {
     var contentHeightValue:Float = 600;
     var scrollY:Float = 0;
     var suppressChange:Bool = false;
+    /** Last width whose controls were reflowed; resize passes reuse it. */
+    var layoutFieldWidth:Float = -1;
 
     public function new(ctx:UiContext, ?parent:h2d.Object) {
         super(parent);
@@ -396,34 +398,42 @@ class MaterialEditor extends h2d.Object {
         wheelHit.height = mask.height;
         statusText.setPosition(EDGE, heightValue - 22);
 
-        // TextInputField keeps an 82px label column by default; our labels live
-        // in the left grid column, so the input must fill the whole field.
-        for (field in [nameField, colorField, emissionField]) field.setLabelWidth(0);
-        nameField.setWidth(fieldWidth());
-        colorField.setWidth(fieldWidth() - 34);
-        emissionField.setWidth(fieldWidth() - 34);
-        colorSwatch.x = innerWidth - 26;
-        emissionSwatch.x = innerWidth - 26;
-        for (slot in [albedoSlot, metallicSlot, roughnessSlot, normalSlot, occlusionSlot]) {
-            slot.setWidth(fieldWidth());
+        // Dock resize and splitter drags call layout() on every frame. The
+        // panel's mask/scrollbar must follow each pass, but the control grid
+        // only changes when the field column changes width. Skipping the
+        // unchanged pass avoids re-measuring labels and rebuilding thumbnails.
+        var fieldW = fieldWidth();
+        if (Math.abs(fieldW - layoutFieldWidth) > 0.5) {
+            layoutFieldWidth = fieldW;
+            // TextInputField keeps an 82px label column by default; our labels
+            // live in the left grid column, so the input fills the whole field.
+            for (field in [nameField, colorField, emissionField]) field.setLabelWidth(0);
+            nameField.setWidth(fieldW);
+            colorField.setWidth(fieldW - 34);
+            emissionField.setWidth(fieldW - 34);
+            colorSwatch.x = innerWidth - 26;
+            emissionSwatch.x = innerWidth - 26;
+            for (slot in [albedoSlot, metallicSlot, roughnessSlot, normalSlot, occlusionSlot]) {
+                slot.setWidth(fieldW);
+            }
+            for (slider in [metallicSlider, smoothnessSlider, emissionSlider]) {
+                slider.setWidth(fieldW);
+            }
+            sourceButton.setWidth(fieldW);
+            cullingButton.setWidth(fieldW);
+            shadowsCheckbox.setWidth(fieldW);
+            var pairWidth = Math.max(60, (fieldW - GAP) * 0.5);
+            tilingX.x = fieldX();
+            tilingY.x = fieldX() + pairWidth + GAP;
+            tilingX.setWidth(pairWidth);
+            tilingY.setWidth(pairWidth);
+            tilingY.x = fieldX() + pairWidth + GAP;
+            offsetX.x = fieldX();
+            offsetY.x = fieldX() + pairWidth + GAP;
+            offsetX.setWidth(pairWidth);
+            offsetY.setWidth(pairWidth);
+            offsetY.x = fieldX() + pairWidth + GAP;
         }
-        for (slider in [metallicSlider, smoothnessSlider, emissionSlider]) {
-            slider.setWidth(fieldWidth());
-        }
-        sourceButton.setWidth(fieldWidth());
-        cullingButton.setWidth(fieldWidth());
-        shadowsCheckbox.setWidth(fieldWidth());
-        var pairWidth = Math.max(60, (fieldWidth() - GAP) * 0.5);
-        tilingX.x = fieldX();
-        tilingY.x = fieldX() + pairWidth + GAP;
-        tilingX.setWidth(pairWidth);
-        tilingY.setWidth(pairWidth);
-        tilingY.x = fieldX() + pairWidth + GAP;
-        offsetX.x = fieldX();
-        offsetY.x = fieldX() + pairWidth + GAP;
-        offsetX.setWidth(pairWidth);
-        offsetY.setWidth(pairWidth);
-        offsetY.x = fieldX() + pairWidth + GAP;
 
         relayoutSections();
         scrollBar.setBounds(widthValue - 7, HEADER_HEIGHT + 2, 5, mask.height - 4);

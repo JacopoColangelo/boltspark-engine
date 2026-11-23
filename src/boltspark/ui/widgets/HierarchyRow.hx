@@ -189,12 +189,20 @@ class HierarchyRow extends h2d.Object {
             selected:Bool):Void {
         this.x = x;
         this.y = y;
+        var widthChanged = width != rowWidth;
+        var selectionChanged = selected != this.selected;
         this.selected = selected;
-        rowWidth = width;
-        background.width = width;
-        surface.setSize(width, background.height);
+        // Resize and splitter drags call this for every visible row on every
+        // pass. Only the position is volatile: the row's graphics, rename mask
+        // and elided label depend on width, and its style depends on selection.
+        if (!widthChanged && !selectionChanged) return;
+        if (widthChanged) {
+            rowWidth = width;
+            background.width = width;
+            surface.setSize(width, background.height);
+        }
         updateStyle();
-        layoutContents();
+        if (widthChanged) layoutContents();
     }
 
     public function beginRename():Void {

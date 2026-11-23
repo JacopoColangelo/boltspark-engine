@@ -110,7 +110,9 @@ class UiSlider extends h2d.Object {
     }
 
     public function setWidth(width:Float):Void {
-        widthValue = Math.max(80, width);
+        var next = Math.max(80, width);
+        if (next == widthValue) return;
+        widthValue = next;
         railWidth = Math.max(40, widthValue - VALUE_WIDTH - 10);
         hit.width = railWidth;
         hit.height = HEIGHT;

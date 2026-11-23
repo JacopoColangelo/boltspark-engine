@@ -78,7 +78,11 @@ class SearchField extends h2d.Object {
     }
 
     public function setWidth(value:Float):Void {
-        widthValue = Math.max(0, value);
+        var next = Math.max(0, value);
+        // layout() rebuilds the field graphics and its text mask; resize and
+        // splitter passes must not repeat that for a stable panel width.
+        if (next == widthValue) return;
+        widthValue = next;
         layout();
     }
 

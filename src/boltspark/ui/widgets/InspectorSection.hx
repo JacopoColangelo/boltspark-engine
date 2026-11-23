@@ -30,6 +30,7 @@ class InspectorSection extends h2d.Object {
     final divider:h2d.Graphics;
     final hit:h2d.Interactive;
     var hovered:Bool = false;
+    var lastWidth:Float = -1;
 
     public function new(ctx:UiContext, titleText:String, ?parent:h2d.Object) {
         super(parent);
@@ -69,7 +70,12 @@ class InspectorSection extends h2d.Object {
     }
 
     public function setWidth(width:Float):Void {
-        hit.width = Math.max(0, width);
+        var next = Math.max(0, width);
+        // Dock layout runs on every resize frame and splitter move. The header
+        // graphics only depend on width, so skip the redraw when it is stable.
+        if (next == lastWidth) return;
+        lastWidth = next;
+        hit.width = next;
         redraw();
     }
 

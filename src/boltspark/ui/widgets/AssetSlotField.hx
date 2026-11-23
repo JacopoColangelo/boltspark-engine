@@ -205,7 +205,12 @@ class AssetSlotField extends h2d.Object {
     }
 
     public function setWidth(width:Float):Void {
-        widthValue = Math.max(0, width);
+        var next = Math.max(0, width);
+        // Every resize frame rebuilds all asset slots. Their thumbnails,
+        // action icons and elided labels only depend on width, so leave them
+        // untouched when a layout pass reports the same size.
+        if (next == widthValue) return;
+        widthValue = next;
         var comboX = THUMB_SIZE + ACTION_GAP;
         var comboWidth = Math.max(0, widthValue - comboX);
         combo.x = comboX;
