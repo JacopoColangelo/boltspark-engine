@@ -2,6 +2,9 @@
 
 A native Windows 11 / DirectX 12 game engine and editor written in Haxe and powered by HashLink + Heaps. Its BoltUI interface is drawn with Heaps' `h2d` over the 3D scene — no browser runtime, no DOM/CSS, no SDL, and no OpenGL.
 
+<img width="1919" height="980" alt="Screenshot 2026-11-23 145949" src="https://github.com/user-attachments/assets/8ba29c7d-0e9d-4309-9f21-461d109f5eb5" />
+
+
 [![Windows portable checks](https://github.com/JacopoColangelo/boltspark-engine/actions/workflows/windows-ci.yml/badge.svg)](https://github.com/JacopoColangelo/boltspark-engine/actions/workflows/windows-ci.yml)
 
 > **Status:** under active development. The editor runs on Windows 11 x64 with a DirectX 12 capable GPU; it is not yet a feature-complete production engine.
