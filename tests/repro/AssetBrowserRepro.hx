@@ -27,6 +27,8 @@ class AssetBrowserRepro {
         testDiscoveryAndMetadata();
         testGenericOperations();
         testFolderOperations();
+        testImport();
+        testUntitledSession();
         testStore();
 
         Sys.println('[asset-browser-repro] all ${checks} checks passed');
@@ -39,6 +41,17 @@ class AssetBrowserRepro {
         var file = AssetTypeRegistry.infoFor("notes.txt");
         assertTrue(file.kind == "file" && !file.loadable,
             "unknown extension is a generic, non-loadable file");
+        for (extension in AssetTypeRegistry.TEXTURE_EXTENSIONS) {
+            var info = AssetTypeRegistry.infoFor("Waterfall." + extension.toUpperCase());
+            assertTrue(info.kind == AssetTypeRegistry.KIND_TEXTURE && info.loadable,
+                'texture extension ${extension} is recognized and loadable');
+            assertTrue(AssetTypeRegistry.isTextureFile("dir/Waterfall." + extension),
+                'texture path detection accepts ${extension}');
+        }
+        assertTrue(!AssetTypeRegistry.isTextureFile("notes.txt"),
+            "plain text is not an importable texture");
+        assertTrue(AssetTypeRegistry.filterKinds().length == 4,
+            "type filter offers the texture kind");
         assertTrue(!AssetTypeRegistry.isInternal("Scenes"), "folders are not internal");
         assertTrue(AssetTypeRegistry.isInternal("Demo.boltproject"),
             "project manifest is internal");
@@ -220,6 +233,163 @@ class AssetBrowserRepro {
             selfMove = true;
         }
         assertTrue(selfMove, "folder cannot be moved into a descendant");
+    }
+
+    static function testImport():Void {
+        var session = new ProjectSession();
+        session.openProject(Path.join([root, "Browser Data.boltproject"]));
+        // Keep the source files outside the project root so the browser scan
+        // only sees the copies the importer made.
+        var external = Path.join([Sys.getCwd(), "bin", "test-results", "asset-browser-external"]);
+        deleteRecursively(external);
+        sys.FileSystem.createDirectory(external);
+        var png = Path.join([external, "Imported Rock.png"]);
+        var jpg = Path.join([external, "Bricks.JPG"]);
+        var text = Path.join([external, "notes.txt"]);
+        writeTinyPng(png, 2, 2, 11);
+        // Import core copies bytes; decoding is covered by the thumbnail path.
+        sys.io.File.saveBytes(jpg, haxe.io.Bytes.ofHex("FFD8FFD9"));
+        sys.io.File.saveContent(text, "not an image");
+
+        var imported = session.importAssets([png, jpg], "");
+        assertTrue(imported.length == 2, "both external files import in input order");
+        assertTrue(imported[0] == "Content/Imported Rock.png",
+            "imported PNG lands directly in the Content root");
+        assertTrue(imported[1] == "Content/Bricks.jpg",
+            "imported JPG uses a lower-case extension");
+        for (source in imported) {
+            assertTrue(sys.FileSystem.exists(Path.join([root, source])),
+                'imported file was copied into the project: ${source}');
+        }
+        assertTrue(session.dirty, "import marks the project dirty");
+
+        var textures = 0;
+        var registered = 0;
+        for (asset in session.scanAllAssets()) {
+            if (asset.kind != AssetTypeRegistry.KIND_TEXTURE) continue;
+            textures++;
+            if (asset.registered) registered++;
+            assertTrue(asset.extension == "png" || asset.extension == "jpg",
+                "texture scan reports the real extension");
+        }
+        assertTrue(textures == 2 && registered == 2,
+            "imported textures are discovered and registered in the browser");
+
+        var document = haxe.Json.parse(sys.io.File.getContent(session.projectPath));
+        var records:Array<Dynamic> = document.assets;
+        var textureRecords = 0;
+        for (record in records) {
+            if (record.type != "texture") continue;
+            textureRecords++;
+            assertTrue(imported.indexOf(record.source) >= 0,
+                "manifest texture record points at the copied file");
+            assertTrue(record.id.length > 0 && record.importSettings.format != null,
+                "manifest texture record has an id and import settings");
+        }
+        assertTrue(textureRecords == 2, "manifest persisted both texture records");
+
+        var again = session.importAssets([png], "");
+        assertTrue(again[0] == "Content/Imported Rock 2.png",
+            "re-import resolves a name collision with a numeric suffix");
+
+        var rejected = false;
+        try {
+            session.importAssets([text], "");
+        } catch (_:Dynamic) {
+            rejected = true;
+        }
+        assertTrue(rejected, "unsupported import extension is rejected");
+        assertTrue(!sys.FileSystem.exists(Path.join([root, "Content", "notes.txt"])),
+            "rejected import did not copy a file");
+        var afterReject = haxe.Json.parse(sys.io.File.getContent(session.projectPath));
+        assertTrue(afterReject.assets.length == records.length + 1,
+            "rejected import did not write a manifest record");
+
+        var escaped = false;
+        try {
+            session.importAssets([png], "../outside");
+        } catch (_:Dynamic) {
+            escaped = true;
+        }
+        assertTrue(escaped, "import rejects a folder that escapes the project root");
+    }
+
+    static function testUntitledSession():Void {
+        // An untitled session uses the working directory's scratch Content
+        // folder. Point cwd at a disposable directory so the repo stays clean.
+        var previousCwd = Sys.getCwd();
+        var scratch = Path.join([root, "untitled-scratch"]);
+        var source = Path.join([root, "untitled-source.png"]);
+        deleteRecursively(scratch);
+        sys.FileSystem.createDirectory(scratch);
+        writeTinyPng(source, 2, 2, 41);
+        Sys.setCwd(scratch);
+        try {
+            var session = new ProjectSession();
+            assertTrue(session.isUntitled(), "new session starts untitled");
+
+            var created = session.createFolder("", "Notes");
+            assertTrue(created == "Content/Notes",
+                "untitled folders are created inside the scratch Content folder");
+            assertTrue(sys.FileSystem.exists(Path.join([scratch, created])),
+                "untitled folder was written to disk");
+
+            var imported = session.importAssets([source], "");
+            assertTrue(imported.length == 1
+                    && imported[0] == "Content/untitled-source.png",
+                "untitled import lands directly in the scratch Content folder");
+            assertTrue(sys.FileSystem.exists(Path.join([scratch, imported[0]])),
+                "untitled imported file was copied");
+            assertTrue(!sys.FileSystem.exists(Path.join([scratch, "Untitled.boltproject"])),
+                "untitled import does not create a project manifest");
+
+            var textures = 0;
+            for (asset in session.scanAllAssets()) {
+                if (asset.kind == AssetTypeRegistry.KIND_TEXTURE) textures++;
+            }
+            assertTrue(textures == 1, "untitled browser discovers the imported texture");
+            var folders = session.scanFolders();
+            assertTrue(folders.indexOf("Content") >= 0
+                    && folders.indexOf("Content/Notes") >= 0,
+                "untitled browser lists the scratch folder tree");
+
+            session.newScene("Scratch Scene", "Scenes");
+            session.persistSceneDocument();
+            assertTrue(session.sceneSource == "Content/Scenes/Scratch Scene.boltscene",
+                "untitled scenes live inside the scratch Content folder");
+            assertTrue(sys.FileSystem.exists(session.scenePath),
+                "untitled scene document was written");
+            var scenes = 0;
+            for (asset in session.scanAssets()) {
+                if (asset.kind == AssetTypeRegistry.KIND_SCENE) scenes++;
+            }
+            assertTrue(scenes == 1, "untitled browser discovers the scratch scene");
+
+            assertTrue(session.canDeleteFolder("Content/Notes"),
+                "untitled folders can be deleted without a project");
+            session.deleteFolder("Content/Notes", true);
+            assertTrue(!sys.FileSystem.exists(Path.join([scratch, "Content", "Notes"])),
+                "untitled folder delete removes the directory");
+            assertTrue(!session.canDeleteFolder("Content/Scenes"),
+                "the folder holding the active untitled scene stays protected");
+        } catch (error:Dynamic) {
+            Sys.setCwd(previousCwd);
+            throw error;
+        }
+        Sys.setCwd(previousCwd);
+    }
+
+    static function writeTinyPng(path:String, width:Int, height:Int, seed:Int):Void {
+        var bytes = haxe.io.Bytes.alloc(width * height * 4);
+        for (index in 0...width * height) {
+            bytes.set(index * 4, (index * 37 + seed) & 0xFF);
+            bytes.set(index * 4 + 1, (index * 71 + seed) & 0xFF);
+            bytes.set(index * 4 + 2, (index * 13 + seed) & 0xFF);
+            bytes.set(index * 4 + 3, 0xFF);
+        }
+        var output = new haxe.io.BytesOutput();
+        new format.png.Writer(output).write(format.png.Tools.build32BGRA(width, height, bytes));
+        sys.io.File.saveBytes(path, output.getBytes());
     }
 
     static function testStore():Void {

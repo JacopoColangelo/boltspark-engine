@@ -21,6 +21,7 @@ import boltspark.editor.TransformMatrix;
 import boltspark.editor.WorldBounds;
 import boltspark.engine.ComponentRegistry;
 import boltspark.engine.Component;
+import boltspark.engine.TextureCache;
 import boltspark.engine.MeshRenderer;
 import boltspark.engine.Mesh3D;
 import boltspark.engine.inspector.AssetType;
@@ -31,6 +32,8 @@ import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.PrimitiveSettings;
 import boltspark.diagnostics.RuntimeProbes;
 import boltspark.platform.InteractiveResize;
+import boltspark.platform.NativeMultiFilePicker;
+import boltspark.project.AssetTypeRegistry;
 import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
@@ -184,6 +187,15 @@ class Main extends hxd.App {
     // Synthetic-input verification probes drive drags with WM_MOUSEMOVE,
     // which relative mode ignores; probes keep Absolute mode.
     var inputProbeMode:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null;
+    // Deterministic Explorer-drop probe hook. A synthetic WM_DROPFILES sent
+    // from another process cannot marshal its HGLOBAL into the editor, so the
+    // native probe writes a numbered instruction file instead. The hook feeds
+    // the exact same handler as hldx's real DropFileEvent.
+    var dropProbeDir:String = "";
+    var dropProbeNext:Int = 1;
+    /** Numbered picker answers let a probe drive several imports in one session. */
+    var pickerProbeDir:String = "";
+    var pickerProbeNext:Int = 1;
     // Routine interaction telemetry is useful to automated probes and during
     // focused diagnosis, but it should not flood the user's Output Log.
     var verboseLogging:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null
@@ -409,12 +421,24 @@ class Main extends hxd.App {
         boltUI.onMoveFolder = moveAssetFolder;
         boltUI.onRevealAsset = revealAsset;
         boltUI.onCopyAssetPath = copyAssetPath;
+        boltUI.onImportAssets = importAssets;
+        boltUI.onQueryTextureTile = function(source) {
+            return TextureCache.get(projectSession.absoluteAssetPath(source));
+        };
         // The browser is already the active bottom tab on startup, so no tab
         // click will trigger a refresh. Populate it only after every query
         // callback above exists; refreshing earlier silently yields an empty
         // list and hides engine assets even with the preference enabled.
         boltUI.refreshAssetBrowser();
         registerViewportDropTargets();
+        // hldx turns WM_DROPFILES into DropFile events once a target exists.
+        // The same handler serves the Import dialog and Explorer drags, so
+        // native drops get the same validation, copy, and manifest write.
+        nativeWindow.addDragAndDropTarget(onFilesDroppedFromShell);
+        var probeDir = inputProbeMode ? Sys.getEnv("BOLTSPARK_PROBE_DROP_DIR") : null;
+        dropProbeDir = probeDir == null ? "" : probeDir;
+        var pickerDir = inputProbeMode ? Sys.getEnv("BOLTSPARK_PROBE_PICKER_DIR") : null;
+        pickerProbeDir = pickerDir == null ? "" : pickerDir;
         logActivity('renderer driver: ${driverName}');
         logActivity("editor shell ready — hierarchy, inspector, console live");
         if (keybindings.lastError != "") {
@@ -480,6 +504,7 @@ class Main extends hxd.App {
         if (keybindings.pollExternalChanges()) {
             logActivity("keybindings: synchronized changes from the settings window");
         }
+        if (dropProbeDir != "") pollDropProbe();
         // Camera navigation stays live in Play mode so the running scene can
         // be inspected; it never mutates either scene graph.
         cameraController.keyboardEnabled = !gizmoDragging;
@@ -3122,6 +3147,56 @@ class Main extends hxd.App {
         });
     }
 
+    /**
+     * Texture imports use a real multi-select native picker. `hl.UI.loadFile`
+     * returns a single path and has no multi-select flag, so the project-local
+     * `multifile.hdll` drives the same Windows common item dialog with
+     * FOS_ALLOWMULTISELECT. Probes substitute paths through the environment.
+     */
+    function pickOpenTextureFiles():Null<Array<String>> {
+        var exts = AssetTypeRegistry.TEXTURE_EXTENSIONS;
+        var spec = [for (ext in exts) "*." + ext].join(";");
+        printActivity('[probe] import picker exts=${exts.join(",")}'
+            + ' name="${AssetTypeRegistry.TEXTURE_FILTER_LABEL}" spec=${spec}');
+        if (inputProbeMode) {
+            // Numbered answer files let one probe drive several imports; a
+            // child process cannot see env changes made after launch.
+            if (pickerProbeDir != "") {
+                var instruction = pickerProbeDir + "/pick-" + pickerProbeNext + ".txt";
+                if (sys.FileSystem.exists(instruction)) {
+                    var answer = StringTools.trim(sys.io.File.getContent(instruction));
+                    sys.FileSystem.deleteFile(instruction);
+                    pickerProbeNext++;
+                    var files:Array<String> = [];
+                    for (entry in answer.split("|")) {
+                        var trimmed = StringTools.trim(entry);
+                        if (trimmed.length > 0) files.push(trimmed);
+                    }
+                    printActivity('[probe] file dialog open title="Import Texture"'
+                        + ' choice=${files.join("|")}');
+                    return files.length == 0 ? null : files;
+                }
+            }
+            var many = Sys.getEnv("BOLTSPARK_PROBE_OPEN_FILES");
+            if (many != null && StringTools.trim(many).length > 0) {
+                var paths:Array<String> = [];
+                for (entry in many.split(";")) {
+                    var trimmed = StringTools.trim(entry);
+                    if (trimmed.length > 0) paths.push(trimmed);
+                }
+                printActivity('[probe] file dialog open title="Import Texture"'
+                    + ' choice=${paths.join("|")}');
+                return paths.length == 0 ? null : paths;
+            }
+            var single = probeFileChoice("open", "Import Texture");
+            return single == null ? null : [single];
+        }
+        return withNativeDialogTimeout(function() {
+            return NativeMultiFilePicker.pickImages("Import Texture",
+                AssetTypeRegistry.TEXTURE_FILTER_LABEL, spec);
+        });
+    }
+
     function pickSaveFile(title:String, defaultName:String, extension:String,
             label:String):Null<String> {
         if (inputProbeMode) return probeFileChoice("save", title);
@@ -3156,6 +3231,13 @@ class Main extends hxd.App {
     }
 
     function openAsset(source:String):Void {
+        // Textures are loadable in the browser (so they can be previewed and
+        // dragged) but do not open a scene document. Material slots are the
+        // next milestone; fail softly instead of reporting a false open error.
+        if (!projectSession.isScenePath(source)) {
+            boltUI.log('asset: ${source} has no editor view yet — texture import is ready, material slots are next');
+            return;
+        }
         if (!confirmDiscardChanges()) return;
         try {
             projectSession.openSceneSource(source);
@@ -3191,6 +3273,91 @@ class Main extends hxd.App {
             else boltUI.refreshAssetBrowser();
             boltUI.log('asset: deleted ${source}');
         } catch (e:Dynamic) reportProjectError('delete asset', e);
+    }
+
+    /**
+     * Native Import command. The picker is the only modal OS interaction;
+     * copying, registration, and persistence go through ProjectSession.
+     */
+    function importAssets(folder:String):Void {
+        if (!canEdit()) return;
+        var picked = pickOpenTextureFiles();
+        if (picked == null || picked.length == 0) return;
+        importExternalFiles(picked, folder);
+    }
+
+    /** Shared write path for the Import dialog and Explorer drops. */
+    function importExternalFiles(paths:Array<String>, folder:String):Void {
+        if (!canEdit()) return;
+        if (paths == null || paths.length == 0) return;
+        try {
+            var imported = projectSession.importAssets(paths, folder);
+            boltUI.refreshAssetBrowser();
+            boltUI.log('asset: imported ${imported.length} texture(s) to ${folder}: ${imported.join(", ")}');
+            printActivity('[probe] import completed count=${imported.length} folder=${folder}');
+        } catch (e:Dynamic) reportProjectError('import asset', e);
+    }
+
+    /**
+     * Probe-only delivery for Explorer drops. `BOLTSPARK_PROBE_DROP_DIR` points
+     * at a directory where a probe writes `drop-N.txt` containing
+     * `clientX;clientY|fullPath|fullPath...`. Each file is consumed once and
+     * routed through `handleDroppedPaths`, so the import, folder placement, and
+     * Play-mode guard are the real production code, not test-only stubs.
+     */
+    function pollDropProbe():Void {
+        if (!sys.FileSystem.exists(dropProbeDir)) return;
+        var instruction = dropProbeDir + "/drop-" + dropProbeNext + ".txt";
+        if (!sys.FileSystem.exists(instruction)) return;
+        var content = StringTools.trim(sys.io.File.getContent(instruction));
+        sys.FileSystem.deleteFile(instruction);
+        dropProbeNext++;
+        var fields = content.split("|");
+        var coords = fields[0].split(";");
+        var x = Std.parseInt(StringTools.trim(coords[0]));
+        var y = Std.parseInt(StringTools.trim(coords[1]));
+        if (x == null) x = 0;
+        if (y == null) y = 0;
+        var paths:Array<String> = [];
+        for (index in 1...fields.length) {
+            var path = StringTools.trim(fields[index]);
+            if (path.length > 0) paths.push(path);
+        }
+        printActivity('[probe] drop hook index=${dropProbeNext - 1}');
+        handleDroppedPaths(paths, x, y);
+    }
+
+    /**
+     * Windows Explorer drop handler. `dropX/dropY` are window-client
+     * coordinates from hldx; the browser maps them to a folder so a drop lands
+     * where the user aimed it. Generic files are ignored for now (only the
+     * registered texture formats are real imports).
+     */
+    function onFilesDroppedFromShell(event:hxd.DropFileEvent):Void {
+        var paths:Array<String> = [];
+        for (file in event.files) paths.push(file.file);
+        handleDroppedPaths(paths, event.dropX, event.dropY);
+    }
+
+    function handleDroppedPaths(paths:Array<String>, x:Int, y:Int):Void {
+        printActivity('[probe] os file drop count=${paths.length} x=${x} y=${y}');
+        if (!canEdit()) {
+            printActivity('[probe] os file drop rejected=play-mode');
+            boltUI.log('External file drops are disabled while playing.');
+            return;
+        }
+        var images = paths.filter(AssetTypeRegistry.isTextureFile);
+        if (images.length != paths.length) {
+            printActivity('[probe] os file drop skipped=${paths.length - images.length}');
+        }
+        if (images.length == 0) return;
+        var folder = boltUI.folderAtWindowPoint(x, y);
+        if (folder != null && StringTools.startsWith(folder, EngineAssetCatalog.FOLDER)) {
+            folder = null;
+        }
+        var target = folder == null ? "" : folder;
+        printActivity('[probe] os file drop folder=${target}');
+        importExternalFiles(images, target);
     }
 
     function createAssetFolder(parent:String):String {
@@ -3378,6 +3545,7 @@ class Main extends hxd.App {
         try {
             var info = new haxe.io.Path(path);
             projectSession.createProject(path, info.file);
+            TextureCache.clear();
             reloadEditorSession();
             boltUI.log('project: created ${projectSession.projectPath}');
         } catch (e:Dynamic) reportProjectError('create project', e);
@@ -3390,6 +3558,7 @@ class Main extends hxd.App {
         if (!confirmDiscardChanges()) return;
         try {
             projectSession.openProject(path);
+            TextureCache.clear();
             reloadEditorSession();
             boltUI.log('project: opened ${projectSession.projectPath}');
         } catch (e:Dynamic) reportProjectError('open project', e);
@@ -3413,6 +3582,8 @@ class Main extends hxd.App {
         if (path == null) return;
         try {
             projectSession.saveAs(path, editorSession);
+            TextureCache.clear();
+            boltUI.refreshAssetBrowser();
             boltUI.log('project: saved ${projectSession.projectPath}');
         } catch (e:Dynamic) reportProjectError('save project as', e);
     }

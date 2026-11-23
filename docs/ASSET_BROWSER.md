@@ -2,25 +2,25 @@
 
 ## Scope decision: adapt to the engine, not to Unity/Unreal
 
-The first implementation phase inspected the existing architecture. The engine
-has exactly **one loadable on-disk asset format**: `.boltscene`, scanned by
-`ProjectSession` and registered in the project manifest as an asset record of
-type `scene`. Mesh and material "assets" referenced by `MeshRenderer` come from
-the **built-in primitive catalog** (`PrimitiveMeshes`, default material) and are
-never loaded from arbitrary files. There is no texture, audio, model, or image
-importer, and no asset metadata payload beyond the manifest record, file size,
-and timestamps.
+The first implementation phase inspected the existing architecture. Scenes
+(`.boltscene`) are scanned by `ProjectSession` and registered in the project
+manifest as `scene` assets. Mesh and material "assets" referenced by
+`MeshRenderer` come from the **built-in primitive catalog** (`PrimitiveMeshes`,
+default material) and are never loaded from arbitrary files. External textures
+are now a second real on-disk kind: PNG/JPG/JPEG/TGA files imported through the
+Asset Browser or dropped from Windows Explorer are copied into the project,
+registered as `texture` assets, and decoded into real thumbnails through Heaps.
 
 The browser therefore:
 
-- treats `.boltscene` as the only loadable asset kind;
+- treats `.boltscene` and imported images as loadable asset kinds;
 - still lists every other non-internal file as a **generic file** with a
   type-specific icon, so the pane mirrors the real filesystem without
   pretending the engine can import it;
 - hides internal documents (`.boltproject`, `*.bak`, `*.tmp`, dot files) because
   they are engine storage, not user assets;
-- does not add any new importer, resource system, thumbnail pipeline, or
-  dependency.
+- keeps mesh/material resources in the built-in catalog rather than inventing
+  an external mesh importer.
 
 This matches the requirement to build on existing capabilities rather than
 recreating Unreal/Unity asset infrastructure.
@@ -199,9 +199,10 @@ recreating Unreal/Unity asset infrastructure.
 
 ## Dependencies added
 
-None. Only existing Heaps `h2d`, `hxd.Key`, project-local `ProjectSession`,
-BoltUI widgets, and the system shell for Explorer/clipboard integration are
-used. No third-party library, web technology, or new asset format was added.
+None. Texture import uses the already-pinned Heaps `hxd.res.Image` decoder and
+`h3d.mat.Texture`, the tracked `format` library, project-local `ProjectSession`,
+BoltUI widgets, and the native Win32/HashLink shell APIs already in use. No new
+third-party library, web technology, or backend define was introduced.
 
 ## Build and testing results
 
@@ -210,19 +211,62 @@ build 26300 x64:
 
 - `haxe compile.hxml` — success (also via `tools/build.ps1 -Build`, including
   the packaged `release\Boltspark.exe` native release).
-- `tools/tests/test.ps1 -Portable` — pass; includes `[asset-browser-repro] all 41
+- `tools/tests/test.ps1 -Portable` — pass; includes `[asset-browser-repro] all 112
   checks passed`.
 - `tools/tests/test.ps1 -AssetBrowser` — pass; original native probe (Add/Rename/Open,
   folder create + F2, clipboard, drag-drop, scroll, collapse/expand) still
-  passes.
-- `tools/tests/test.ps1 -Build -NativeSmoke -CommandHistory -RotationHandoff
-  -ProjectFiles -AssetBrowser` — pass; all requested native and release checks
-  succeeded.
+  passes with the appended Import menu row.
+- `tools/tests/test.ps1 -Build -NativeSmoke -PlayMode -ProjectFiles -AssetBrowser
+  -ImportFiles -ExplorerDrop` — pass; all requested native and release checks
+  succeeded. Image-header coverage is `[texture-cache-repro] all 5 checks passed`.
 - Visual verification: DX12 `PrintWindow` capture at
   `bin/test-results/asset-browser-visual/asset-browser.png`; the redesigned
   view (plus open filter and size-slider popovers) is captured as
   `asset-browser-redesign.png`, `asset-browser-filter-menu.png`, and
   `asset-browser-settings.png` in the same folder.
+
+## External texture import and Explorer drag-in
+
+The Add menu (and the empty-space New… submenu) gained **Import Asset...**. It
+opens a **multi-select** native picker (`tools/native/multifile.c`, built as
+`bin/multifile.hdll`) with a single **image-only filter** covering all
+registered extensions (PNG, JPG, JPEG, TGA) — no All Files option and no
+PNG-only single-file filter that used to hide real-world JPG texture sets. Choose
+several maps in one dialog; every selected path is forwarded to
+`ProjectSession.importAssets()`. The main window also registers an
+`hxd.Window` drag-and-drop target, so Explorer
+files land through the same write path; the drop point is mapped to a browser
+folder with `AssetBrowser.folderAtWindowPoint()` and falls back to the
+`Content` root (no extra `Textures` subfolder). Both paths are editor-only
+mutations and are refused while Play mode is running.
+
+`importAssets()` validates every path before copying anything, rejects
+unsupported extensions and paths that escape the project root, sanitizes and
+de-duplicates destination names, copies with `sys.io.File.copy`, appends an
+`AssetRecord(type:"texture")` with `{ format }` import settings, saves the
+manifest atomically, and fires `stateChanged()`. External paths are never
+persisted. Non-image Explorer drops are ignored with a probe line rather than
+failing the whole drop.
+
+Grid cards and list icons for texture assets use **real decoded thumbnails**.
+`src/boltspark/engine/TextureCache.hx` decodes PNG/JPG/TGA with
+`hxd.res.Image`, downsamples to at most 256 px on the CPU before upload, caches
+by absolute path, keeps a `realloc` callback for DX12 device resets, and is
+cleared when the project changes. Scene and generic-file previews remain
+vector glyph stand-ins.
+
+## Untitled sessions are usable
+
+Without a saved `.boltproject`, the Asset Browser scans a scratch **Content/**
+folder under the working directory instead of returning an empty list. Add →
+Folder, Import Asset, New Scene, rename/move/copy/delete, and Explorer drops all
+work in this mode; asset records and the scene graph live in memory and scene
+documents are written into the scratch folder. Manifest writes are skipped
+until Save Project As, and the scratch folder itself cannot be deleted while it
+holds the active scene. Reveal in Explorer and Copy Path still prompt for a
+project because they need a real filesystem root to expose. Scratch content is
+not migrated when a project is later created — it is a testing sandbox, not a
+project stub.
 
 ## Remaining limitations
 
@@ -230,17 +274,17 @@ build 26300 x64:
   (Ctrl+R, the context-menu Refresh entry, or tab activation). The project had no watcher
   infrastructure to reuse, avoiding a background rescan that could block the
   render loop.
-- **No OS drag-in.** Dragging files from Windows Explorer into the dock is not
-  wired; the existing editor has no generic file-drop payload for it. Internal
-  multi-asset and folder drags are supported.
 - **Cross-panel drop is limited to engine assets.** The path-array payload used
   by filesystem assets is still browser-local; only engine assets (primitives
   and materials) carry a typed drag payload that the MeshRenderer Inspector
   slots consume.
-- **No real image/texture thumbnails.** The engine cannot load image files, so
-  previews for `.boltscene` and generic files are Tabler icon stand-ins rather
-  than rendered content. They scale with the thumbnail-size slider instead of
-  staying a fixed 16px atlas icon.
+- **Explorer drops into floating Asset Browser windows are not supported.** The
+  pinned `winfloat.c` bridge has no `WM_DROPFILES` primitive, so a drop on a
+  floating panel is not delivered to the editor; only the main window and its
+  docked browser are drop targets.
+- **Only textures have a real importer.** Meshes (OBJ/glTF), audio, and other
+  binary files are still generic files. Material texture slots are the next
+  milestone; imported textures are not yet bound to `MeshRenderer`.
 - **Explorer integration is Windows-shell based.** Reveal launches
   `explorer.exe /select,<native path>`; project paths use forward slashes
   internally, so the handler converts them to Windows separators before the

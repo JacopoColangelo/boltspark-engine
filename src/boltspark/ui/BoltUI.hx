@@ -105,6 +105,10 @@ class BoltUI {
     public var onMoveFolder:Null<String->String->Void>;
     public var onRevealAsset:Null<String->Void>;
     public var onCopyAssetPath:Null<String->Void>;
+    /** External texture import request, with the browser's target folder. */
+    public var onImportAssets:Null<String->Void>;
+    /** Decoded thumbnail tile for a texture asset. */
+    public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
     /** Open an editor dialog as its own native top-level application window. */
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Start an editor-window host before the user reaches its menu leaf. */
@@ -328,6 +332,12 @@ class BoltUI {
         shell.onCopyAssetPath = function(source) {
             if (onCopyAssetPath != null) onCopyAssetPath(source);
         };
+        shell.onImportAssets = function(folder) {
+            if (onImportAssets != null) onImportAssets(folder);
+        };
+        shell.onQueryTextureTile = function(source) {
+            return onQueryTextureTile != null ? onQueryTextureTile(source) : null;
+        };
         shell.onOpenApplicationWindow = function(kind) {
             if (onOpenApplicationWindow != null) onOpenApplicationWindow(kind);
         };
@@ -379,6 +389,11 @@ class BoltUI {
         input.viewportNavigationQuery = function() {
             return shell.isViewportNavigationActive();
         };
+    }
+
+    /** Resolve a window-client point to a browser folder for OS file drops. */
+    public function folderAtWindowPoint(x:Float, y:Float):Null<String> {
+        return shell.folderAtWindowPoint(x, y);
     }
 
     /**

@@ -269,6 +269,14 @@ class EditorShell {
     public var onMoveFolder:Null<String->String->Void>;
     public var onRevealAsset:Null<String->Void>;
     public var onCopyAssetPath:Null<String->Void>;
+    /** External texture import request, with the browser's target folder. */
+    public var onImportAssets:Null<String->Void>;
+    /** Decoded thumbnail tile for a texture asset. */
+    public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
+    /** Resolve a window-client point to a browser folder for OS file drops. */
+    public function folderAtWindowPoint(x:Float, y:Float):Null<String> {
+        return assetBrowser.folderAtWindowPoint(x, y);
+    }
     /** Application-level dialogs are routed upward and hosted in native windows. */
     public var onOpenApplicationWindow:Null<ApplicationWindowKind->Void>;
     /** Opportunistically initialize a hidden host before its menu command runs. */
@@ -1177,6 +1185,12 @@ class EditorShell {
         };
         assetBrowser.onCopyAssetPath = function(source) {
             if (onCopyAssetPath != null) onCopyAssetPath(source);
+        };
+        assetBrowser.onImportAssets = function(folder) {
+            if (onImportAssets != null) onImportAssets(folder);
+        };
+        assetBrowser.onQueryTextureTile = function(source) {
+            return onQueryTextureTile != null ? onQueryTextureTile(source) : null;
         };
         palette = new GameObjectPalette(ctx, root);
         palette.onCreatePrimitive = function(meshId) {

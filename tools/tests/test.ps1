@@ -16,7 +16,10 @@ param(
     [switch]$FovInput,
     [switch]$KeybindingsList,
     [switch]$ProjectFiles,
-    [switch]$AssetBrowser
+    [switch]$AssetBrowser,
+    [switch]$ImportFiles,
+    [switch]$ExplorerDrop,
+    [switch]$UntitledSession
 )
 
 $ErrorActionPreference = 'Stop'
@@ -180,8 +183,9 @@ try {
         @{ Name = 'PlayModeRepro'; Output = 'play-mode-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
-        @{ Name = 'AssetBrowserRepro'; Output = 'asset-browser-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
-        @{ Name = 'ThumbnailPipelineRepro'; Output = 'thumbnail-pipeline-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') }
+        @{ Name = 'AssetBrowserRepro'; Output = 'asset-browser-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'format') },
+        @{ Name = 'ThumbnailPipelineRepro'; Output = 'thumbnail-pipeline-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') },
+        @{ Name = 'TextureCacheRepro'; Output = 'texture-cache-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') }
     )
     foreach ($test in $hlTests) {
         $output = Join-Path $testOutput $test.Output
@@ -274,6 +278,18 @@ try {
         Assert-LastExitCode 'Asset Browser probe'
         & (Join-Path $repoRoot 'tests\native\Test-RevealRoot.ps1')
         Assert-LastExitCode 'Asset Browser root reveal probe'
+    }
+    if ($ImportFiles) {
+        & (Join-Path $repoRoot 'tests\native\Test-ImportFiles.ps1')
+        Assert-LastExitCode 'Native import dialog probe'
+    }
+    if ($ExplorerDrop) {
+        & (Join-Path $repoRoot 'tests\native\Test-ExplorerDrop.ps1')
+        Assert-LastExitCode 'Windows Explorer drop probe'
+    }
+    if ($UntitledSession) {
+        & (Join-Path $repoRoot 'tests\native\Test-UntitledSession.ps1')
+        Assert-LastExitCode 'Untitled session probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

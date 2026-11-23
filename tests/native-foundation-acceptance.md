@@ -315,6 +315,57 @@ DX12 transport probe. Runtime evidence is in `bin/test-results/play-mode/`.
   playing, while camera navigation stays live; Stop rebuilds the authored
   editor views and restores the grid preference.
 
+## External asset import and Explorer drag-in
+
+Executed 2026-11-23 on the dev machine. Final evidence:
+`bin/test-results/import-files/aaa5bf403b4647b8a162f2b4e6b508ec/`
+(`stdout.log`, `workspace/Import Demo.boltproject`, and
+`imported-texture-thumbnail.png`),
+`bin/test-results/explorer-drop/5f2d83d74ac147a3adb2290eb1f60019/`
+(`stdout.log` and `workspace/Drop Demo.boltproject`), and
+`bin/test-results/untitled-session/e8055ef725fc4f7d8be35574ed6abcdf/`
+(`stdout.log` and isolated `workspace/`). Probes recreate a fresh `<run-id>`
+folder on every run.
+
+- [x] PNG/JPG/JPEG/TGA are registered as loadable `texture` kinds by
+  `AssetTypeRegistry` and appear in the browser filter, Add menu, and New…
+  submenu (`tests/repro/AssetBrowserRepro.hx`, 126 checks passed).
+- [x] `ProjectSession.importAssets()` validates every path before copying,
+  rejects unsupported extensions and escaping folders, de-duplicates names,
+  copies into the project, appends `AssetRecord(type:"texture")`, and saves the
+  manifest. Repeat imports and rejected imports leave the manifest consistent
+  (`tests/repro/AssetBrowserRepro.hx`).
+- [x] Add → Import Asset reaches the native picker call site with an
+  image-only filter (PNG/JPG/JPEG/TGA, no All Files option) and **multi-select**:
+  one command imports a two-file JPG texture set. The probe copies a PNG, a
+  JPG named like the reported `Metal049C_2K` maps, and a two-map batch
+  directly into `Content/`, persists four texture records, and refreshes the browser
+  (`tests/native/Test-ImportFiles.ps1`, `stdout.log` and manifest in the
+  evidence folder). `tools/native/multifile.c` is a project-local native
+  extension built into `bin/multifile.hdll` and staged in the release; no
+  locked toolchain file was changed.
+- [x] Untitled sessions are interactive: the scratch `Content` folder is
+  visible, Add → Folder writes a folder, Add → Import Asset copies and decodes
+  a texture, and no `.boltproject` is created
+  (`tests/native/Test-UntitledSession.ps1`, headless coverage in
+  `tests/repro/AssetBrowserRepro.hx`).
+- [x] Texture cards use real decoded thumbnails. `TextureCache` reads headers
+  headlessly (`tests/repro/TextureCacheRepro.hx`), decodes via `hxd.res.Image`,
+  caps uploads to 256 px and installs a `realloc` callback for DX12 device
+  resets (device-reset restoration itself remains covered by the existing
+  `-DeviceReset` probe for the renderer). The native probe asserts the
+  tile-upload log line and records a `PrintWindow` capture at
+  `imported-texture-thumbnail.png`.
+- [x] Multi-file Explorer drops land in the folder under the cursor, import
+  both files, and register both records. Drops are refused during Play mode
+  without changing the manifest (`tests/native/Test-ExplorerDrop.ps1`).
+  A documented `BOLTSPARK_PROBE_DROP_DIR` hook feeds the production drop
+  handler because a cross-process synthetic `WM_DROPFILES` cannot marshal its
+  `HGLOBAL` into the editor process.
+- [ ] Explorer drops into a *floating* Asset Browser window (deferred: the
+  pinned `winfloat.c` bridge has no drop-files primitive).
+- [ ] Material albedo texture slots bound to imported textures (next milestone).
+
 ## Platform and toolchain
 
 - [x] Record Haxe, HashLink, Heaps, `format`, `hldx`, hlfreetype, and FreeType versions (`docs/TOOLCHAIN_VERSIONS.md`).

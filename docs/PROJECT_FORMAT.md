@@ -111,6 +111,24 @@ the old file. Delete removes the asset and file, switches to a remaining scene
 when the active one is removed, and refuses to remove the last scene. Both keep
 `defaultSceneId` resolvable.
 
+Imported textures are non-scene `AssetRecord` entries with
+`type: "texture"`, a project-relative `source` under the import folder
+(`Content/` by default, no `Textures` subfolder), and `importSettings` such as
+`{ "format": "png" }`. The schema already permits arbitrary type strings, so
+adding them needs no migration or version bump: `ProjectValidator` checks the
+same id/type/source/settings rules, `ProjectCodec` preserves their fields, and
+`defaultSceneId` still points at a `scene` record. `ProjectSession.importAssets()`
+copies external PNG/JPG/JPEG/TGA files into the project before registering
+them; external absolute paths are never stored in the manifest. Folder renames
+and moves repoint texture sources exactly as they repoint scene sources.
+
+Until a manifest exists, `ProjectSession` uses an **untitled session**: asset
+records stay in memory, asset operations resolve against a scratch `Content/`
+folder under the working directory, and only scene documents are written. No
+`.boltproject` is created until Save Project As. The same `AssetRecord` shapes
+and `Content/` convention apply, so a later project uses the same
+paths; scratch files themselves are not copied into the new project.
+
 `DocumentStore.read` strips a UTF-8 BOM before decoding, so manifests and scenes
 edited by common Windows text editors still load. A `.boltproject` path passed
 as the editor's command-line argument (or `--project=…`) opens at startup; the

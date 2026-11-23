@@ -77,6 +77,10 @@ class AssetBrowser extends h2d.Object {
     public var onMoveFolder:Null<String->String->Void>;
     public var onRevealAsset:Null<String->Void>;
     public var onCopyAssetPath:Null<String->Void>;
+    /** Request an external file import into the given folder (empty = default). */
+    public var onImportAssets:Null<String->Void>;
+    /** Decoded thumbnail tile for a texture asset, or null when unavailable. */
+    public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
 
     static inline var TOOLBAR_HEIGHT:Float = 26;
     /** The three navigation hits occupy x=4..74 inside the toolbar. */
@@ -422,6 +426,12 @@ class AssetBrowser extends h2d.Object {
                         beginRenameFolder(created);
                     }
                 }
+            }, {
+                // Appended last so native probes that address Scene/Folder by
+                // row offset keep working. Import is a command: the picker,
+                // copy, and manifest write all live above this widget.
+                label: "Import Asset...",
+                onClick: importAssets
             }]);
         };
         addMenu = new MenuDropdown(ctx, menus);
@@ -1026,6 +1036,7 @@ class AssetBrowser extends h2d.Object {
         var options = [
             {key: "all", label: "All assets"},
             {key: AssetTypeRegistry.KIND_SCENE, label: AssetTypeRegistry.SCENE_INFO_LABEL},
+            {key: AssetTypeRegistry.KIND_TEXTURE, label: AssetTypeRegistry.TEXTURE_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_ENGINE, label: AssetTypeRegistry.ENGINE_INFO_LABEL},
             {key: AssetTypeRegistry.KIND_FILE, label: AssetTypeRegistry.FILE_INFO_LABEL},
             {key: "favorites", label: "Favorites"},
@@ -1792,6 +1803,16 @@ class AssetBrowser extends h2d.Object {
         buildFolders();
     }
 
+    /**
+     * Map a window-client point (as delivered by `hxd.DropFileEvent`) to a
+     * browser folder. Internal drags already pass local coordinates; OS drops
+     * arrive in window space and must be transformed through the dock layout.
+     */
+    public function folderAtWindowPoint(x:Float, y:Float):Null<String> {
+        var local = globalToLocal(new h2d.col.Point(x, y));
+        return folderAt(local.x, local.y);
+    }
+
     /** Folder drop target in either the hierarchy pane or the main panel. */
     function folderAt(x:Float, y:Float):Null<String> {
         for (rect in assetFolderRects) {
@@ -1997,6 +2018,29 @@ class AssetBrowser extends h2d.Object {
         return hit;
     }
 
+    /**
+     * Draw a decoded texture tile fitted inside `size`. Returns false when no
+     * tile is available so callers can fall back to their normal glyph.
+     */
+    function drawTextureThumb(g:h2d.Graphics, source:String,
+            x:Float, y:Float, size:Float):Bool {
+        if (onQueryTextureTile == null) return false;
+        var tile = onQueryTextureTile(source);
+        if (tile == null || tile.width <= 0 || tile.height <= 0) return false;
+        var scale = Math.min(size / tile.width, size / tile.height);
+        var width = Math.max(1, Std.int(tile.width * scale));
+        var height = Math.max(1, Std.int(tile.height * scale));
+        g.beginFill(0x000000, 0.22);
+        g.drawRect(x, y, size, size);
+        g.endFill();
+        // scaleToSize mutates its tile; clone so the cached tile keeps its
+        // original dimensions for every other card in the grid.
+        var fitted = tile.clone();
+        fitted.scaleToSize(width, height);
+        g.drawTile(x + (size - width) * 0.5, y + (size - height) * 0.5, fitted);
+        return true;
+    }
+
     /** Large preview tile. Scenes use Tabler's `outline/photo` glyph - a framed
      *  landscape is the familiar shorthand for a level/scene thumbnail - and
      *  generic files keep a neutral document glyph. Both scale with the
@@ -2015,7 +2059,10 @@ class AssetBrowser extends h2d.Object {
             PrimitiveThumbnails.draw(g, payload == null ? "" : payload.assetId,
                 cardX, cardY, cardSize, cardSize,
                 selected ? Theme.ACCENT : Theme.CUBE_ORANGE);
-        } else if (entry.loadable) {
+        } else if (entry.kind == AssetTypeRegistry.KIND_TEXTURE
+                && drawTextureThumb(g, entry.source, cardX, cardY, cardSize)) {
+            // Real decoded image, capped to a small GPU tile by TextureCache.
+        } else if (entry.loadable && entry.kind == AssetTypeRegistry.KIND_SCENE) {
             var iconSize = cardSize * 0.86;
             UiIcons.drawSceneThumb(g, cx - iconSize * 0.5, cy - iconSize * 0.5,
                 iconSize, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
@@ -2192,6 +2239,9 @@ class AssetBrowser extends h2d.Object {
             var payload = EngineAssetCatalog.dragPayload(entry);
             PrimitiveThumbnails.draw(g, payload == null ? "" : payload.assetId,
                 x, y, size, size, color);
+        } else if (entry != null && entry.kind == AssetTypeRegistry.KIND_TEXTURE
+                && drawTextureThumb(g, entry.source, x, y, size)) {
+            // Grid/list miniature from the same decoded thumbnail cache.
         } else {
             UiIcons.draw(g, entry == null ? Document : iconFor(entry),
                 x, y, size, color);
@@ -2718,6 +2768,13 @@ class AssetBrowser extends h2d.Object {
     }
 
     /** Right-click over empty space anywhere in the browser. */
+    /** Request an external import; the destination follows browser navigation. */
+    function importAssets():Void {
+        var folder = isEngineFolder(selectedFolder) ? "" : selectedFolder;
+        Sys.println('[probe] asset browser import request folder=${folder}');
+        if (onImportAssets != null) onImportAssets(folder);
+    }
+
     /** Shared New... submenu; Folder is first and more kinds can be appended. */
     function newMenuItems(parent:String):Array<MenuItem> {
         return [{
@@ -2735,6 +2792,14 @@ class AssetBrowser extends h2d.Object {
             onClick: function() {
                 var target = parent == "" ? "Scenes" : parent;
                 if (onNewScene != null) onNewScene(target, "New Scene");
+            }
+        }, {
+            // Last row, matching the toolbar Add menu.
+            label: "Import Asset...",
+            onClick: function() {
+                var folder = isEngineFolder(parent) ? "" : parent;
+                Sys.println('[probe] asset browser import request folder=${folder}');
+                if (onImportAssets != null) onImportAssets(folder);
             }
         }];
     }

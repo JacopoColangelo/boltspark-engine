@@ -34,6 +34,9 @@ $freeTypeSource = Join-Path $hlFreeTypeRoot 'vendor\freetype'
 $winFloatSource = Join-Path $repoRoot 'tools\native\winfloat.c'
 $winFloatModule = Join-Path $repoRoot 'bin\winfloat.hdll'
 $winFloatImportLibrary = Join-Path $repoRoot 'bin\winfloat.lib'
+$multiFileSource = Join-Path $repoRoot 'tools\native\multifile.c'
+$multiFileModule = Join-Path $repoRoot 'bin\multifile.hdll'
+$multiFileImportLibrary = Join-Path $repoRoot 'bin\multifile.lib'
 
 $actionCount = 0
 foreach ($requestedAction in @($InstallDependencies, $Check, $Run)) {
@@ -313,6 +316,36 @@ function Build-WinFloatModule {
     Write-Host 'Native floating-panel module built (bin\winfloat.hdll).' -ForegroundColor Green
 }
 
+function Build-MultiFileModule {
+    # Multi-select common item dialog for importing texture sets in one command.
+    $visualStudio = Get-VisualStudioConfiguration
+    $vcvars = Join-Path $visualStudio.InstallationPath 'VC\Auxiliary\Build\vcvars64.bat'
+    if (-not (Test-Path $vcvars)) {
+        throw "vcvars64.bat was not found at $vcvars. Install the Desktop C++ workload."
+    }
+    $cl = Get-ChildItem -LiteralPath (Join-Path $visualStudio.InstallationPath 'VC\Tools\MSVC') `
+        -Recurse -Filter cl.exe |
+        Where-Object { $_.FullName -match 'Hostx64\\x64\\cl\.exe$' } |
+        Select-Object -First 1 -ExpandProperty FullName
+    if (-not $cl) { throw 'x64 cl.exe not found for the multi-file module.' }
+    Get-RequiredFile $multiFileSource `
+        'The native multi-file picker source tools\native\multifile.c is required.' | Out-Null
+
+    $command = "`"$vcvars`" >nul && `"$cl`" /nologo /LD /MD /O2 " +
+        "/I `"$hashLinkDir\include`" `"$multiFileSource`" /Fe:`"$multiFileModule`" " +
+        "/link /LIBPATH:`"$hashLinkDir`" libhl.lib ole32.lib uuid.lib shell32.lib"
+    Push-Location (Join-Path $repoRoot 'bin')
+    try {
+        & cmd.exe /c $command | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $multiFileModule) `
+                -or -not (Test-Path $multiFileImportLibrary)) {
+            throw 'Building the native multi-file picker module failed.'
+        }
+    }
+    finally { Pop-Location }
+    Write-Host 'Native multi-file picker module built (bin\multifile.hdll).' -ForegroundColor Green
+}
+
 function Install-TemporaryImportLibrary([string]$Source, [string]$Target,
         [string]$Backup, [bool]$HadOriginal) {
     if ($HadOriginal) {
@@ -502,6 +535,8 @@ function Test-Environment {
         "Restore pinned hlfreetype $hlFreeTypeVersion native source." | Out-Null
     Get-RequiredFile $winFloatSource `
         'The native floating-panel source tools\native\winfloat.c is required.' | Out-Null
+    Get-RequiredFile $multiFileSource `
+        'The native multi-file picker source tools\native\multifile.c is required.' | Out-Null
     Test-FreeTypeSource
     $monoFontSource = Get-RequiredFile `
         (Join-Path $repoRoot 'tools\font-source\JetBrainsMono.ttf') `
@@ -719,6 +754,9 @@ function New-NativeRelease {
     $winFloatImportLibraryTarget = Join-Path $hashLinkDir 'winfloat.lib'
     $winFloatImportLibraryBackup = Join-Path $nativeModuleBuild 'winfloat-original.lib'
     $hadWinFloatImportLibrary = Test-Path $winFloatImportLibraryTarget
+    $multiFileImportLibraryTarget = Join-Path $hashLinkDir 'multifile.lib'
+    $multiFileImportLibraryBackup = Join-Path $nativeModuleBuild 'multifile-original.lib'
+    $hadMultiFileImportLibrary = Test-Path $multiFileImportLibraryTarget
     if ($hadFreeTypeImportLibrary) {
         Copy-Item -LiteralPath $hashLinkFreeTypeImportLibrary `
             -Destination $freeTypeImportLibraryBackup -Force
@@ -754,8 +792,12 @@ function New-NativeRelease {
     Copy-Item -LiteralPath $freeTypeImportLibrary -Destination $hashLinkFreeTypeImportLibrary -Force
     Get-RequiredFile $winFloatImportLibrary `
         'Build the native floating-panel module before creating a release.' | Out-Null
+    Get-RequiredFile $multiFileImportLibrary `
+        'Build the native multi-file picker module before creating a release.' | Out-Null
     Install-TemporaryImportLibrary $winFloatImportLibrary $winFloatImportLibraryTarget `
         $winFloatImportLibraryBackup $hadWinFloatImportLibrary
+    Install-TemporaryImportLibrary $multiFileImportLibrary $multiFileImportLibraryTarget `
+        $multiFileImportLibraryBackup $hadMultiFileImportLibrary
     try {
         $previousErrorActionPreference = $ErrorActionPreference
         try {
@@ -770,6 +812,8 @@ function New-NativeRelease {
     finally {
         Restore-TemporaryImportLibrary $winFloatImportLibraryTarget `
             $winFloatImportLibraryBackup $hadWinFloatImportLibrary
+        Restore-TemporaryImportLibrary $multiFileImportLibraryTarget `
+            $multiFileImportLibraryBackup $hadMultiFileImportLibrary
         Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
         if ($hadFreeTypeImportLibrary) {
             Copy-Item -LiteralPath $freeTypeImportLibraryBackup `
@@ -817,6 +861,8 @@ function New-NativeRelease {
 
     Install-TemporaryImportLibrary $winFloatImportLibrary $winFloatImportLibraryTarget `
         $winFloatImportLibraryBackup $hadWinFloatImportLibrary
+    Install-TemporaryImportLibrary $multiFileImportLibrary $multiFileImportLibraryTarget `
+        $multiFileImportLibraryBackup $hadMultiFileImportLibrary
     try {
         Copy-Item -LiteralPath $patchedDirectXImportLibrary -Destination $directXImportLibrary -Force
         Copy-Item -LiteralPath $freeTypeImportLibrary -Destination $hashLinkFreeTypeImportLibrary -Force
@@ -830,6 +876,8 @@ function New-NativeRelease {
     finally {
         Restore-TemporaryImportLibrary $winFloatImportLibraryTarget `
             $winFloatImportLibraryBackup $hadWinFloatImportLibrary
+        Restore-TemporaryImportLibrary $multiFileImportLibraryTarget `
+            $multiFileImportLibraryBackup $hadMultiFileImportLibrary
         Copy-Item -LiteralPath $directXImportLibraryBackup -Destination $directXImportLibrary -Force
         if ($hadFreeTypeImportLibrary) {
             Copy-Item -LiteralPath $freeTypeImportLibraryBackup `
@@ -874,6 +922,8 @@ function New-NativeRelease {
             $freeTypeModule
         } elseif ($module -eq 'winfloat') {
             $winFloatModule
+        } elseif ($module -eq 'multifile') {
+            $multiFileModule
         } else {
             Join-Path $hashLinkDir $moduleFile
         }
@@ -905,7 +955,8 @@ function New-NativeRelease {
         'WinPixEventRuntime.dll',
         'THIRD-PARTY-LICENSES.txt',
         'freetype.hdll',
-        'winfloat.hdll'
+        'winfloat.hdll',
+        'multifile.hdll'
     )
     $replaceNames += $legacyLicenseNames
     $replaceNames += Get-ChildItem $hashLinkDir -Filter '*.hdll' -File | Select-Object -ExpandProperty Name
@@ -954,6 +1005,7 @@ try {
     New-Item -ItemType Directory -Force (Join-Path $repoRoot 'bin') | Out-Null
     Build-FreeTypeModule
     Build-WinFloatModule
+    Build-MultiFileModule
     & $haxeExe (Join-Path $repoRoot 'compile.hxml')
     if ($LASTEXITCODE -ne 0) { throw "Haxe compilation failed with exit code $LASTEXITCODE." }
     if (-not (Test-Path (Join-Path $repoRoot 'bin\boltspark.hl'))) {

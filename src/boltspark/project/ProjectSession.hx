@@ -20,6 +20,13 @@ typedef AssetFileInfo = {
     var loadable:Bool;
 };
 
+/** One validated external file waiting to be copied into the project. */
+typedef PendingImport = {
+    var from:String;
+    var destination:String;
+    var extension:String;
+};
+
 /** On-demand metadata for one asset, fetched for the inspector only. */
 typedef AssetDetails = {
     var source:String;
@@ -51,6 +58,8 @@ typedef AssetDetails = {
 class ProjectSession {
     public static inline var PROJECT_EXT:String = "boltproject";
     public static inline var SCENE_EXT:String = "boltscene";
+    /** Default destination for external imports: the Content root, no extra subfolder. */
+    public static inline var TEXTURE_FOLDER:String = "Content";
 
     public var project(default, null):ProjectDocument;
     public var scene(default, null):SceneDocument;
@@ -99,14 +108,16 @@ class ProjectSession {
 
         // A new project starts with a fresh empty scene; the current editor
         // graph is not carried over (Save As is the path that persists it).
+        // This first scene uses a fixed source: a fresh project must not be
+        // renamed just because another project shares the same directory.
         project.name = trimmed;
         project.assets.resize(0);
         savedRevision = 0;
-        var allocated = allocateScene("Main Scene", "Scenes");
+        projectPath = absolute;
+        var allocated = { name: "Main Scene", source: "Scenes/Main Scene.boltscene" };
         scene = new SceneDocument(StableId.create("scene"), allocated.name);
         sceneSource = allocated.source;
         var _ = bindSceneAsset();
-        projectPath = absolute;
         scenePath = resolvePath(sceneSource);
         saveDocuments();
     }
@@ -131,14 +142,15 @@ class ProjectSession {
         stateChanged();
     }
 
-    /** Open an existing scene inside the current project. */
+    /** Open an existing scene inside the current project or untitled scratch root. */
     public function openScene(path:String):Void {
-        if (projectPath == "") throw "Open or create a project before opening a scene.";
         path = withExtension(path, SCENE_EXT);
         requireExtension(path, SCENE_EXT);
         requireExists(path);
         var loaded = DocumentStore.loadScene(path);
-        var relative = relativeToProject(projectPath, path);
+        var relative = isUntitled()
+            ? relativeToRoot(projectRootDir(), path)
+            : relativeToProject(projectPath, path);
         scene = loaded;
         sceneSource = relative;
         scenePath = sys.FileSystem.absolutePath(path);
@@ -156,7 +168,6 @@ class ProjectSession {
      * allocated so a second "New Scene" can never overwrite the first one.
      */
     public function newScene(name:String = "Main Scene", folder:String = "Scenes"):Void {
-        if (projectPath == "") throw "Open or create a project before creating a scene.";
         var trimmed = StringTools.trim(name);
         if (trimmed.length == 0) throw "Scene name cannot be empty.";
         var allocated = allocateScene(trimmed, folder);
@@ -169,21 +180,45 @@ class ProjectSession {
         stateChanged();
     }
 
+    /** True until the session has a persisted `.boltproject` manifest. */
+    public function isUntitled():Bool return projectPath == "";
+
+    /**
+     * Scratch root for untitled sessions. It lives under the working directory
+     * so users can try folders/imports without creating a project, while the
+     * generated binaries and test output next to it stay out of the browser.
+     */
+    public static inline var UNTITLED_FOLDER:String = "Content";
+
+    function scanRootDir():String {
+        return isUntitled() ? Path.join([projectRootDir(), UNTITLED_FOLDER])
+            : projectRootDir();
+    }
+
+    function scanPrefix():String {
+        return isUntitled() ? UNTITLED_FOLDER : "";
+    }
+
+    static function prefixed(prefix:String, relative:String):String {
+        if (relative == "") return prefix;
+        return prefix == "" ? relative : prefix + "/" + relative;
+    }
+
     /**
      * Scan the project root on disk for asset files. The Asset Browser shows
      * real files (including ones not yet registered in the manifest) so a
      * project can be repaired by opening or deleting a discovered asset.
+     * Untitled sessions scan their scratch `Content/` folder instead.
      */
     public function scanAssets():Array<AssetFileInfo> {
         var result:Array<AssetFileInfo> = [];
-        if (projectPath == "") return result;
-        collectAssets(projectRootDir(), "", result);
+        collectAssets(scanRootDir(), "", scanPrefix(), result);
         result.sort(function(a, b) {
             var folderOrder = a.folder == b.folder ? 0 : (a.folder < b.folder ? -1 : 1);
             return folderOrder != 0 ? folderOrder
                 : (a.name == b.name ? 0 : (a.name < b.name ? -1 : 1));
         });
-        var registered = sceneSources();
+        var registered = registeredAssetSources();
         for (asset in result) {
             asset.active = asset.source == sceneSource;
             asset.registered = registered.indexOf(asset.source) >= 0;
@@ -191,7 +226,7 @@ class ProjectSession {
         return result;
     }
 
-    static function collectAssets(root:String, relative:String,
+    static function collectAssets(root:String, relative:String, prefix:String,
             output:Array<AssetFileInfo>):Void {
         var directory = relative == "" ? root : Path.join([root, relative]);
         if (!sys.FileSystem.exists(directory)
@@ -201,7 +236,7 @@ class ProjectSession {
             var childRelative = relative == "" ? entry : relative + "/" + entry;
             var fullPath = Path.join([root, childRelative]);
             if (sys.FileSystem.isDirectory(fullPath)) {
-                collectAssets(root, childRelative, output);
+                collectAssets(root, childRelative, prefix, output);
                 continue;
             }
             var lower = entry.toLowerCase();
@@ -209,9 +244,9 @@ class ProjectSession {
             var info = AssetTypeRegistry.infoFor(entry);
             var name = new Path(entry).file;
             output.push({
-                source: childRelative,
+                source: prefixed(prefix, childRelative),
                 name: name,
-                folder: relative,
+                folder: prefixed(prefix, relative),
                 kind: info.kind,
                 active: false,
                 registered: false,
@@ -225,13 +260,15 @@ class ProjectSession {
     /** All folders under the project root, including empty ones. */
     public function scanFolders():Array<String> {
         var result:Array<String> = [];
-        if (projectPath == "") return result;
-        collectFolders(projectRootDir(), "", result);
+        var prefix = scanPrefix();
+        collectFolders(scanRootDir(), "", prefix, result);
+        // The scratch root itself must be browsable even while it is empty.
+        if (prefix != "" && result.indexOf(prefix) < 0) result.push(prefix);
         result.sort(function(a, b) return a < b ? -1 : (a == b ? 0 : 1));
         return result;
     }
 
-    static function collectFolders(root:String, relative:String,
+    static function collectFolders(root:String, relative:String, prefix:String,
             output:Array<String>):Void {
         var directory = relative == "" ? root : Path.join([root, relative]);
         if (!sys.FileSystem.exists(directory)
@@ -241,8 +278,9 @@ class ProjectSession {
             var child = relative == "" ? entry : relative + "/" + entry;
             var full = Path.join([root, child]);
             if (!sys.FileSystem.isDirectory(full)) continue;
-            if (output.indexOf(child) < 0) output.push(child);
-            collectFolders(root, child, output);
+            var source = prefixed(prefix, child);
+            if (output.indexOf(source) < 0) output.push(source);
+            collectFolders(root, child, prefix, output);
         }
     }
 
@@ -251,17 +289,17 @@ class ProjectSession {
      * get their engine kind; unknown files stay listed as generic files so the
      * browser mirrors the filesystem without implying the engine can import
      * them. Internal files (manifest, backups, dot files) are skipped.
+     * Untitled sessions scan their scratch `Content/` folder instead.
      */
     public function scanAllAssets():Array<AssetFileInfo> {
         var result:Array<AssetFileInfo> = [];
-        if (projectPath == "") return result;
-        collectAllAssets(projectRootDir(), "", result);
+        collectAllAssets(scanRootDir(), "", scanPrefix(), result);
         result.sort(function(a, b) {
             var folderOrder = a.folder == b.folder ? 0 : (a.folder < b.folder ? -1 : 1);
             if (folderOrder != 0) return folderOrder;
             return a.name == b.name ? 0 : (a.name < b.name ? -1 : 1);
         });
-        var registered = sceneSources();
+        var registered = registeredAssetSources();
         for (asset in result) {
             asset.active = asset.loadable && asset.source == sceneSource;
             asset.registered = registered.indexOf(asset.source) >= 0;
@@ -269,7 +307,7 @@ class ProjectSession {
         return result;
     }
 
-    static function collectAllAssets(root:String, relative:String,
+    static function collectAllAssets(root:String, relative:String, prefix:String,
             output:Array<AssetFileInfo>):Void {
         var directory = relative == "" ? root : Path.join([root, relative]);
         if (!sys.FileSystem.exists(directory)
@@ -279,18 +317,20 @@ class ProjectSession {
             var childRelative = relative == "" ? entry : relative + "/" + entry;
             var fullPath = Path.join([root, childRelative]);
             if (sys.FileSystem.isDirectory(fullPath)) {
-                collectAllAssets(root, childRelative, output);
+                collectAllAssets(root, childRelative, prefix, output);
                 continue;
             }
             var info = AssetTypeRegistry.infoFor(entry);
             output.push({
-                source: childRelative,
+                source: prefixed(prefix, childRelative),
                 name: new Path(entry).file,
-                folder: relative,
+                folder: prefixed(prefix, relative),
                 kind: info.kind,
                 active: false,
                 registered: false,
-                extension: info.extension,
+                // The real extension, not the kind's canonical filter extension:
+                // a .jpg texture must not be reported as .png in detail/search.
+                extension: AssetTypeRegistry.extensionOf(entry),
                 kindLabel: info.label,
                 loadable: info.loadable
             });
@@ -327,7 +367,7 @@ class ProjectSession {
             kindLabel: info.label,
             extension: actualExtension,
             loadable: info.loadable,
-            registered: isRegisteredScene(normalized),
+            registered: isRegisteredAsset(normalized),
             active: info.loadable && normalized == sceneSource,
             absolutePath: absolute,
             size: size,
@@ -468,6 +508,60 @@ class ProjectSession {
     }
 
     /**
+     * Copy external image files into the project and register each one as a
+     * `texture` asset. This is the single write path shared by the native
+     * Import dialog and Explorer drops; neither caller touches the manifest.
+     *
+     * Every input is validated before anything is copied, so a bad extension,
+     * missing file, or unsafe folder leaves the project untouched. Destination
+     * names are sanitized and made unique, external paths are never persisted,
+     * and existing files are never overwritten.
+     *
+     * @return project-relative sources of the files that were imported, in
+     *         input order.
+     */
+    public function importAssets(paths:Array<String>, targetFolder:String):Array<String> {
+        if (paths == null || paths.length == 0) return [];
+        var requested = targetFolder == null ? "" : StringTools.trim(targetFolder);
+        var folder = requested.length == 0 ? TEXTURE_FOLDER : normalizeFolder(requested);
+
+        var pending:Array<PendingImport> = [];
+        for (path in paths) {
+            if (path == null || StringTools.trim(path).length == 0) {
+                throw "An import path is required.";
+            }
+            var absolute = sys.FileSystem.absolutePath(path);
+            if (!sys.FileSystem.exists(absolute) || sys.FileSystem.isDirectory(absolute)) {
+                throw 'Import file not found: ${absolute}';
+            }
+            var extension = AssetTypeRegistry.extensionOf(absolute);
+            if (!AssetTypeRegistry.isTextureExtension(extension)) {
+                throw 'Unsupported import format: ${extension == "" ? "(none)" : extension}';
+            }
+            var leaf = safeFileName(new Path(absolute).file + "." + extension);
+            pending.push({
+                from: absolute,
+                destination: uniqueAssetPath(folder, leaf, ""),
+                extension: extension
+            });
+        }
+
+        var imported:Array<String> = [];
+        for (item in pending) {
+            var to = resolveAgainst(projectRootDir(), item.destination);
+            ensureDirectory(new Path(to).dir);
+            sys.io.File.copy(item.from, to);
+            project.assets.push(new AssetRecord(StableId.create("asset"), "texture",
+                item.destination, { format: item.extension }));
+            imported.push(item.destination);
+        }
+        saveManifestIfOpen();
+        dirty = true;
+        stateChanged();
+        return imported;
+    }
+
+    /**
      * Delete a folder. `recursive` must be true for non-empty folders; the UI
      * asks for confirmation first. Registered scenes inside the folder are
      * unregistered, and the last remaining scene can never be removed this way.
@@ -477,6 +571,9 @@ class ProjectSession {
         var normalized = normalizeFolder(folder);
         if (normalized == "") return false;
         var prefix = normalized + "/";
+        // An untitled session has no manifest scene count to protect. Still
+        // refuse the folder holding the in-memory active scene.
+        if (isUntitled()) return !StringTools.startsWith(sceneSource, prefix);
         var scenesInside = 0;
         for (asset in project.assets) {
             if (asset.type != "scene") continue;
@@ -502,7 +599,7 @@ class ProjectSession {
                 scenesInside++;
             }
         }
-        if (sceneSources().length - scenesInside < 1) {
+        if (!isUntitled() && sceneSources().length - scenesInside < 1) {
             throw "A project must keep at least one scene.";
         }
         var entries = collectRelativeEntries(absolute, normalized);
@@ -541,7 +638,7 @@ class ProjectSession {
         // The active scene may have lived in the removed folder. Rebind the
         // default scene id before validation so the manifest stays consistent.
         bindSceneAsset();
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         dirty = true;
         stateChanged();
     }
@@ -563,10 +660,10 @@ class ProjectSession {
         requireExists(from);
         if (to == from) return normalized;
         if (sys.FileSystem.exists(to)) throw 'A folder already exists at ${destination}';
-        sys.FileSystem.createDirectory(new Path(to).dir);
+        ensureDirectory(new Path(to).dir);
         sys.FileSystem.rename(from, to);
         repointAssetPaths(normalized, destination);
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         dirty = true;
         stateChanged();
         return destination;
@@ -627,6 +724,24 @@ class ProjectSession {
         return base;
     }
 
+    /** Every manifest asset source, including imported textures and future kinds. */
+    public function registeredAssetSources():Array<String> {
+        var result:Array<String> = [];
+        for (asset in project.assets) {
+            var source = ProjectPath.normalizeRelative(asset.source);
+            if (result.indexOf(source) < 0) result.push(source);
+        }
+        return result;
+    }
+
+    function isRegisteredAsset(source:String):Bool {
+        var normalized = ProjectPath.normalizeRelative(source);
+        for (asset in project.assets) {
+            if (ProjectPath.normalizeRelative(asset.source) == normalized) return true;
+        }
+        return false;
+    }
+
     function isRegisteredScene(source:String):Bool {
         var normalized = ProjectPath.normalizeRelative(source);
         for (asset in project.assets) {
@@ -650,8 +765,10 @@ class ProjectSession {
      * callers that want a subfolder pass an explicit folder path.
      */
     public function createFolder(parent:String, name:String):String {
-        if (projectPath == "") throw "Open or create a project before creating folders.";
         var root = normalizeFolder(parent);
+        // Untitled sessions work inside the scratch Content folder, so an
+        // empty parent means that folder rather than the process working dir.
+        if (root == "" && isUntitled()) root = UNTITLED_FOLDER;
         var base = safeFileName(name);
         var relative = root == "" ? base : root + "/" + base;
         var suffix = 2;
@@ -659,13 +776,12 @@ class ProjectSession {
             relative = root == "" ? base + " " + suffix : root + "/" + base + " " + suffix;
             suffix++;
         }
-        sys.FileSystem.createDirectory(resolveAgainst(projectRootDir(), relative));
+        ensureDirectory(resolveAgainst(projectRootDir(), relative));
         return relative;
     }
 
     /** Rename a folder and repoint every asset path inside it. */
     public function renameFolder(folder:String, newName:String):String {
-        if (projectPath == "") throw "Open or create a project before renaming folders.";
         var normalized = assetFolder(folder);
         var parts = normalized.split("/");
         var parent = parts.length > 1 ? parts.slice(0, parts.length - 1).join("/") : "";
@@ -695,7 +811,7 @@ class ProjectSession {
             sceneSource = target + "/" + sceneSource.substr(prefix.length);
             scenePath = resolvePath(sceneSource);
         }
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         dirty = true;
         stateChanged();
         return target;
@@ -703,7 +819,6 @@ class ProjectSession {
 
     /** Move a registered scene into another folder. */
     public function moveScene(source:String, targetFolder:String):Void {
-        if (projectPath == "") throw "Open or create a project before moving assets.";
         var normalized = ProjectPath.normalizeRelative(source);
         var asset = requireSceneAsset(normalized);
         var folder = assetFolder(targetFolder);
@@ -713,21 +828,20 @@ class ProjectSession {
         var from = resolveAgainst(projectRootDir(), normalized);
         var to = resolveAgainst(projectRootDir(), destination);
         requireExists(from);
-        sys.FileSystem.createDirectory(new Path(to).dir);
+        ensureDirectory(new Path(to).dir);
         sys.FileSystem.rename(from, to);
         asset.source = destination;
         if (sceneSource == normalized) {
             sceneSource = destination;
             scenePath = to;
         }
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         dirty = true;
         stateChanged();
     }
 
     /** Copy a scene into another folder with fresh identities. */
     public function copyScene(source:String, targetFolder:String):String {
-        if (projectPath == "") throw "Open or create a project before copying assets.";
         var normalized = ProjectPath.normalizeRelative(source);
         requireSceneAsset(normalized);
         var folder = assetFolder(targetFolder);
@@ -742,10 +856,10 @@ class ProjectSession {
             DocumentStore.loadScene(resolveAgainst(projectRootDir(), normalized)),
             sceneDisplayName(destination));
         var to = resolveAgainst(projectRootDir(), destination);
-        sys.FileSystem.createDirectory(new Path(to).dir);
+        ensureDirectory(new Path(to).dir);
         DocumentStore.saveScene(to, document);
         project.assets.push(new AssetRecord(document.id, "scene", destination));
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         dirty = true;
         stateChanged();
         return destination;
@@ -786,7 +900,6 @@ class ProjectSession {
      * unique. The active scene keeps its identity and edited graph.
      */
     public function renameScene(source:String, newName:String):Void {
-        if (projectPath == "") throw "Open or create a project before renaming a scene.";
         var normalized = ProjectPath.normalizeRelative(source);
         var asset = requireSceneAsset(normalized);
         var trimmed = StringTools.trim(newName);
@@ -801,9 +914,10 @@ class ProjectSession {
         document.name = allocated.name;
         // Write the new target before repointing the manifest, so every
         // intermediate state still has a readable file at the registered path.
+        ensureDirectory(new Path(newPath).dir);
         DocumentStore.saveScene(newPath, document);
         asset.source = allocated.source;
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         if (oldPath != newPath) {
             sys.FileSystem.deleteFile(oldPath);
             removeBackup(oldPath);
@@ -819,7 +933,6 @@ class ProjectSession {
 
     /** Delete a registered scene. The last remaining scene cannot be removed. */
     public function deleteScene(source:String):Void {
-        if (projectPath == "") throw "Open or create a project before deleting a scene.";
         var normalized = ProjectPath.normalizeRelative(source);
         var asset = requireSceneAsset(normalized);
         if (sceneSources().length <= 1) {
@@ -838,7 +951,7 @@ class ProjectSession {
             scenePath = nextPath;
         }
         bindSceneAsset();
-        DocumentStore.saveProject(projectPath, project);
+        saveManifestIfOpen();
         if (sys.FileSystem.exists(path)) sys.FileSystem.deleteFile(path);
         removeBackup(path);
         dirty = true;
@@ -879,7 +992,13 @@ class ProjectSession {
      * editor graph. Used by the Asset Browser right after a scene is created.
      */
     public function persistSceneDocument():Void {
-        if (projectPath == "") throw "No project path; use Save Project As.";
+        if (isUntitled()) {
+            // No manifest to write yet, but the scene document must exist so
+            // the browser can find it and a later Save As has a file to promote.
+            ensureDirectory(new Path(scenePath).dir);
+            DocumentStore.saveScene(scenePath, scene);
+            return;
+        }
         saveDocuments();
     }
 
@@ -1006,10 +1125,12 @@ class ProjectSession {
         return { name: name, source: source };
     }
 
-    static function assetFolder(folder:String):String {
+    function assetFolder(folder:String):String {
         var trimmed = StringTools.trim(folder).split("\\").join("/");
-        if (trimmed.length == 0) return "Scenes";
-        return ProjectPath.normalizeRelative(trimmed);
+        var normalized = trimmed.length == 0 ? "Scenes" : ProjectPath.normalizeRelative(trimmed);
+        // Untitled scenes live inside the scratch Content folder so they show
+        // up in the browser alongside imported textures.
+        return isUntitled() ? UNTITLED_FOLDER + "/" + normalized : normalized;
     }
 
     function requireSceneAsset(source:String):AssetRecord {
@@ -1039,7 +1160,30 @@ class ProjectSession {
     }
 
     function projectRootDir():String {
-        return projectPath == "" ? Sys.getCwd() : new Path(projectPath).dir;
+        if (!isUntitled()) return new Path(projectPath).dir;
+        // Probe hook: native tests point untitled sessions at an isolated
+        // workspace instead of the shared bin working directory. Production
+        // behaviour is the working directory's scratch Content folder.
+        var probeDir = Sys.getEnv("BOLTSPARK_PROBE_UNTITLED_DIR");
+        if (probeDir != null && StringTools.trim(probeDir).length > 0) return probeDir;
+        return Sys.getCwd();
+    }
+
+    /**
+     * Persist manifest edits only when a real project exists. Untitled sessions
+     * keep asset records in memory so folders, imports, and scene experiments
+     * work without forcing a Save Project As first.
+     */
+    function saveManifestIfOpen():Void {
+        if (!isUntitled()) DocumentStore.saveProject(projectPath, project);
+    }
+
+    /** `createDirectory` is not recursive on every target; create parents too. */
+    static function ensureDirectory(path:String):Void {
+        if (path == null || path == "" || sys.FileSystem.exists(path)) return;
+        var parent = new Path(path).dir;
+        if (parent != null && parent != path && parent.length > 0) ensureDirectory(parent);
+        sys.FileSystem.createDirectory(path);
     }
 
     static function defaultSceneSource(project:ProjectDocument):String {
@@ -1065,7 +1209,11 @@ class ProjectSession {
 
     /** Validate that a chosen scene lives inside the current project root. */
     static function relativeToProject(projectPath:String, scenePath:String):String {
-        var root = normalizeSlashes(sys.FileSystem.absolutePath(new Path(projectPath).dir));
+        return relativeToRoot(new Path(projectPath).dir, scenePath);
+    }
+
+    static function relativeToRoot(rootPath:String, scenePath:String):String {
+        var root = normalizeSlashes(sys.FileSystem.absolutePath(rootPath));
         var absolute = normalizeSlashes(sys.FileSystem.absolutePath(scenePath));
         var lowerRoot = root.toLowerCase();
         var lowerFile = absolute.toLowerCase();
