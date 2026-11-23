@@ -121,8 +121,11 @@ Also fixed during diagnosis: `h3d.scene.DirLight` was removed from `Main.hx` (cl
   backend-independent input state tracks physical downs and reports unmatched
   releases as `orphanUp`, including releases after focus-loss clears held keys.
   It remains diagnostic and does not trigger editor commands.
-- Second-machine confirmation is unavailable and explicitly deferred until M9
-  by `tests/validation-policy.json`; it remains open rather than passed.
+- Second-machine confirmation was reported by the project owner on 2026-11-23:
+  the editor runs successfully on two additional Windows 11 / DX12 PCs. Accepted
+  as user-attested evidence (no per-machine artifacts retained), replacing the
+  earlier M9 deferral in `tests/validation-policy.json`. The mixed-DPI and
+  device-removal items remain deferred until M9.
 - Stale machine-level env vars on C: (dead paths) need admin to remove.
 - A cosmetic artifact: cube bottom edge shows slight z-fighting speckle at some angles (unlit cube, default renderer). Harmless at M0; will be revisited with the renderer work.
 
@@ -146,10 +149,11 @@ now the next product-facing boundary. Current priorities are:
 2. Follow project/scene loading with asset registry/import metadata.
 3. Continue incremental BoltUI widget migration onto stable IDs, generic layout,
    and pooled draw commands.
-4. Keep genuine driver-triggered DXGI device removal, physical mixed-DPI, and
-   second-machine confirmation open but non-blocking under the tracked
-   `ignoreExternalHardwareValidation` policy until M9 release hardening; the
-   explicit Heaps context-loss/recreation path remains covered automatically.
+4. Keep genuine driver-triggered DXGI device removal and physical mixed-DPI open
+   but non-blocking under the tracked `ignoreExternalHardwareValidation` policy
+   until M9 release hardening; the explicit Heaps context-loss/recreation path
+   remains covered automatically. Second-machine confirmation was supplied by
+   the project owner on 2026-11-23 and is no longer deferred.
 
 ## 10. Post-M0 foundation update — 2026-11-15
 

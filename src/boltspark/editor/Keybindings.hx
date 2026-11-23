@@ -27,12 +27,13 @@ typedef Binding = {
  */
 class Keybindings {
     static inline var FILE_NAME:String = "keybindings.json";
-    static inline var SCHEMA_VERSION:Int = 6;
+    static inline var SCHEMA_VERSION:Int = 7;
     static inline var VERSION_ONE_ACTION_COUNT:Int = 6;
     static inline var VERSION_TWO_ACTION_COUNT:Int = 8;
     static inline var VERSION_THREE_ACTION_COUNT:Int = 13;
     static inline var VERSION_FOUR_ACTION_COUNT:Int = 14;
     static inline var VERSION_FIVE_ACTION_COUNT:Int = 16;
+    static inline var VERSION_SIX_ACTION_COUNT:Int = 17;
 
     final directory:Null<String>;
     final filePath:Null<String>;
@@ -121,6 +122,9 @@ class Keybindings {
             case EditorAction.SaveCurrentScene: "Save Current Scene";
             case EditorAction.SaveAll: "Save All";
             case EditorAction.CutAsset: "Cut Asset";
+            case EditorAction.Play: "Play Scene";
+            case EditorAction.Pause: "Pause Scene";
+            case EditorAction.Stop: "Stop Scene";
             default: "Unknown Action";
         };
     }
@@ -176,6 +180,10 @@ class Keybindings {
         bindings[EditorAction.SaveCurrentScene] = {keyCode: hxd.Key.S, ctrl: true, shift: false};
         bindings[EditorAction.SaveAll] = {keyCode: hxd.Key.S, ctrl: true, shift: true};
         bindings[EditorAction.CutAsset] = {keyCode: hxd.Key.X, ctrl: true, shift: false};
+        // Play mode transport; function keys avoid the editing/save chords.
+        bindings[EditorAction.Play] = {keyCode: hxd.Key.F5, ctrl: false, shift: false};
+        bindings[EditorAction.Pause] = {keyCode: hxd.Key.F6, ctrl: false, shift: false};
+        bindings[EditorAction.Stop] = {keyCode: hxd.Key.F7, ctrl: false, shift: false};
         lastError = "";
         if (!quiet) {
             var saveError = save();
@@ -279,7 +287,7 @@ class Keybindings {
         }
         var storedVersion = Reflect.field(data, "version");
         if ((storedVersion != 1 && storedVersion != 2 && storedVersion != 3
-                && storedVersion != 4 && storedVersion != 5
+                && storedVersion != 4 && storedVersion != 5 && storedVersion != 6
                 && storedVersion != SCHEMA_VERSION)
                 || !Std.isOfType(Reflect.field(data, "bindings"), Array)) {
             lastError = 'Keybindings at ${filePath} have an unsupported format; using defaults.';
@@ -293,17 +301,7 @@ class Keybindings {
         var loaded:Array<Null<Binding>> = [];
         for (_ in 0...EditorAction.ACTION_COUNT) loaded.push(null);
         var chords:Map<String, Bool> = [];
-        var expectedActions = storedVersion == 1
-            ? VERSION_ONE_ACTION_COUNT
-            : (storedVersion == 2
-                ? VERSION_TWO_ACTION_COUNT
-                : (storedVersion == 3
-                    ? VERSION_THREE_ACTION_COUNT
-                    : (storedVersion == 4
-                        ? VERSION_FOUR_ACTION_COUNT
-                        : (storedVersion == 5
-                            ? VERSION_FIVE_ACTION_COUNT
-                            : (EditorAction.ACTION_COUNT : Int)))));
+        var expectedActions = expectedActionCount(storedVersion);
         for (entry in stored) {
             if (!Reflect.isObject(entry)) return invalidStoredBindings();
             var action = Reflect.field(entry, "action");
@@ -357,6 +355,19 @@ class Keybindings {
         }
         if (notify && onChanged != null) onChanged();
         return true;
+    }
+
+    /** Number of actions a stored schema version is expected to contain. */
+    static function expectedActionCount(version:Int):Int {
+        return switch (version) {
+            case 1: VERSION_ONE_ACTION_COUNT;
+            case 2: VERSION_TWO_ACTION_COUNT;
+            case 3: VERSION_THREE_ACTION_COUNT;
+            case 4: VERSION_FOUR_ACTION_COUNT;
+            case 5: VERSION_FIVE_ACTION_COUNT;
+            case 6: VERSION_SIX_ACTION_COUNT;
+            default: EditorAction.ACTION_COUNT;
+        };
     }
 
     function invalidStoredBindings():Bool {

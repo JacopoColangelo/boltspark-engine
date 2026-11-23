@@ -658,7 +658,20 @@ class FloatWindowManager {
         // hldx's Window.hl negates WM_MOUSEWHEEL, so the docked editor sees
         // wheel-down as +1. Match that convention for float widgets.
         event.wheelDelta = wheel > 0 ? -1 : (wheel < 0 ? 1 : 0);
-        emit(bound, event);
+        if (kind == hxd.Event.EventKind.EMove) {
+            ctx.invalidateNativeCursorCache();
+        }
+        try {
+            emit(bound, event);
+        } catch (error:Dynamic) {
+            // WM_SETCURSOR over a resize edge changes the OS cursor without
+            // updating Heaps' logical cache. Preserve the actual widget cursor
+            // selected by this event so returning to HTCLIENT restores it even
+            // when SceneEvents has no hover transition to dispatch.
+            NativeFloatWindow.rememberClientCursor(panel.handle);
+            throw error;
+        }
+        NativeFloatWindow.rememberClientCursor(panel.handle);
         return true;
     }
 
@@ -1070,33 +1083,44 @@ class FloatWindowManager {
             bound.layoutKey = "";
         }
         layoutBound(panel, bound);
+        // drawTo() does not run Scene.sync(). Synchronize first so a hover that
+        // moves/shows text, a tooltip or rebuilt rows can never render one frame
+        // with stale absolute transforms or stale glyph geometry.
+        @:privateAccess bound.scene.sync(bound.scene.ctx);
         bound.target.clear(Theme.PANEL);
         bound.scene.drawTo(bound.target);
-        // drawTo() renders the host directly; sync the scene so interactive
-        // absolute bounds and camera matrices are current for input hit tests.
-        @:privateAccess bound.scene.sync(bound.scene.ctx);
         var captured = bound.target.capturePixels();
         if (captured == null) return;
-        if (captured.format != RGBA) captured.convert(RGBA);
-        var count = w * h * 4;
-        if (captured.width != w || captured.height != h
-                || captured.bytes.length < count) return;
-        var src:hxd.impl.UncheckedBytes = captured.bytes;
-        var dst:hxd.impl.UncheckedBytes = panel.pixels;
-        var offset = captured.offset;
-        // D3D readback is bottom-up; StretchDIBits with a negative height wants
-        // top-down BGRA. The H2D header is part of the captured scene already.
-        for (y in 0...h) {
-            var srcRow = offset + y * w * 4;
-            var dstRow = y * w * 4;
-            for (x in 0...w) {
-                var at = x * 4;
-                dst[dstRow + at] = src[srcRow + at + 2];
-                dst[dstRow + at + 1] = src[srcRow + at + 1];
-                dst[dstRow + at + 2] = src[srcRow + at];
-                dst[dstRow + at + 3] = src[srcRow + at + 3];
+        try {
+            if (captured.format != RGBA) captured.convert(RGBA);
+            var count = w * h * 4;
+            if (captured.width == w && captured.height == h
+                    && captured.bytes.length >= count) {
+                var src:hxd.impl.UncheckedBytes = captured.bytes;
+                var dst:hxd.impl.UncheckedBytes = panel.pixels;
+                var offset = captured.offset;
+                // D3D readback is bottom-up; StretchDIBits with a negative height wants
+                // top-down BGRA. The H2D header is part of the captured scene already.
+                for (y in 0...h) {
+                    var srcRow = offset + y * w * 4;
+                    var dstRow = y * w * 4;
+                    for (x in 0...w) {
+                        var at = x * 4;
+                        dst[dstRow + at] = src[srcRow + at + 2];
+                        dst[dstRow + at + 1] = src[srcRow + at + 1];
+                        dst[dstRow + at + 2] = src[srcRow + at];
+                        dst[dstRow + at + 3] = src[srcRow + at + 3];
+                    }
+                }
             }
+        } catch (error:Dynamic) {
+            // capturePixels allocates a full CPU readback every repaint. Floats
+            // repaint continuously, so relying on GC here creates substantial
+            // transient pressure exactly while hover geometry is rebuilding.
+            captured.dispose();
+            throw error;
         }
+        captured.dispose();
     }
 
     /** Fill a clipped rectangle using a native row blit per scanline. */

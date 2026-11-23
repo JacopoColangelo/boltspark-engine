@@ -49,6 +49,12 @@ class InputAdapter {
     public var onSaveAllPressed:Null<Void->Void>;
     /** Ctrl+X (rebindable): cut the selected Asset Browser asset. */
     public var onCutPressed:Null<Void->Void>;
+    /** F5 (rebindable): enter Play mode. */
+    public var onPlayPressed:Null<Void->Void>;
+    /** F6 (rebindable): pause/resume the running scene. */
+    public var onPausePressed:Null<Void->Void>;
+    /** F7 (rebindable): leave Play mode and restore editor state. */
+    public var onStopPressed:Null<Void->Void>;
     /** The native window lost keyboard focus; release held navigation state. */
     public var onWindowFocusLost:Null<Void->Void>;
     /**
@@ -83,6 +89,9 @@ class InputAdapter {
     var saveCurrentSceneKeyDown:Int = -1;
     var saveAllKeyDown:Int = -1;
     var cutKeyDown:Int = -1;
+    var playKeyDown:Int = -1;
+    var pauseKeyDown:Int = -1;
+    var stopKeyDown:Int = -1;
 
     public function new(scene:h2d.Scene, keybindings:Keybindings,
             ?state:UiInputState) {
@@ -251,6 +260,27 @@ class InputAdapter {
                         cutKeyDown = event.keyCode;
                     }
                 }
+                if (keybindings.matches(EditorAction.Play, event.keyCode,
+                        ctrlDown, shiftDown)) {
+                    if (playKeyDown < 0) {
+                        if (onPlayPressed != null) onPlayPressed();
+                        playKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.Pause, event.keyCode,
+                        ctrlDown, shiftDown)) {
+                    if (pauseKeyDown < 0) {
+                        if (onPausePressed != null) onPausePressed();
+                        pauseKeyDown = event.keyCode;
+                    }
+                }
+                if (keybindings.matches(EditorAction.Stop, event.keyCode,
+                        ctrlDown, shiftDown)) {
+                    if (stopKeyDown < 0) {
+                        if (onStopPressed != null) onStopPressed();
+                        stopKeyDown = event.keyCode;
+                    }
+                }
                 if (event.keyCode == hxd.Key.ESCAPE && onEscapePressed != null) {
                     onEscapePressed();
                 }
@@ -277,6 +307,9 @@ class InputAdapter {
                 }
                 if (event.keyCode == saveAllKeyDown) saveAllKeyDown = -1;
                 if (event.keyCode == cutKeyDown) cutKeyDown = -1;
+                if (event.keyCode == playKeyDown) playKeyDown = -1;
+                if (event.keyCode == pauseKeyDown) pauseKeyDown = -1;
+                if (event.keyCode == stopKeyDown) stopKeyDown = -1;
                 if (event.keyCode == snapHoldKeyDown) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;
@@ -309,6 +342,9 @@ class InputAdapter {
                 saveCurrentSceneKeyDown = -1;
                 saveAllKeyDown = -1;
                 cutKeyDown = -1;
+                playKeyDown = -1;
+                pauseKeyDown = -1;
+                stopKeyDown = -1;
                 if (snapHoldKeyDown >= 0) {
                     if (onSnapHoldChanged != null) onSnapHoldChanged(false);
                     snapHoldKeyDown = -1;

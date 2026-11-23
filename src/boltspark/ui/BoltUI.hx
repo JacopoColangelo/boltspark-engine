@@ -111,6 +111,10 @@ class BoltUI {
     public var onPrepareApplicationWindow:Null<ApplicationWindowKind->Void>;
     public var onUndo:Null<Void->Void>;
     public var onRedo:Null<Void->Void>;
+    /** Transport toolbar and F5/F6/F7 shortcuts. */
+    public var onPlayPressed:Null<Void->Void>;
+    public var onPausePressed:Null<Void->Void>;
+    public var onStopPressed:Null<Void->Void>;
     /** Mouse wheel over the viewport (positive delta scrolls down). */
     public var onViewportWheel:Null<Float->Void>;
     /** Camera gesture start: GESTURE_* kind + viewport-local pointer. */
@@ -332,6 +336,9 @@ class BoltUI {
         };
         shell.onUndo = function() if (onUndo != null) onUndo();
         shell.onRedo = function() if (onRedo != null) onRedo();
+        shell.onPlayPressed = function() if (onPlayPressed != null) onPlayPressed();
+        shell.onPausePressed = function() if (onPausePressed != null) onPausePressed();
+        shell.onStopPressed = function() if (onStopPressed != null) onStopPressed();
         shell.onViewportWheel = function(delta) {
             if (onViewportWheel != null) onViewportWheel(delta);
         };
@@ -456,6 +463,11 @@ class BoltUI {
     public function setHistoryState(undoLabel:Null<String>,
             redoLabel:Null<String>):Void {
         shell.setHistoryState(undoLabel, redoLabel);
+    }
+
+    /** Reflect the live Play/Pause state on the transport buttons. */
+    public function setPlaybackState(playing:Bool, paused:Bool):Void {
+        shell.setPlaybackState(playing, paused);
     }
 
     /** Title-strip project/scene label, including the unsaved marker. */

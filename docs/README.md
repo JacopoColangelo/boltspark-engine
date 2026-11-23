@@ -128,9 +128,11 @@ resizable persisted panel regions, bounded picking, hierarchy/Inspector editing,
 three transform gizmos, native application windows, and reusable BoltUI/data
 foundations. A renderer-independent editor session now makes create, delete,
 rename, and transform operations undoable while preserving stable IDs and
-selection. It is still not a complete editor or the final immediate-mode API.
-Integrated project/scene open/save is now wired to the File menu. Asset import,
-plugins, custom render passes, PBR, and HIDE migration remain outside the current
+selection. Play mode now runs a serialized, detached scene copy so component
+lifecycle and runtime transforms cannot modify the authored editor state. It is
+still not a complete editor or the final immediate-mode API. Integrated
+project/scene open/save is now wired to the File menu. Asset import, plugins,
+custom render passes, PBR, and HIDE migration remain outside the current
 implementation boundary.
 
 The current BoltUI hybrid keeps retained H2D controls while using explicit frame

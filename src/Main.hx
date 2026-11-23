@@ -34,6 +34,8 @@ import boltspark.platform.InteractiveResize;
 import boltspark.project.EngineAssetCatalog;
 import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
+import boltspark.project.SceneSerializer;
+import boltspark.runtime.PlayModeSession;
 import boltspark.engine.Material;
 import boltspark.ui.AppIcon;
 import boltspark.ui.AssetDragPayload;
@@ -88,6 +90,22 @@ class Main extends hxd.App {
     var editorSession:EditorSession;
     /** Owns project/scene documents, paths, and dirty state. */
     var projectSession:ProjectSession;
+    /**
+     * Detached Play-mode scene copy. While non-null, component lifecycle runs
+     * only here and the editor session is frozen; Stop destroys it so the
+     * authored editor state is always restored exactly.
+     */
+    var playSession:Null<PlayModeSession> = null;
+    /** Editor grid preference preserved across a Play/Stop cycle. */
+    var playSavedGridVisible:Bool = true;
+
+    inline function isPlaying():Bool return playSession != null;
+
+    /** Session whose objects are currently projected into the Heaps scene. */
+    inline function activeSession():EditorSession {
+        return playSession == null ? editorSession : playSession.session;
+    }
+
     /** Loading replaces the whole session; its change notifications are not edits. */
     var suppressProjectDirty:Bool = false;
     var gizmo:TransformGizmo;
@@ -187,6 +205,10 @@ class Main extends hxd.App {
         applicationWindows = new ApplicationWindowManager();
         nativeWindow.onClose = function() {
             if (!confirmDiscardChanges()) return false;
+            if (playSession != null) {
+                playSession.destroy();
+                playSession = null;
+            }
             runtimeProbes.shutdown();
             if (boltUI != null) boltUI.shutdown();
             if (editorSession != null) editorSession.destroy();
@@ -274,7 +296,11 @@ class Main extends hxd.App {
         boltUI.onSnapToGrid = snapSelectionToGrid;
         boltUI.onUndo = undoEditorCommand;
         boltUI.onRedo = redoEditorCommand;
+        boltUI.onPlayPressed = playScene;
+        boltUI.onPausePressed = togglePlaybackPause;
+        boltUI.onStopPressed = stopScene;
         boltUI.onHierarchyObjectNameChanged = function(id, name) {
+            if (!canEdit()) return;
             var trimmed = StringTools.trim(name);
             if (trimmed.length == 0) {
                 boltUI.log("hierarchy: object name cannot be empty");
@@ -285,30 +311,43 @@ class Main extends hxd.App {
         boltUI.onCreateChildObject = createHierarchyObject;
         boltUI.onCreateChildPrimitive = createHierarchyPrimitive;
         boltUI.onCreateEmptyParent = function(ids) {
+            if (!canEdit()) return;
             editorSession.createEmptyParent(ids, "GameObject");
         };
-        boltUI.onDuplicateObjects = function(ids) editorSession.duplicateObjects(ids);
-        boltUI.onCopyObjects = function(ids) editorSession.copyObjects(ids);
-        boltUI.onPasteObjects = function(parentId) editorSession.pasteObjects(parentId);
-        boltUI.onQueryObjectClipboard = function() return editorSession.hasClipboard();
+        boltUI.onDuplicateObjects = function(ids) {
+            if (canEdit()) editorSession.duplicateObjects(ids);
+        };
+        boltUI.onCopyObjects = function(ids) {
+            if (canEdit()) editorSession.copyObjects(ids);
+        };
+        boltUI.onPasteObjects = function(parentId) {
+            if (canEdit()) editorSession.pasteObjects(parentId);
+        };
+        boltUI.onQueryObjectClipboard = function() return canEdit() && editorSession.hasClipboard();
         boltUI.onUnparentObjects = function(ids) {
+            if (!canEdit()) return;
             editorSession.unparentObjects(ids, true);
         };
         boltUI.onToggleObjectVisibility = function(id) {
+            if (!canEdit()) return;
             var object = editorSession.findObject(id);
             if (object != null) editorSession.setObjectVisible(id, !object.visible);
         };
         boltUI.onSetObjectEnabled = function(id, value) {
+            if (!canEdit()) return;
             if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
                 Sys.println('[probe] inspector object enabled=${value}');
             }
             editorSession.setObjectEnabled(id, value);
         };
-        boltUI.onSelectSubtree = editorSession.selectSubtree;
+        boltUI.onSelectSubtree = function(id) {
+            if (canEdit()) editorSession.selectSubtree(id);
+        };
         boltUI.onCanHierarchyDrop = function(ids, parentId) {
-            return editorSession.canReparentObjects(ids, parentId);
+            return canEdit() && editorSession.canReparentObjects(ids, parentId);
         };
         boltUI.onHierarchyDrop = function(ids, parentId, siblingIndex, preserveWorld) {
+            if (!canEdit()) return;
             editorSession.reparentObjects(ids, parentId, siblingIndex, preserveWorld);
         };
         boltUI.onOpenApplicationWindow = function(kind) {
@@ -394,6 +433,7 @@ class Main extends hxd.App {
         suppressProjectDirty = false;
 
         boltUI.onObjectNameChanged = function(name:String) {
+            if (!canEdit()) return;
             // A multi-selection has no single name to rename.
             if (editorSession.selectedObjectIds.length > 1) {
                 refreshSelectionInspector();
@@ -430,21 +470,25 @@ class Main extends hxd.App {
     override function update(dt:Float):Void {
         runtimeProbes.update(dt, h3d.Engine.getCurrent());
         applicationWindows.update();
-        editorSession.update(dt);
+        if (playSession != null) {
+            // Component lifecycle ticks the detached copy only. The editor
+            // session is deliberately frozen for the whole Play/Stop cycle.
+            playSession.update(dt);
+        } else {
+            editorSession.update(dt);
+        }
         if (keybindings.pollExternalChanges()) {
             logActivity("keybindings: synchronized changes from the settings window");
         }
-        // Editor camera navigation runs before everything that reads the
-        // camera this frame (gizmo follow, outline, rendering). Movement keys
-        // are inert unless an RMB free-look gesture owns the viewport; gizmo
-        // drags remain an additional safety lockout.
+        // Camera navigation stays live in Play mode so the running scene can
+        // be inspected; it never mutates either scene graph.
         cameraController.keyboardEnabled = !gizmoDragging;
         var viewport = boltUI.getViewportRect();
         cameraController.setViewportSize(viewport.width, viewport.height);
         cameraController.update(dt);
         boltUI.update(dt);
         axisGizmo.update();
-        updateViewportDropHover();
+        if (playSession == null) updateViewportDropHover();
         updateDragLabel();
         refreshCameraSpeedLabel();
         if (verboseLogging) {
@@ -456,17 +500,29 @@ class Main extends hxd.App {
                     + '${round2(cam.pos.y)}, ${round2(cam.pos.z)})');
             }
         }
-        gizmo.follow();
-        // A very large object can enclose the editor camera. Render that mesh
-        // two-sided only while inside it so it remains visibly present rather
-        // than looking as though it was deleted by a transform command.
-        for (sceneObject in sceneObjects) {
-            var model = editorSession.findObject(sceneObject.id);
-            if (model != null) sceneObject.synchronizeComponents(model);
-            refreshScaleRendering(sceneObject);
+        if (playSession == null) {
+            gizmo.follow();
+            // A very large object can enclose the editor camera. Render that
+            // mesh two-sided only while inside it so it remains visibly present
+            // rather than looking as though a transform command deleted it.
+            for (sceneObject in sceneObjects) {
+                var model = editorSession.findObject(sceneObject.id);
+                if (model != null) sceneObject.synchronizeComponents(model);
+                refreshScaleRendering(sceneObject);
+            }
+            refreshSelectionOutline();
+        } else {
+            // Runtime components may move their own Transform between frames.
+            // Replay the detached model's local transform into its Heaps view
+            // and keep culling correct; editor outline/gizmo stay hidden.
+            for (sceneObject in sceneObjects) {
+                var model = playSession.findObject(sceneObject.id);
+                if (model == null) continue;
+                sceneObject.synchronizeComponents(model);
+                sceneObject.applyTransform(model.transform.value);
+                refreshScaleRendering(sceneObject);
+            }
         }
-        // The selection outline tracks transform edits and gizmo drags.
-        refreshSelectionOutline();
     }
 
     override function onContextLost():Void {
@@ -521,6 +577,7 @@ class Main extends hxd.App {
     /** Route generic Inspector metadata back into the Transform command path. */
     function applyInspectorNumberChange(componentIndex:Int, propertyId:String,
             axis:Int, value:Float):Void {
+        if (!canEdit()) return;
         if (isSelectedTransform(componentIndex)) {
             var row = transformPropertyRow(propertyId);
             if (editorSession.selectedObjectIds.length > 1) {
@@ -559,6 +616,7 @@ class Main extends hxd.App {
 
     function applyInspectorTextChange(componentIndex:Int, propertyId:String,
             value:String):Void {
+        if (!canEdit()) return;
         if (editorSession.selectedObjectIds.length > 1) {
             var edited = false;
             for (id in editorSession.selectedObjectIds) {
@@ -633,6 +691,7 @@ class Main extends hxd.App {
     /** Assign a shared mesh/material asset from a type-aware Inspector picker. */
     function applyInspectorAssetChange(componentIndex:Int, propertyId:String,
             assetId:String):Void {
+        if (!canEdit()) return;
         var multi = editorSession.selectedObjectIds.length > 1;
         var ids = multi ? editorSession.selectedObjectIds.copy()
             : [editorSession.selectedObjectId];
@@ -673,6 +732,7 @@ class Main extends hxd.App {
     /** Apply a boolean Inspector toggle to the selected component(s). */
     function applyInspectorBoolChange(componentIndex:Int, propertyId:String,
             value:Bool):Void {
+        if (!canEdit()) return;
         // Boolean toggles are discrete clicks: history commits immediately and
         // the resulting session notify may safely rebuild the Inspector (no
         // drag capture is active, same as the asset-picker path).
@@ -822,6 +882,7 @@ class Main extends hxd.App {
     }
 
     function resetInspectorProperty(componentIndex:Int, propertyId:String):Void {
+        if (!canEdit()) return;
         if (isSelectedTransform(componentIndex)) {
             var row = transformPropertyRow(propertyId);
             if (row < 0) return;
@@ -892,6 +953,7 @@ class Main extends hxd.App {
 
     function setInspectorPropertyLinked(componentIndex:Int, propertyId:String,
             linked:Bool):Void {
+        if (!canEdit()) return;
         if (isSelectedTransform(componentIndex) && propertyId == "scale") {
             setScaleProportionsLinked(linked);
             return;
@@ -904,6 +966,7 @@ class Main extends hxd.App {
     }
 
     function addSelectedComponent(typeId:String):Void {
+        if (!canEdit()) return;
         if (editorSession.selectedObjectIds.length > 1) {
             boltUI.log("inspector: select a single object to add components");
             return;
@@ -922,6 +985,7 @@ class Main extends hxd.App {
 
     /** Remove a component through history; the mandatory Transform is protected. */
     function removeSelectedComponent(componentIndex:Int):Void {
+        if (!canEdit()) return;
         if (editorSession.selectedObjectIds.length > 1) {
             boltUI.log("inspector: select a single object to remove components");
             return;
@@ -1481,12 +1545,13 @@ class Main extends hxd.App {
     }
 
     function onViewportHover(x:Float, y:Float):Void {
-        if (gizmoDragging) return;
+        if (!canEdit() || gizmoDragging) return;
         var pointer = viewportPointer(x, y);
         gizmo.setHover(gizmo.pick(viewportRay(x, y), pointer.x, pointer.y));
     }
 
     function onViewportPush(x:Float, y:Float):Bool {
+        if (!canEdit()) return false;
         // A camera gesture owns the pointer; gizmo picking stays silent
         // until the gesture ends (Unreal-style navigation priority).
         if (cameraGesture >= 0) return false;
@@ -1552,7 +1617,7 @@ class Main extends hxd.App {
     }
 
     function onViewportDrag(x:Float, y:Float):Void {
-        if (!gizmoDragging) return;
+        if (!canEdit() || !gizmoDragging) return;
         var selected = getSelectedObject();
         if (selected == null) {
             cancelGizmoDrag();
@@ -1777,6 +1842,7 @@ class Main extends hxd.App {
      * translation enable flag — this is an explicit user command.
      */
     function snapSelectionToGrid():Void {
+        if (!canEdit()) return;
         var selected = getSelectedObject();
         if (selected == null || gizmoDragging) return;
         if (editorSession.selectedObjectIds.length > 1) {
@@ -1825,6 +1891,7 @@ class Main extends hxd.App {
 
     /** Ctrl+End with several objects selected: snap each world position. */
     function snapSelectionToGridMulti():Void {
+        if (!canEdit()) return;
         var step = snap.translationStep;
         var ids:Array<Int> = [];
         var befores:Array<EditorTransform> = [];
@@ -2154,7 +2221,7 @@ class Main extends hxd.App {
     }
 
     function onViewportRelease(x:Float, y:Float):Void {
-        if (!gizmoDragging) return;
+        if (!canEdit() || !gizmoDragging) return;
         gizmoDragging = false;
         endRelativeDrag();
         var handle = gizmoHandle;
@@ -2217,6 +2284,7 @@ class Main extends hxd.App {
     }
 
     function onViewportClick(x:Float, y:Float):Void {
+        if (!canEdit()) return;
         var pick = pickViewportObject(x, y);
         var nearestObject = pick.object;
         // Modifier semantics match the hierarchy: Ctrl toggles membership,
@@ -2251,9 +2319,12 @@ class Main extends hxd.App {
 
     /** Mirror the pure EditorSession model into Heaps scene objects. */
     function synchronizeSceneObjects():Void {
+        // Play mode projects the detached runtime copy instead of the editor
+        // session; both use the same model -> h3d bridge below.
+        var session = activeSession();
         var index = sceneObjects.length - 1;
         while (index >= 0) {
-            if (editorSession.findObject(sceneObjects[index].id) == null) {
+            if (session.findObject(sceneObjects[index].id) == null) {
                 sceneObjectsById.remove(sceneObjects[index].id);
                 sceneObjects[index].mesh.remove();
                 sceneObjects.splice(index, 1);
@@ -2262,7 +2333,7 @@ class Main extends hxd.App {
         }
 
         // Ensure every renderer node exists before linking parent references.
-        for (object in editorSession.objects) {
+        for (object in session.objects) {
             var sceneObject = findSceneObject(object.id);
             if (sceneObject == null) {
                 sceneObject = createSceneObjectView(object);
@@ -2272,7 +2343,7 @@ class Main extends hxd.App {
         }
 
         var ordered:Array<SceneObject> = [];
-        for (object in editorSession.hierarchy.flatten()) {
+        for (object in session.hierarchy.flatten()) {
             var sceneObject = findSceneObject(object.id);
             var parentView = object.parent == null
                 ? null : findSceneObject(object.parent.id);
@@ -2308,6 +2379,81 @@ class Main extends hxd.App {
         refreshSelectionInspector();
         boltUI.setHistoryState(editorSession.history.undoLabel,
             editorSession.history.redoLabel);
+    }
+
+    // ------------------------------------------------------------------
+    // Play mode. The editor session is the authoritative authored state;
+    // Play runs a serialized, detached copy and Stop discards it. No editor
+    // command, selection, or history entry is ever created by runtime updates.
+    // ------------------------------------------------------------------
+
+    /** Editor mutations are rejected while the detached runtime is running. */
+    inline function canEdit():Bool return !isPlaying();
+
+    /** Remove every Heaps view without touching either session's model. */
+    function clearSceneObjectViews():Void {
+        for (sceneObject in sceneObjects) sceneObject.mesh.remove();
+        sceneObjects.resize(0);
+        sceneObjectsById.clear();
+        selectionOutline.clear();
+    }
+
+    /** Capture the authored graph and start a detached runtime copy. */
+    function playScene():Void {
+        if (playSession != null) return;
+        // Never switch modes from inside a live editable gesture or capture.
+        if (gizmoDragging || cameraGesture >= 0 || keybindings.capturePending) return;
+        clearInspectorTransformEdit();
+        clearPrimitiveSettingsEdit();
+        try {
+            var scene = projectSession.scene;
+            var snapshot = SceneSerializer.fromSession(editorSession,
+                scene.id, scene.name);
+            var runtime = new PlayModeSession(snapshot);
+            playSavedGridVisible = gridRenderer.visible;
+            playSession = runtime;
+            gridRenderer.visible = false;
+            axisGizmo.visible = false;
+            clearSceneObjectViews();
+            synchronizeSceneObjects();
+            gizmo.attach(null);
+            boltUI.setPlaybackState(true, false);
+            printActivity('[probe] play started objects=${runtime.objects().length} '
+                + 'revision=${editorSession.history.revision}');
+            logActivity('play: started (${runtime.objects().length} objects)');
+        } catch (error:Dynamic) {
+            playSession = null;
+            gridRenderer.visible = playSavedGridVisible;
+            axisGizmo.visible = true;
+            synchronizeEditorSession();
+            boltUI.setPlaybackState(false, false);
+            boltUI.log('play: could not start — ${Std.string(error)}');
+        }
+    }
+
+    function togglePlaybackPause():Void {
+        var runtime = playSession;
+        if (runtime == null) return;
+        var paused = runtime.togglePaused();
+        boltUI.setPlaybackState(true, paused);
+        printActivity('[probe] play paused=${paused}');
+        logActivity(paused ? "play: paused" : "play: resumed");
+    }
+
+    /** Discard the runtime copy and restore the exact authored editor state. */
+    function stopScene():Void {
+        var runtime = playSession;
+        if (runtime == null) return;
+        playSession = null;
+        runtime.destroy();
+        gridRenderer.visible = playSavedGridVisible;
+        axisGizmo.visible = true;
+        clearSceneObjectViews();
+        synchronizeEditorSession();
+        boltUI.setPlaybackState(false, false);
+        printActivity('[probe] play stopped elapsed=${round2(runtime.elapsed)} '
+            + 'revision=${editorSession.history.revision}');
+        logActivity("play: stopped - editor state restored");
     }
 
     /** Keep back-face culling aligned with a reflected transform's winding. */
@@ -2377,17 +2523,20 @@ class Main extends hxd.App {
     static inline var ADD_IN_FRONT_DISTANCE:Float = 6.0;
 
     function createPrimitive(meshId:String):Void {
+        if (!canEdit()) return;
         var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
         createPrimitiveAtWorld(meshId, spot.x, spot.y, spot.z);
     }
 
     /** Hierarchy asset drop: same camera placement as Add, with drop parent. */
     function createPrimitiveInHierarchy(meshId:String, parentId:Int):Void {
+        if (!canEdit()) return;
         var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
         createPrimitiveAtWorld(meshId, spot.x, spot.y, spot.z, parentId);
     }
 
     function createEmptyObjectInFront():Void {
+        if (!canEdit()) return;
         var spot = pointInFrontOfCamera(ADD_IN_FRONT_DISTANCE);
         var limit = WorldBounds.HALF_EXTENT - 0.5;
         var name = "GameObject";
@@ -2589,6 +2738,7 @@ class Main extends hxd.App {
 
     function createPrimitiveAtViewport(meshId:String, viewX:Float,
             viewY:Float):Void {
+        if (!canEdit()) return;
         var ray = viewportRay(viewX, viewY);
         var x = editorSession.nextRuntimeId * 1.5;
         var z = 0.0;
@@ -2603,11 +2753,13 @@ class Main extends hxd.App {
     }
 
     function createPrimitiveAtPosition(meshId:String, x:Float, z:Float):Void {
+        if (!canEdit()) return;
         createPrimitiveAtWorld(meshId, x, 0, z);
     }
 
     function createPrimitiveAtWorld(meshId:String, x:Float, y:Float,
             z:Float, ?parentId:Int):Void {
+        if (!canEdit()) return;
         var name = primitiveName(meshId);
         // Newly added objects keep identity rotation/scale; constrain their
         // pivot before they enter session history.
@@ -2623,6 +2775,7 @@ class Main extends hxd.App {
     }
 
     function createHierarchyObject(parentId:Int, empty:Bool):Void {
+        if (!canEdit()) return;
         // Non-empty children go through createHierarchyPrimitive; this only
         // serves the "Empty Object" menu entry now.
         editorSession.createObject("GameObject", new EditorTransform(),
@@ -2630,12 +2783,14 @@ class Main extends hxd.App {
     }
 
     function createHierarchyPrimitive(parentId:Int, meshId:String):Void {
+        if (!canEdit()) return;
         var name = primitiveName(meshId);
         editorSession.createObject(name, new EditorTransform(), parentId,
             PrimitiveGameObjects.primitiveComponents(meshId));
     }
 
     function deleteSceneObjects(ids:Array<Int>):Void {
+        if (!canEdit()) return;
         var deletedNames = editorSession.deleteObjects(ids);
         if (deletedNames.length == 0) {
             boltUI.log("scene: selected objects no longer exist");
@@ -2646,6 +2801,7 @@ class Main extends hxd.App {
     }
 
     function selectSceneObjects(ids:Array<Int>, primaryId:Int):Void {
+        if (!canEdit()) return;
         clearInspectorTransformEdit();
         editorSession.selectObjects(ids, primaryId);
     }
@@ -2876,6 +3032,7 @@ class Main extends hxd.App {
     }
 
     function undoEditorCommand():Void {
+        if (!canEdit()) return;
         if (gizmoDragging || inspectorEditObjectId >= 0
                 || settingsEditPropertyId != "") return;
         var label = editorSession.history.undoLabel;
@@ -2885,6 +3042,7 @@ class Main extends hxd.App {
     }
 
     function redoEditorCommand():Void {
+        if (!canEdit()) return;
         if (gizmoDragging || inspectorEditObjectId >= 0
                 || settingsEditPropertyId != "") return;
         var label = editorSession.history.redoLabel;
@@ -2978,6 +3136,7 @@ class Main extends hxd.App {
 
     /** Replace the Heaps views and editor session with the loaded scene. */
     function reloadEditorSession():Void {
+        if (playSession != null) stopScene();
         suppressProjectDirty = true;
         if (editorSession != null) editorSession.destroy();
         editorSession = projectSession.createSession();

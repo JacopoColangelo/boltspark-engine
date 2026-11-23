@@ -206,19 +206,21 @@ try {
     if ($inspectorRedo.Groups[1].Value -ne $expectedStep) {
         throw "Inspector redo did not restore its stepped value: $($inspectorRedo.Groups[1].Value) != $expectedStep."
     }
-    if ($log -notmatch '\[history\] undo label=Create Cube2 object=sampleCube') {
-        throw 'Create undo did not remove Cube2 and restore the prior selection.'
+    # The Add palette names the first primitive "Cube" (or "Cube2" when a cube
+    # already exists), so accept either rather than pinning a stale literal.
+    if ($log -notmatch '\[history\] undo label=Create Cube2? object=sampleCube') {
+        throw 'Create undo did not remove the new cube and restore the prior selection.'
     }
     # Placement is camera-relative for Add-menu objects, so assert the command
     # result and selection rather than a fixed world position.
-    if ($log -notmatch '\[history\] redo label=Create Cube2 object=Cube2 position=\(') {
-        throw 'Create redo did not restore and select Cube2.'
+    if ($log -notmatch '\[history\] redo label=Create Cube2? object=Cube2? position=\(') {
+        throw 'Create redo did not restore and select the new cube.'
     }
-    if ($log -notmatch '\[history\] undo label=Delete Cube2 object=Cube2 position=\(') {
-        throw 'Delete undo did not restore Cube2 and its selection.'
+    if ($log -notmatch '\[history\] undo label=Delete Cube2? object=Cube2? position=\(') {
+        throw 'Delete undo did not restore the new cube and its selection.'
     }
-    if ($log -notmatch '\[history\] redo label=Delete Cube2 object=sampleCube') {
-        throw 'Delete redo did not remove Cube2 and select the remaining object.'
+    if ($log -notmatch '\[history\] redo label=Delete Cube2? object=sampleCube') {
+        throw 'Delete redo did not remove the new cube and select the remaining object.'
     }
 
     Write-Host '[history] Native gizmo/Inspector/create/delete Ctrl+Z/Ctrl+Y passed.' -ForegroundColor Green

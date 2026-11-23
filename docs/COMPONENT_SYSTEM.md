@@ -131,6 +131,12 @@ attached components. Removing a component or deleting its owner calls
 owner starts receive `onStart()` immediately. Destroyed instances cannot be
 reattached; undo/redo and duplication use `cloneComponent()`.
 
+In Play mode the same lifecycle is driven against a detached session rebuilt
+from a serialized scene snapshot, so runtime `onStart`/`onUpdate`/`onDestroy`
+never mutate the authored editor objects. Pausing suppresses updates, and Stop
+destroys the copy so the next Play starts fresh. See `PlayModeSession.hx` and
+`tests/repro/PlayModeRepro.hx`.
+
 ## Inspector and serialization extension
 
 Components override `inspectorData()` to publish UI-neutral property metadata.

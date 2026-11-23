@@ -37,6 +37,9 @@ class KeybindingsWindowContent extends h2d.Object {
         { name: "VIEWPORT", actions: [
             EditorAction.FocusSelection, EditorAction.ToggleGrid
         ] },
+        { name: "PLAY", actions: [
+            EditorAction.Play, EditorAction.Pause, EditorAction.Stop
+        ] },
         { name: "EDITING", actions: [
             EditorAction.Undo, EditorAction.Redo,
             EditorAction.DeleteSelection, EditorAction.RenameSelection

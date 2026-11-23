@@ -6,6 +6,7 @@
 - GPU: NVIDIA GeForce RTX 3080
 - GPU driver version/date: 32.0.16.2114 (2026-10-27)
 - Direct3D 12 feature level reported by the device: 12_1 (RTX 3080); DX12 driver initialized with default adapter (no explicit device name set by Heaps DX12Driver at M0)
+- Additional validation machines: the project owner reports the editor runs successfully on two further Windows 11 / DX12 PCs (user-attested 2026-11-23). Per-machine OS builds, GPUs, and driver versions were not recorded, so the hardware matrix above remains the only artifact-backed configuration.
 - Haxe (`haxe --version`): **5.0.0-preview.1+dcda605** (pinned development build, dated 2025-10-23) — installed at `toolchain/haxe-dev`
   - **Why a dev build:** Haxe 4.3.7 (latest stable) has **no** native `hl_carray` codegen (`genhl.ml` has zero `ACArray` support; verified from 4.3.7 source). Heaps 2.1.0's DX12 driver (`h3d/impl/DX12Driver.hx`) requires `hl.CArray` element access that 4.3.7 cannot compile correctly, and 4.3.7's stdlib declares `carray_get`/`carray_length` primitives that no released HashLink exports (verified against HashLink 1.16.0 `libhl.dll` PE exports: only `alloc_carray` + `carray_blit`). Dev builds 2024-12-20 through 2025-10-23 compile and run the full project; 2025-10-25+ is broken by Haxe commit `70820f1` ("Refactor event loops" — removes `EventLoop.progress` called by Heaps 2.1.0 `hxd/System.hl.hx:157`). The 2025-10-23 build is therefore the **newest working** compiler for Heaps 2.1.0 + HashLink 1.16 + DX12.
   - Ratified by the user on 2026-11-11.

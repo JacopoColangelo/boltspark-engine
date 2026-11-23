@@ -2,6 +2,7 @@ param(
     [switch]$Portable,
     [switch]$Build,
     [switch]$NativeSmoke,
+    [switch]$PlayMode,
     [switch]$CommandHistory,
     [switch]$ComponentRemoval,
     [switch]$RotationHandoff,
@@ -131,6 +132,7 @@ try {
             'SceneHierarchyRepro',
             'HierarchyOrderRepro',
             'KeybindingsMigrationRepro',
+            'PlayModeRepro',
             'ProjectSerializationRepro',
             'ProjectSessionRepro',
             'AssetBrowserRepro'
@@ -175,6 +177,7 @@ try {
         @{ Name = 'SceneObjectAffineRepro'; Output = 'scene-object-affine-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'SelectionOutlineEdgesRepro'; Output = 'selection-outline-edges-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
         @{ Name = 'KeybindingsMigrationRepro'; Output = 'keybindings-migration-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps') },
+        @{ Name = 'PlayModeRepro'; Output = 'play-mode-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'AssetBrowserRepro'; Output = 'asset-browser-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
@@ -209,6 +212,10 @@ try {
     if ($NativeSmoke) {
         & (Join-Path $repoRoot 'tests\native\Test-NativeSmoke.ps1')
         Assert-LastExitCode 'Native smoke test'
+    }
+    if ($PlayMode) {
+        & (Join-Path $repoRoot 'tests\native\Test-PlayMode.ps1')
+        Assert-LastExitCode 'Native play-mode test'
     }
     if ($CommandHistory) {
         & (Join-Path $repoRoot 'tests\native\Test-CommandHistory.ps1')

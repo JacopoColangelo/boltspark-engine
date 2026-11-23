@@ -259,5 +259,7 @@ pure model, including exact-affine correction matrices and world-space gizmos.
   boundaries and complex undo/redo; `SceneObjectAffineRepro.hx` verifies the
   nested Heaps bridge and shear-correction rebuild under HashLink.
 
-External mixed-DPI, physical device-removal, and second-machine checks remain
-open but are non-blocking until M9 under `tests/validation-policy.json`.
+External mixed-DPI and physical device-removal checks remain open but are
+non-blocking until M9 under `tests/validation-policy.json`. Second-machine
+confirmation was added 2026-11-23 as a user-attested report covering two
+additional Windows 11/DX12 PCs.

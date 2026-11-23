@@ -70,8 +70,16 @@ public static class BoltsparkFloatApi {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct CURSORINFO {
+        public int cbSize;
+        public int flags;
+        public IntPtr hCursor;
+        public POINT screenPos;
+    }
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO info);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
@@ -108,6 +116,12 @@ public static class BoltsparkFloatApi {
         RECT r;
         GetClientRect(h, out r);
         return new int[] { r.Right - r.Left, r.Bottom - r.Top };
+    }
+
+    public static IntPtr CurrentCursor() {
+        CURSORINFO info = new CURSORINFO();
+        info.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+        return GetCursorInfo(ref info) ? info.hCursor : IntPtr.Zero;
     }
 
     public static IntPtr[] FindPanelWindows(uint pid) {
@@ -251,6 +265,48 @@ try {
     # The editor and the float must both answer WM_NULL while the float is live.
     Assert-Responsive $main 'float idle (editor)'
     Assert-Responsive $floatWindow 'float idle (panel)'
+
+    # A native resize-edge cursor must not remain installed after returning to
+    # the float's H2D client. Compare real global HCURSOR handles rather than
+    # posting synthetic mouse messages: WM_NCHITTEST/WM_SETCURSOR must run in
+    # the same order as they do for a user moving the pointer.
+    $floatSize = [BoltsparkFloatApi]::ClientSize($floatWindow)
+    $origin = New-Object BoltsparkFloatApi+POINT
+    $origin.X = 0
+    $origin.Y = 0
+    if (-not [BoltsparkFloatApi]::ClientToScreen($floatWindow, [ref]$origin)) {
+        throw 'Could not resolve floating-panel client origin for cursor test.'
+    }
+    # Keep the probe point unobscured even when the editor was restored over the
+    # persisted float coordinates on a smaller desktop.
+    [void][BoltsparkFloatApi]::SetWindowPos(
+        $floatWindow, [IntPtr](-1), 0, 0, 0, 0, 0x0013) # TOPMOST, NOMOVE|NOSIZE|NOACTIVATE
+    [void][BoltsparkFloatApi]::SetForegroundWindow($floatWindow)
+    Start-Sleep -Milliseconds 100
+    $centerX = $origin.X + [int]($floatSize[0] / 2)
+    $centerY = $origin.Y + [int]($floatSize[1] / 2)
+    [void][BoltsparkFloatApi]::SetCursorPos($centerX, $centerY)
+    Start-Sleep -Milliseconds 150
+    $clientCursorBefore = [BoltsparkFloatApi]::CurrentCursor()
+    [void][BoltsparkFloatApi]::SetCursorPos($origin.X + 1, $centerY)
+    Start-Sleep -Milliseconds 150
+    $edgeCursor = [BoltsparkFloatApi]::CurrentCursor()
+    [void][BoltsparkFloatApi]::SetCursorPos($centerX, $centerY)
+    Start-Sleep -Milliseconds 150
+    $clientCursorAfter = [BoltsparkFloatApi]::CurrentCursor()
+    Write-Host "[float] Cursor handles client=$clientCursorBefore edge=$edgeCursor restored=$clientCursorAfter" -ForegroundColor DarkGray
+    if ($clientCursorBefore -eq [IntPtr]::Zero -or $edgeCursor -eq [IntPtr]::Zero) {
+        throw 'Could not query native cursor handles for floating-panel test.'
+    }
+    if ($edgeCursor -eq $clientCursorBefore) {
+        throw 'Floating-panel resize edge did not install a sizing cursor.'
+    }
+    if ($clientCursorAfter -ne $clientCursorBefore) {
+        throw 'Floating-panel sizing cursor remained active inside the client area.'
+    }
+    [void][BoltsparkFloatApi]::SetWindowPos(
+        $floatWindow, [IntPtr](-2), 0, 0, 0, 0, 0x0013) # NOTOPMOST
+    Write-Host '[float] Resize-edge cursor restoration passed.' -ForegroundColor DarkGray
 
     if ($Executable -eq 'boltspark.hl') {
         $beforeMenus = (Get-Content $stdout -Raw |

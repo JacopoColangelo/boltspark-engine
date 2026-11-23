@@ -35,6 +35,11 @@
 
 typedef struct {
     HWND hwnd;
+    /* Last cursor chosen by the H2D scene while the pointer was in this
+     * panel's client area. Edge hit tests temporarily install a sizing cursor
+     * without changing this value, so HTCLIENT can restore the real widget
+     * cursor immediately (before the next synthetic H2D mouse event). */
+    HCURSOR client_cursor;
     vclosure *on_event;
     int destroyed;
     /* Focus/capture messages can be sent synchronously while HashLink is
@@ -260,14 +265,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return HTCLIENT;
         }
         case WM_SETCURSOR:
-            /* Restore the arrow as soon as the pointer enters the client area;
-             * leave non-client hit tests (resize borders) to DefWindowProc. */
+            /* Edge hit tests install their own sizing cursor. Restore the last
+             * cursor selected by the client scene as soon as the pointer comes
+             * back inside; merely returning TRUE here leaves the edge cursor
+             * active indefinitely. */
             switch (LOWORD(lp)) {
                 case HTCLIENT:
-                    /* Heaps' SceneEvents chooses the client cursor (arrow,
-                     * text I-beam, splitter resize) while dispatching float
-                     * input. Resetting it to the arrow here made every H2D
-                     * cursor invisible inside floating panels. */
+                    SetCursor(panel != NULL && panel->client_cursor != NULL
+                        ? panel->client_cursor : LoadCursorA(NULL, IDC_ARROW));
                     return TRUE;
                 case HTLEFT: case HTRIGHT:
                     SetCursor(LoadCursorA(NULL, IDC_SIZEWE));
@@ -430,6 +435,7 @@ HL_PRIM void *HL_NAME(create)(vbyte *title, int x, int y, int w, int h,
     panel = (Panel *)calloc(1, sizeof(Panel));
     if (panel == NULL)
         return NULL;
+    panel->client_cursor = LoadCursorA(NULL, IDC_ARROW);
     panel->on_event = on_event;
     if (on_event != NULL)
         hl_add_root(&panel->on_event);
@@ -636,6 +642,20 @@ HL_PRIM void HL_NAME(release_capture)(void) {
     intentional_capture_release = 0;
 }
 
+/* Remember the actual cursor selected by SceneEvents after a client event.
+ * hxd.System caches logical cursors while Win32 changes the cursor directly
+ * over resize borders, so querying the real HCURSOR is more reliable than
+ * trying to duplicate Heaps' cursor-selection rules in native code. */
+HL_PRIM void HL_NAME(remember_client_cursor)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    HCURSOR cursor;
+    if (panel == NULL || !IsWindow(panel->hwnd))
+        return;
+    cursor = GetCursor();
+    if (cursor != NULL)
+        panel->client_cursor = cursor;
+}
+
 HL_PRIM void HL_NAME(set_title)(void *handle, vbyte *title) {
     Panel *panel = (Panel *)handle;
     if (panel == NULL || title == NULL || !IsWindow(panel->hwnd))
@@ -674,6 +694,7 @@ DEFINE_PRIM(_I32, client_origin_y, _ABSTRACT(dx_window));
 DEFINE_PRIM(_VOID, move_window, _WINFLOAT _I32 _I32);
 DEFINE_PRIM(_VOID, set_capture, _WINFLOAT);
 DEFINE_PRIM(_VOID, release_capture,);
+DEFINE_PRIM(_VOID, remember_client_cursor, _WINFLOAT);
 DEFINE_PRIM(_VOID, destroy, _WINFLOAT);
 DEFINE_PRIM(_WINFLOAT_LABEL, overlay_create,);
 DEFINE_PRIM(_VOID, overlay_paint, _WINFLOAT_LABEL _BYTES _I32 _I32 _I32 _I32);

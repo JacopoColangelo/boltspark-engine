@@ -17,9 +17,9 @@ This command does not need Neko, HashLink runtime DLLs, or a GPU. It:
 2. compiles the complete application to HashLink bytecode using the tracked
    source classpaths directly;
 3. runs the portable arcball, Euler, post-arcball rotation-ring, BoltUI-core, command-history,
-   editor-session, component-system, scene-hierarchy, keybinding-migration, and
-   project/scene-serialization, and Asset Browser data-layer tests through the
-   Haxe interpreter.
+   editor-session, component-system, scene-hierarchy, keybinding-migration,
+   play-mode isolation, project/scene-serialization, and Asset Browser data-layer
+   tests through the Haxe interpreter.
 
 The pinned compiler executable and its five adjacent Windows runtime DLLs are
 tracked as one hash-verified set; native HashLink/DX12 runtime modules remain
@@ -51,12 +51,13 @@ To rebuild everything first:
 Optional switches add real-window checks:
 
 ```powershell
-.\tools\tests\test.ps1 -Build -NativeSmoke -CommandHistory -ComponentRemoval -RotationHandoff -WindowLifecycle -SplitterCapture -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
+.\tools\tests\test.ps1 -Build -NativeSmoke -PlayMode -CommandHistory -ComponentRemoval -RotationHandoff -WindowLifecycle -SplitterCapture -DpiProbe -DeviceReset -FocusSelection -FovInput -KeybindingsList -ProjectFiles -AssetBrowser
 ```
 
 | Switch | Coverage |
 |---|---|
 | `-NativeSmoke` | Development and packaged release HWND creation, icon assignment, positive DX12-driver identity, empty stderr, and clean `WM_CLOSE`. |
+| `-PlayMode` | Clicks the transport Play button, pauses/resumes with F6 and stops with F7 in a real DX12 window. Asserts the runtime object count, elapsed time, and that the editor history revision is unchanged across the Play/Stop cycle (`tests/native/Test-PlayMode.ps1`). |
 | `-CommandHistory` | Native gizmo, Inspector, Create, and Delete commands followed by rebindable Ctrl+Z/Ctrl+Y; verifies transform, renderer-view, identity, and selection restoration in the running DX12 editor. |
 | `-ComponentRemoval` | Clicks the MeshRenderer header remove action on the starter cube and verifies the component detaches, then that Ctrl+Z/Ctrl+Y restore/remove it through command history. |
 | `-RotationHandoff` | Window-scoped center arcball followed by a snapped world-axis torus drag; verifies that the ring changes only its captured axis after an arbitrary freeform orientation. |
@@ -66,7 +67,7 @@ Optional switches add real-window checks:
 | `-DeviceReset` | Heaps DX12's public forced context-loss path, device/context recreation, resource restoration callback, and post-reset HWND responsiveness. |
 | `-FocusSelection` | Presses F while the pointer hovers the hierarchy panel instead of the viewport; verifies the selection-based focus command is not gated by viewport focus. |
 | `-FovInput` | Clicks the PERSPECTIVE strip, types an exact value into the transform-style FOV field, and verifies probe telemetry reports the committed field-of-view value. |
-| `-KeybindingsList` | Opens the native keybindings HWND, confirms all 17 actions are present, then shrinks the window and verifies the binding list switches to a scrollable mask. |
+| `-KeybindingsList` | Opens the native keybindings HWND, confirms all 20 actions in 7 categories are present, then shrinks the window and verifies the binding list becomes scrollable and its list height shrinks. |
 | `-ProjectFiles` | Drives the real File menu: Save Project As writes the manifest/scene (including bare names without an extension), the title dirty marker tracks edits, both unsaved-close answers are honored, Open Project rebuilds the saved scene graph, and Save Current Scene on an untitled project routes to Save Project As. Scripted probe paths replace the modal OS picker. |
 | `-AssetBrowser` | Launches the editor with a `.boltproject` argument (the .uproject-style path), verifies the file scan, creates a scene with Add → Scene, renames it inline, and double-clicks a scene to open it. Also creates and F2-renames a root-level folder, copies/pastes an asset with Ctrl+C/Ctrl+V, drag-drops a tile onto a folder for a direct move and with Ctrl for a copy, creates an explicit nested subfolder from a folder's context menu, drags a folder onto another folder to reparent it, checks folder-name rows and collapse/expand, fills the grid until scrolling is enabled, navigates via folder rows, back/forward arrows, and the root breadcrumb, uses the New… submenu to create a nested folder, right-clicks empty toolbar space for the Add menu, dismisses it with a left-click, scrolls with the wheel, and presses Delete on both assets and folders (asserting the folder is actually removed). Also runs `Test-RevealRoot.ps1`, which right-clicks the root "All" folder with no project loaded and invokes Reveal in Explorer to confirm it prompts project creation instead of throwing or opening a stray directory. Checks on-disk files and refresh markers. |
 
@@ -95,8 +96,11 @@ recreation path but is not a genuine driver-triggered `DXGI_ERROR_DEVICE_REMOVED
 event.
 
 The tracked flag `ignoreExternalHardwareValidation` in
-`tests/validation-policy.json` currently defers those checks and second-machine
-confirmation until M9 release hardening because the required external hardware
-and fault conditions are unavailable. The test runner reports that policy on
+`tests/validation-policy.json` currently defers those checks until M9 release
+hardening because the required external hardware and fault conditions are
+unavailable. Second-machine confirmation was closed on 2026-11-23 on the
+project owner's firsthand report that the editor runs successfully on two
+additional Windows 11 / DX12 PCs; it is recorded as user-attested because no
+per-machine artifacts were retained. The test runner reports the policy on
 every invocation. Deferred means non-blocking for current development—not
 passed—and the checklist items remain open until real evidence exists.

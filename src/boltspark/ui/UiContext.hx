@@ -94,8 +94,17 @@ class UiContext {
         arrowCursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.Arrow);
         sizeWECursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.SizeWE);
         sizeNSCursor = dx.Cursor.createSystem(dx.Cursor.CursorKind.SizeNS);
-        resizeHorizontal = hxd.Cursor.Callback(function() sizeWECursor.set());
-        resizeVertical = hxd.Cursor.Callback(function() sizeNSCursor.set());
+        resizeHorizontal = hxd.Cursor.Callback(function() {
+            // Callback cursors bypass hxd.System's logical cursor cache. Mark
+            // it non-Default first so the next ordinary client hover cannot be
+            // skipped while the native SizeWE cursor remains installed.
+            hxd.System.setCursor(hxd.Cursor.Move);
+            sizeWECursor.set();
+        });
+        resizeVertical = hxd.Cursor.Callback(function() {
+            hxd.System.setCursor(hxd.Cursor.Move);
+            sizeNSCursor.set();
+        });
         #else
         resizeHorizontal = hxd.Cursor.Move;
         resizeVertical = hxd.Cursor.Move;
@@ -131,6 +140,18 @@ class UiContext {
         arrowCursor.set();
         #else
         hxd.System.setCursor(hxd.Cursor.Default);
+        #end
+    }
+
+    /**
+     * A float's WM_SETCURSOR restores a per-HWND cursor directly, outside
+     * hxd.System. Mark Heaps' logical cache stale before its next hover
+     * transition so an equal logical cursor (for example I-beam in both the
+     * editor and a float) is still applied to the correct native window.
+     */
+    public function invalidateNativeCursorCache():Void {
+        #if hldx
+        @:privateAccess hxd.System.currentNativeCursor = hxd.Cursor.Move;
         #end
     }
 

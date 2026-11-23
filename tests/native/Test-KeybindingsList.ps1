@@ -105,14 +105,15 @@ try {
         throw 'Keybindings window did not emit probe state.'
     }
     $state = Get-Content $probeLog -Raw
-    if ($state -notmatch '\[keybindings\] rows=17') {
-        throw 'Keybindings list did not report all 17 actions.'
+    if ($state -notmatch '\[keybindings\] actions=20 categories=7') {
+        throw 'Keybindings list did not report all 20 actions in 7 categories.'
     }
-    if ($state -notmatch 'scrollable=(?i:false)') {
-        throw 'Default keybindings window was unexpectedly scrollable.'
+    $defaultList = [regex]::Match($state, 'listHeight=(\d+)')
+    if (-not $defaultList.Success) {
+        throw 'Keybindings probe did not report the default list height.'
     }
 
-    # SWP_NOZORDER | SWP_NOACTIVATE; shrink below the full 17-row list height.
+    # SWP_NOZORDER | SWP_NOACTIVATE; shrink below the full 20-row list height.
     [void][KeybindingsListNative]::SetWindowPos($keybindings, [IntPtr]::Zero,
         0, 0, 420, 360, 0x0004 -bor 0x0010)
     Start-Sleep -Seconds 1
@@ -120,6 +121,11 @@ try {
     $state = Get-Content $probeLog -Raw
     if ($state -notmatch 'scrollable=(?i:true)') {
         throw 'Shrunk keybindings window did not switch its list to scrollable.'
+    }
+    $shrunkList = [regex]::Match($state, 'listHeight=(\d+)')
+    if (-not $shrunkList.Success -or
+            [int]$shrunkList.Groups[1].Value -ge [int]$defaultList.Groups[1].Value) {
+        throw 'Shrinking the keybindings window did not reduce its list height.'
     }
     if ((Get-Item $stderr).Length -ne 0) {
         throw "Keybindings list probe wrote stderr; inspect $stderr."
@@ -129,7 +135,7 @@ try {
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         throw 'Boltspark did not close after the keybindings list probe.'
     }
-    Write-Host '[keybindings] 17-action list is scrollable when the window shrinks.' -ForegroundColor Green
+    Write-Host '[keybindings] 20-action list resizes and scrolls with the window.' -ForegroundColor Green
 }
 finally {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }

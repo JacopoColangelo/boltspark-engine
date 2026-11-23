@@ -8,6 +8,10 @@ Reusable Haxe tests and native probes are tracked under `tests/repro/` and
 External hardware-only checks are currently deferred by the tracked
 `ignoreExternalHardwareValidation` flag in `tests/validation-policy.json` until
 M9 release hardening. They remain unchecked and must not be described as passed.
+The former second-machine item was closed on 2026-11-23 on the project owner's
+firsthand report that the editor runs successfully on two additional Windows 11 /
+DX12 PCs. It is recorded as user-attested because no per-machine logs or
+screenshots were retained; the two hardware-only items below remain deferred.
 
 ## Build/runtime
 
@@ -115,18 +119,18 @@ Executed on 2026-11-14 with window-scoped native key/mouse events against the Ha
 - [x] The keybindings HWND is assigned the launching editor as its native owner before its first show, then explicitly restored/raised/activated. A first-open menu probe confirmed `GW_OWNER == editor HWND`, preventing the settings window from opening behind the editor (`tests/native/historical/verify-first-keybindings-open.ps1`, `bin/window-behavior-evidence.txt`).
 - [x] Rebind capture ignores modifier-only events: Ctrl then T captured `Ctrl+T` for Rotate in the separate window, persisted a complete versioned JSON map, synchronized into the already-running main editor, and immediately selected Rotate there (`bin/keybindings-native-window-rebound.png`, `bin/native-window-evidence.txt`). Duplicate chords are rejected and malformed/partial persisted maps leave the complete live/default map intact in `Keybindings.hx`.
 - [x] Shortcut commands, hold snapping, snap-to-grid, and Delete remain suppressed while an inspector/search text control owns keyboard capture.
-- [x] The Editor Keybindings window shows all 17 actions in a scrollable list with
-  a native scrollbar and no instructional/mouse helper text; shrinking the HWND
-  switches the list into its clipped scroll mode
+- [x] The Editor Keybindings window shows all 20 actions in 7 categories in a
+  scrollable list with a native scrollbar and no instructional/mouse helper
+  text; shrinking the HWND switches the list into its clipped scroll mode
   (`tests/native/Test-KeybindingsList.ps1`, `bin/test-results/keybindings-list/keybindings-state.log`).
 - [x] Viewport camera settings popups and editor dropdown/menu bodies keep the
   standard arrow cursor instead of Heaps' `Cursor.Button` pointing hand.
 - [x] Undo and Redo are exposed through the native Edit menu and rebindable
   Ctrl+Z/Ctrl+Y defaults; Ctrl+S saves the current scene and Ctrl+Shift+S saves
   all; Ctrl+C/Ctrl+V/Ctrl+X copy, paste, and cut assets in the Asset Browser.
-  Historical keybinding maps migrate to version 6 by retaining existing
-  actions and appending collision-free history, hierarchy, grid, focus, and save
-  bindings (including Shift-aware chords).
+  Historical keybinding maps migrate to version 7 by retaining existing
+  actions and appending collision-free history, hierarchy, grid, focus, save,
+  and Play/Pause/Stop transport bindings (including Shift-aware chords).
 
 ## Viewport camera navigation
 
@@ -287,6 +291,30 @@ hosted Windows CI job.
   state after editable TRS channels change
   (`tests/repro/SceneObjectAffineRepro.hx`).
 
+## Play mode (M4 vertical slice)
+
+Executed 2026-11-23 through the headless isolation repro and a window-scoped
+DX12 transport probe. Runtime evidence is in `bin/test-results/play-mode/`.
+
+- [x] Play captures the authored editor graph as a `SceneDocument` and rebuilds
+  a fresh detached session; runtime objects, components, and hierarchy are
+  distinct instances with identical durable ids, transforms, and parenting.
+  Runtime transform edits never reach the editor session, history, or selection
+  (`tests/repro/PlayModeRepro.hx`).
+- [x] Component `onStart`/`onUpdate`/`onDestroy` dispatch once per running frame
+  and exactly once on stop; pausing suppresses both updates and elapsed time,
+  and a second Play starts from the authored snapshot with fresh components
+  (`tests/repro/PlayModeRepro.hx`).
+- [x] The transport toolbar Play button, rebindable F5/F6/F7 shortcuts (schema
+  version 7, 20 actions in 7 categories), pause/resume, and stop work in the
+  real DX12 window; stdout reports object count, elapsed time, and an unchanged
+  editor history revision across the cycle, with empty stderr
+  (`tests/native/Test-PlayMode.ps1`, `tests/native/Test-KeybindingsList.ps1`).
+- [x] Editor-only viewport overlays (grid, transform gizmo, selection outline,
+  drop-target highlights) and all scene mutation callbacks are suppressed while
+  playing, while camera navigation stays live; Stop rebuilds the authored
+  editor views and restores the grid preference.
+
 ## Platform and toolchain
 
 - [x] Record Haxe, HashLink, Heaps, `format`, `hldx`, hlfreetype, and FreeType versions (`docs/TOOLCHAIN_VERSIONS.md`).
@@ -295,8 +323,9 @@ hosted Windows CI job.
 - [x] Record GPU model, driver version (`docs/TOOLCHAIN_VERSIONS.md`). D3D12 feature level recorded from hardware class (12_1); Heaps DX12Driver does not expose a device feature-level query at M0 — direct runtime feature-level read is deferred to a later milestone if needed.
 - [x] Confirm `compile.hxml` selects `hldx` + `-D dx12` and does not reference `hlsdl` (enforced by `tools/build.ps1 -Check`).
 - [x] Root-cause diagnosis for the initial DX12 startup failure documented with an isolated repro (`tests/repro/DxCArrayRepro.hx` + analysis in `docs/M0_IMPLEMENTATION_REPORT.md`).
-- [ ] **Deferred by validation policy:** repeat the native acceptance subset on a second Windows 11 / DX12 machine;
-  only the primary RTX 3080 development machine is currently evidenced.
+- [x] **Second-machine confirmation (user-attested, 2026-11-23):** the project owner reports the editor
+  runs successfully on two additional Windows 11 / DX12 PCs. Accepted on firsthand owner report in place
+  of in-repo artifacts; no per-machine logs or screenshots were retained for those runs.
 
 ## Performance baseline
 
@@ -315,6 +344,8 @@ hosted Windows CI job.
 GPU-memory, and representative-project measurements remain later work.)
 
 The native foundation gate was executed on the primary Windows 11/DX12 machine
-beginning 2026-11-11 and revalidated with tracked probes on 2026-11-15. The
-three external hardware items remain visibly open but are non-blocking until M9
-under `tests/validation-policy.json`.
+beginning 2026-11-11 and revalidated with tracked probes on 2026-11-15.
+Second-machine confirmation was added on 2026-11-23 as a user-attested report
+covering two additional Windows 11/DX12 PCs. The two remaining external hardware
+items stay visibly open but are non-blocking until M9 under
+`tests/validation-policy.json`.

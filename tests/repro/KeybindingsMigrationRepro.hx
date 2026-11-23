@@ -43,9 +43,9 @@ class KeybindingsMigrationRepro {
 
         var migrated:Dynamic = Json.parse(File.getContent(path));
         var bindings:Array<Dynamic> = Reflect.field(migrated, "bindings");
-        assertTrue(Reflect.field(migrated, "version") == 6
+        assertTrue(Reflect.field(migrated, "version") == 7
             && bindings.length == EditorAction.ACTION_COUNT,
-            "migrated keybinding payload was not rewritten as version 6");
+            "migrated keybinding payload was not rewritten as version 7");
         assertTrue(keybindings.keyCode(EditorAction.DuplicateSelection) == hxd.Key.D
             && keybindings.requiresCtrl(EditorAction.DuplicateSelection),
             "hierarchy shortcut defaults were not appended");
@@ -66,8 +66,15 @@ class KeybindingsMigrationRepro {
         assertTrue(keybindings.keyCode(EditorAction.CutAsset) == hxd.Key.X
                 && keybindings.requiresCtrl(EditorAction.CutAsset),
             "Ctrl+X default was not appended");
+        assertTrue(keybindings.keyCode(EditorAction.Play) == hxd.Key.F5
+                && !keybindings.requiresCtrl(EditorAction.Play),
+            "F5 Play default was not appended");
+        assertTrue(keybindings.keyCode(EditorAction.Pause) == hxd.Key.F6,
+            "F6 Pause default was not appended");
+        assertTrue(keybindings.keyCode(EditorAction.Stop) == hxd.Key.F7,
+            "F7 Stop default was not appended");
         Sys.println("[keybindings] version-1 map migrated with history, hierarchy,"
-            + " focus, and save actions preserved");
+            + " focus, save, and transport actions preserved");
     }
 
     static function assertTrue(value:Bool, message:String):Void {

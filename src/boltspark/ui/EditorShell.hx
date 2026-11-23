@@ -275,6 +275,10 @@ class EditorShell {
     public var onPrepareApplicationWindow:Null<ApplicationWindowKind->Void>;
     public var onUndo:Null<Void->Void>;
     public var onRedo:Null<Void->Void>;
+    /** Transport toolbar: Play/Pause/Stop drive the runtime session. */
+    public var onPlayPressed:Null<Void->Void>;
+    public var onPausePressed:Null<Void->Void>;
+    public var onStopPressed:Null<Void->Void>;
     public var onViewportHover:Null<Float->Float->Void>;
     public var onViewportPush:Null<Float->Float->Bool>;
     public var onViewportDrag:Null<Float->Float->Void>;
@@ -638,7 +642,13 @@ class EditorShell {
             var transportButton = new UiButton(ctx, "", 30, 28, root);
             transportButton.setIcon(transport.kind).setQuiet();
             var command = transport.name;
-            transportButton.onClick = function() log(command + " mode is reserved for the runtime milestone");
+            transportButton.onClick = function() {
+                switch (command) {
+                    case "Play": if (onPlayPressed != null) onPlayPressed();
+                    case "Pause": if (onPausePressed != null) onPausePressed();
+                    case "Stop": if (onStopPressed != null) onStopPressed();
+                }
+            };
             transportButtons.push(transportButton);
         }
 
@@ -983,6 +993,18 @@ class EditorShell {
         input.onRedoPressed = function() {
             if (anyTextCaptureActive()) return;
             if (onRedo != null) onRedo();
+        };
+        input.onPlayPressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onPlayPressed != null) onPlayPressed();
+        };
+        input.onPausePressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onPausePressed != null) onPausePressed();
+        };
+        input.onStopPressed = function() {
+            if (anyTextCaptureActive()) return;
+            if (onStopPressed != null) onStopPressed();
         };
         input.onCopyPressed = function() {
             if (anyTextCaptureActive()) return;
@@ -1550,6 +1572,14 @@ class EditorShell {
         historyRedoLabel = redoLabel;
     }
 
+    /** Reflect the live Play/Pause state on the transport buttons. */
+    public function setPlaybackState(playing:Bool, paused:Bool):Void {
+        if (transportButtons.length < 3) return;
+        transportButtons[0].setSelected(playing && !paused);
+        transportButtons[1].setSelected(paused);
+        transportButtons[2].setSelected(playing);
+    }
+
     /** Title-strip project/scene label, including the unsaved marker. */
     public function setProjectTitle(text:String):Void {
         projectTitle.text = text;
@@ -1753,6 +1783,12 @@ class EditorShell {
             var button = transformButtons[index];
             frame.register(toolNames[index], new LayoutRect(
                 button.x, button.y, 28, 28));
+        }
+        var transportNames = ["play", "pause", "stop"];
+        for (index in 0...transportButtons.length) {
+            var button = transportButtons[index];
+            frame.register(transportNames[index], new LayoutRect(
+                button.x, button.y, 30, 28));
         }
         frame.popScope();
 

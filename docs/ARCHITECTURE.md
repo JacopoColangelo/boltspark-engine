@@ -126,8 +126,11 @@ No browser technology exists anywhere in this stack. There is no Electron/CEF/We
 ## Current scope boundary
 
 Splitters, retained text input, menus, bounded picking, native packaging,
-current-monitor DPI awareness, and integrated project/scene open/save now exist.
-Still out of scope are a complete immediate-mode public BoltUI API, physical
-mixed-DPI monitor validation, a general dock tree/detached panels, asset import,
-production materials/PBR, and Play mode. See `docs/PROJECT_FORMAT.md` for the
-implemented data boundary.
+current-monitor DPI awareness, integrated project/scene open/save, and
+Play/Stop runtime mode now exist. Play mode serializes the authored editor
+graph into a `SceneDocument`, rebuilds a detached session from that snapshot,
+and ticks component lifecycle only on the copy; Stop destroys it without ever
+touching editor objects, selection, or history. Still out of scope are a
+complete immediate-mode public BoltUI API, physical mixed-DPI monitor
+validation, a general dock tree/detached panels, asset import, and production
+materials/PBR. See `docs/PROJECT_FORMAT.md` for the implemented data boundary.

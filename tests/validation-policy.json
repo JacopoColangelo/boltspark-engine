@@ -3,10 +3,17 @@
   "ignoreExternalHardwareValidation": true,
   "setByUserOn": "2026-11-15",
   "revisitAt": "M9 release hardening",
-  "reason": "Required secondary hardware and fault-injection conditions are not currently available.",
+  "reason": "Fault-injection conditions and physical mixed-DPI hardware are not currently available; second-machine confirmation was supplied by the project owner.",
   "deferredChecks": [
     "physical mixed-DPI transitions between monitors",
-    "genuine driver/OS-triggered DXGI device removal",
-    "native acceptance on a second Windows 11/DX12 machine"
+    "genuine driver/OS-triggered DXGI device removal"
+  ],
+  "resolvedChecks": [
+    {
+      "check": "native acceptance on a second Windows 11/DX12 machine",
+      "resolvedOn": "2026-11-23",
+      "basis": "Project owner firsthand report: the editor runs successfully on two additional Windows 11/DX12 PCs.",
+      "evidence": "user-attested; no per-machine logs or screenshots retained in repo"
+    }
   ]
 }

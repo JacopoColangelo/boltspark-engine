@@ -90,6 +90,11 @@ class NativeFloatWindow {
     @:hlNative("winfloat", "release_capture")
     public static function releaseCapture():Void {}
 
+    /** Preserve the cursor chosen by the float's H2D scene across native
+     *  resize-edge hit tests. */
+    @:hlNative("winfloat", "remember_client_cursor")
+    public static function rememberClientCursor(handle:WinFloatHandle):Void {}
+
     @:hlNative("winfloat", "destroy")
     public static function destroy(handle:WinFloatHandle):Void {}
 }
