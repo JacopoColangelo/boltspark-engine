@@ -426,6 +426,7 @@ class Main extends hxd.App {
         boltUI.onRevealAsset = revealAsset;
         boltUI.onCopyAssetPath = copyAssetPath;
         boltUI.onImportAssets = importAssets;
+        boltUI.onFloatFilesDropped = handleFloatDroppedPaths;
         boltUI.onQueryTextureTile = function(source) {
             return TextureCache.get(projectSession.absoluteAssetPath(source));
         };
@@ -3371,6 +3372,25 @@ class Main extends hxd.App {
         var target = folder == null ? "" : folder;
         printActivity('[probe] os file drop folder=${target}');
         importExternalFiles(images, target);
+    }
+
+    /**
+     * Explorer drop on a floating Asset Browser. The float already mapped the
+     * drop point to one of its own folders, so only import validation is left.
+     */
+    function handleFloatDroppedPaths(paths:Array<String>, folder:String):Void {
+        printActivity('[probe] float file drop count=${paths.length} folder=${folder}');
+        if (!canEdit()) {
+            printActivity('[probe] float file drop rejected=play-mode');
+            boltUI.log('External file drops are disabled while playing.');
+            return;
+        }
+        var images = paths.filter(AssetTypeRegistry.isTextureFile);
+        if (images.length != paths.length) {
+            printActivity('[probe] float file drop skipped=${paths.length - images.length}');
+        }
+        if (images.length == 0) return;
+        importExternalFiles(images, folder);
     }
 
     function createAssetFolder(parent:String):String {

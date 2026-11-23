@@ -106,7 +106,7 @@ Heaps 2.1.0's DX12 driver requires `hl.CArray`, whose correct codegen exists onl
 .\tools\build.ps1 -Check              # validate the Windows build environment
 .\tools\build.ps1 -Run                # run the development HashLink build
 .\tools\tests\test.ps1 -Portable            # clean-worker compile + headless tests
-.\tools\tests\test.ps1 -Build -NativeSmoke -PlayMode -CommandHistory -RotationHandoff -WindowLifecycle -SplitterCapture -ProjectFiles -AssetBrowser -ImportFiles -ExplorerDrop -UntitledSession -AssetWatcher  # full tests + DX12 interaction probes
+.\tools\tests\test.ps1 -Build -NativeSmoke -PlayMode -CommandHistory -RotationHandoff -WindowLifecycle -SplitterCapture -ProjectFiles -AssetBrowser -ImportFiles -ExplorerDrop -UntitledSession -AssetWatcher -FloatExplorerDrop  # full tests + DX12 interaction probes
 ```
 
 The single script sets the Haxe/HashLink environment per-session and uses project-local dependencies. Dependency installation is explicit; it downloads the pinned HashLink/C library, PIX runtime, and verified FreeType source only when requested. `-Check` reports the detected Visual Studio/MSBuild installation and verifies it is usable. Native builds select the matching toolset (VS2026 `v145`, VS2022 `v143`). The generated `release\` folder contains the executable, `freetype.hdll`, one consolidated `THIRD-PARTY-LICENSES.txt`, and its other required runtime files. Canonical upstream license files remain separate in the source tree.

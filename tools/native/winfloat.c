@@ -22,6 +22,9 @@
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
 #include <dwmapi.h>
+/* DragAcceptFiles / DragQueryFileW are shell32, not user32. */
+#include <shellapi.h>
+#include <wchar.h>
 #ifndef GET_X_LPARAM
 #define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
 #define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
@@ -47,6 +50,14 @@ typedef struct {
      * winfloat_pump(), never by re-entering the VM from that WndProc stack. */
     int pending_focus_lost;
     int pending_focus_gained;
+    /* Explorer drop latched in WndProc and delivered on the next pump().
+     * Paths are GC-allocated UCS-2 hl.Bytes values, so Haxe can convert them
+     * with String.fromUCS2; take_drops() never re-enters the VM from WndProc. */
+    int pending_drop;
+    int drop_x;
+    int drop_y;
+    int drop_count;
+    varray *drop_paths;
     /* Buffer handed to paint() for the next WM_PAINT. Only valid during the
      * synchronous UpdateWindow() call in winfloat_paint(). */
     void *pixels;
@@ -112,6 +123,42 @@ static void fire(Panel *panel, int kind, int a, int b, int c) {
     vd.t = &hlt_i32; vd.v.i = c;
     args[0] = &va; args[1] = &vb; args[2] = &vc; args[3] = &vd;
     hl_dyn_call_safe(panel->on_event, args, 4, &exception);
+}
+
+/* WM_DROPFILES runs on the UI thread inside winfloat_pump()'s DispatchMessage,
+ * so HashLink allocations here are safe. Copy the HDROP payload into GC memory
+ * before DragFinish frees the shell buffer; Haxe reads it on the same stack
+ * after pump() returns via take_drops(). */
+static void latch_drop(Panel *panel, HDROP drop) {
+    UINT count, i;
+    POINT pt;
+
+    if (panel == NULL || drop == NULL)
+        return;
+    count = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+    panel->drop_paths = NULL;
+    panel->drop_count = 0;
+    panel->pending_drop = 0;
+    if (count == 0)
+        return;
+    panel->drop_paths = (varray *)hl_alloc_array(&hlt_bytes, (int)count);
+    if (panel->drop_paths == NULL)
+        return;
+    for (i = 0; i < count; i++) {
+        UINT chars = DragQueryFileW(drop, i, NULL, 0);
+        vbyte *buffer = hl_alloc_bytes((int)((chars + 1) * sizeof(WCHAR)));
+        if (buffer == NULL)
+            break;
+        DragQueryFileW(drop, i, (LPWSTR)buffer, chars + 1);
+        hl_aptr(panel->drop_paths, vbyte *)[i] = buffer;
+    }
+    panel->drop_count = (int)i;
+    pt.x = 0;
+    pt.y = 0;
+    DragQueryPoint(drop, &pt);
+    panel->drop_x = (int)pt.x;
+    panel->drop_y = (int)pt.y;
+    panel->pending_drop = 1;
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -190,6 +237,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_CHAR:
             fire(panel, WF_CHAR, (int)wp, 0, 0);
+            return 0;
+        case WM_DROPFILES:
+            latch_drop(panel, (HDROP)wp);
+            DragFinish((HDROP)wp);
             return 0;
         case WM_NCPAINT: {
             /* Paint the resize frame in the editor palette. The default frame
@@ -451,6 +502,9 @@ HL_PRIM void *HL_NAME(create)(vbyte *title, int x, int y, int w, int h,
         return NULL;
     }
     SetWindowLongPtr(panel->hwnd, GWLP_USERDATA, (LONG_PTR)panel);
+    /* Accept Explorer files on this top-level HWND. winfloat's own message
+     * loop sees WM_DROPFILES; the main editor window has a separate target. */
+    DragAcceptFiles(panel->hwnd, TRUE);
     {
         /* DWM paints the 1px resize frame even when WM_NCPAINT is handled;
          * give it the editor palette instead of the default bright white. */
@@ -667,11 +721,61 @@ HL_PRIM void HL_NAME(destroy)(void *handle) {
     Panel *panel = (Panel *)handle;
     if (panel == NULL)
         return;
-    if (IsWindow(panel->hwnd))
+    if (IsWindow(panel->hwnd)) {
+        DragAcceptFiles(panel->hwnd, FALSE);
         DestroyWindow(panel->hwnd);
+    }
     if (panel->on_event != NULL)
         hl_remove_root(&panel->on_event);
     free(panel);
+}
+
+HL_PRIM int HL_NAME(drop_count)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    if (panel == NULL || !panel->pending_drop)
+        return 0;
+    return panel->drop_count;
+}
+
+HL_PRIM vbyte *HL_NAME(drop_path)(void *handle, int index) {
+    Panel *panel = (Panel *)handle;
+    if (panel == NULL || panel->drop_paths == NULL
+            || index < 0 || index >= panel->drop_count)
+        return NULL;
+    return hl_aptr(panel->drop_paths, vbyte *)[index];
+}
+
+HL_PRIM int HL_NAME(drop_x)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    return panel == NULL ? 0 : panel->drop_x;
+}
+
+HL_PRIM int HL_NAME(drop_y)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    return panel == NULL ? 0 : panel->drop_y;
+}
+
+HL_PRIM void HL_NAME(clear_drops)(void *handle) {
+    Panel *panel = (Panel *)handle;
+    if (panel == NULL)
+        return;
+    /* Buffers are GC-allocated; drop the references and let HashLink reclaim. */
+    panel->drop_paths = NULL;
+    panel->drop_count = 0;
+    panel->pending_drop = 0;
+}
+
+/* Deterministic probe hook: fills the same latch a real WM_DROPFILES would.
+ * Haxe passes UCS-2 hl.Bytes values; no cross-process HGLOBAL is involved. */
+HL_PRIM void HL_NAME(inject_drop)(void *handle, varray *paths, int x, int y) {
+    Panel *panel = (Panel *)handle;
+    if (panel == NULL || paths == NULL)
+        return;
+    panel->drop_paths = paths;
+    panel->drop_count = paths->size;
+    panel->drop_x = x;
+    panel->drop_y = y;
+    panel->pending_drop = 1;
 }
 
 DEFINE_PRIM(_WINFLOAT, create,
@@ -696,6 +800,12 @@ DEFINE_PRIM(_VOID, set_capture, _WINFLOAT);
 DEFINE_PRIM(_VOID, release_capture,);
 DEFINE_PRIM(_VOID, remember_client_cursor, _WINFLOAT);
 DEFINE_PRIM(_VOID, destroy, _WINFLOAT);
+DEFINE_PRIM(_I32, drop_count, _WINFLOAT);
+DEFINE_PRIM(_BYTES, drop_path, _WINFLOAT _I32);
+DEFINE_PRIM(_I32, drop_x, _WINFLOAT);
+DEFINE_PRIM(_I32, drop_y, _WINFLOAT);
+DEFINE_PRIM(_VOID, clear_drops, _WINFLOAT);
+DEFINE_PRIM(_VOID, inject_drop, _WINFLOAT _ARR _I32 _I32);
 DEFINE_PRIM(_WINFLOAT_LABEL, overlay_create,);
 DEFINE_PRIM(_VOID, overlay_paint, _WINFLOAT_LABEL _BYTES _I32 _I32 _I32 _I32);
 DEFINE_PRIM(_VOID, overlay_hide, _WINFLOAT_LABEL);

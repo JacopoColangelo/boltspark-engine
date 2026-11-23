@@ -271,6 +271,8 @@ class EditorShell {
     public var onCopyAssetPath:Null<String->Void>;
     /** External texture import request, with the browser's target folder. */
     public var onImportAssets:Null<String->Void>;
+    /** Explorer drop on a floating browser: paths and the resolved folder. */
+    public var onFloatFilesDropped:Null<Array<String>->String->Void>;
     /** Decoded thumbnail tile for a texture asset. */
     public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
     /** Resolve a window-client point to a browser folder for OS file drops. */
@@ -1217,6 +1219,9 @@ class EditorShell {
         dockOverlayLayer.addChild(palette);
         dockOverlayLayer.addChild(viewportDropHintSurface);
         dockWindowManager = new FloatWindowManager(ctx);
+        dockWindowManager.onFilesDropped = function(paths, folder) {
+            if (onFloatFilesDropped != null) onFloatFilesDropped(paths, folder);
+        };
         dockManager = new DockingManager(ctx, input, dockRegistry, panelLayer,
             dockFloatPanelLayer, dockChromeLayer, dockFloatLayer, dockOverlayLayer,
             dockWindowManager);

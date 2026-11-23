@@ -303,7 +303,7 @@ function Build-WinFloatModule {
 
     $command = "`"$vcvars`" >nul && `"$cl`" /nologo /LD /MD /O2 " +
         "/I `"$hashLinkDir\include`" `"$winFloatSource`" /Fe:`"$winFloatModule`" " +
-        "/link /LIBPATH:`"$hashLinkDir`" libhl.lib user32.lib gdi32.lib dwmapi.lib"
+        "/link /LIBPATH:`"$hashLinkDir`" libhl.lib user32.lib gdi32.lib dwmapi.lib shell32.lib"
     Push-Location (Join-Path $repoRoot 'bin')
     try {
         & cmd.exe /c $command | Out-Null

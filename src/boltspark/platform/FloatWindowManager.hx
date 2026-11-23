@@ -1,5 +1,6 @@
 package boltspark.platform;
 
+import boltspark.platform.NativeFloatWindow.WinFloatDrop;
 import boltspark.platform.NativeFloatWindow.WinFloatHandle;
 import boltspark.platform.NativeWindow;
 import boltspark.ui.Theme;
@@ -94,6 +95,8 @@ class FloatWindowManager {
     public var onSnapshotRequest:Null<String->Dynamic>;
     /** phase 0 = start, 1 = move, 2 = drop; coordinates are screen-space. */
     public var onHeaderDrag:Null<String->Int->Int->Int->Void>;
+    /** OS file drop on a float: paths plus the folder resolved under the cursor. */
+    public var onFilesDropped:Null<Array<String>->String->Void>;
 
     final ctx:UiContext;
     final panels:Map<String, FloatPanel> = new Map();
@@ -109,9 +112,16 @@ class FloatWindowManager {
     final pendingFocusLoss:Map<String, Bool> = new Map();
     /** Single always-on-top label shared by the editor and every float. */
     var dragOverlay:Null<DragLabelOverlay> = null;
+    /** Probe hook: numbered float-drop instruction files in this directory. */
+    var floatDropProbeDir:String = "";
+    var floatDropProbeNext:Int = 1;
 
     public function new(ctx:UiContext) {
         this.ctx = ctx;
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            var dir = Sys.getEnv("BOLTSPARK_PROBE_FLOAT_DROP_DIR");
+            floatDropProbeDir = dir == null ? "" : dir;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -414,6 +424,7 @@ class FloatWindowManager {
         // Native code only latches them; consume any prior-frame notification
         // before touching the drag overlay or repainting a captured scene.
         flushFocusLoss();
+        pollDropProbe();
         if (UiContext.dragLabel == null) {
             if (UiContext.dragPointerOverride != null) {
                 UiContext.dragPointerOverride = null;
@@ -451,6 +462,10 @@ class FloatWindowManager {
             flushFocusLoss();
             if (panel.closed) continue;
 
+            // WM_DROPFILES latches paths in WndProc; pump() has returned, so
+            // Haxe can now read them and map the drop point to a folder.
+            flushDrops(panel);
+
             syncNativeSize(panel);
             var scale = dpiScale(NativeFloatWindow.getDpi(panel.handle));
             if (Math.abs(scale - panel.scale) > 0.01) {
@@ -461,6 +476,73 @@ class FloatWindowManager {
             }
             if (panel.snapshot == null) refreshSnapshot(panel);
             if (panel.dirty || boundViews.exists(panel.key)) repaint(panel);
+        }
+    }
+
+    /** Deliver a latched Explorer drop after the native pump has unwound. */
+    function flushDrops(panel:FloatPanel):Void {
+        var drop = NativeFloatWindow.takeDrops(panel.handle);
+        if (drop == null || drop.paths.length == 0) return;
+        var folder = dropFolder(panel, drop.x, drop.y);
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] float file drop panel=${panel.panelId} '
+                + 'count=${drop.paths.length} x=${drop.x} y=${drop.y} '
+                + 'folder=${folder}');
+        }
+        if (onFilesDropped != null) onFilesDropped(drop.paths, folder);
+    }
+
+    /** Map float-local client coordinates to a folder in its browser view. */
+    function dropFolder(panel:FloatPanel, x:Int, y:Int):String {
+        var bound = boundViews.get(panel.key);
+        if (bound != null && bound.assetBrowser != null) {
+            var scale = panel.scale > 0 ? panel.scale : 1;
+            var folder = bound.assetBrowser.folderAtWindowPoint(x / scale, y / scale);
+            if (folder != null && !StringTools.startsWith(folder, "engine://")) {
+                return folder;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Deterministic probe hook. A cross-process synthetic WM_DROPFILES cannot
+     * marshal its HGLOBAL, so the probe writes a numbered instruction file and
+     * we feed the exact same native latch that a real Explorer drop uses.
+     * Format: panelId | x;y | path | path ...
+     */
+    function pollDropProbe():Void {
+        if (floatDropProbeDir == "") return;
+        var instruction = floatDropProbeDir + "/float-drop-" + floatDropProbeNext + ".txt";
+        if (!sys.FileSystem.exists(instruction)) return;
+        var content = "";
+        try {
+            content = sys.io.File.getContent(instruction);
+        } catch (e:Dynamic) {
+            return;
+        }
+        sys.FileSystem.deleteFile(instruction);
+        var probeIndex = floatDropProbeNext;
+        floatDropProbeNext++;
+        Sys.println('[probe] float drop hook index=${probeIndex}');
+        var fields = content.split("\n")[0].split("|");
+        if (fields.length < 2) return;
+        var panelId = StringTools.trim(fields[0]);
+        var coords = StringTools.trim(fields[1]).split(";");
+        var x = Std.parseInt(StringTools.trim(coords[0]));
+        var y = coords.length > 1 ? Std.parseInt(StringTools.trim(coords[1])) : 0;
+        var paths:Array<String> = [];
+        for (index in 2...fields.length) {
+            var path = StringTools.trim(fields[index]);
+            if (path.length > 0) paths.push(path);
+        }
+        var bytes = new hl.NativeArray<hl.Bytes>(paths.length);
+        for (index in 0...paths.length) bytes[index] = NativeFloatWindow.toUcs2(paths[index]);
+        for (panel in panels) {
+            if (panel.panelId != panelId) continue;
+            NativeFloatWindow.injectDrops(panel.handle, bytes,
+                x == null ? 0 : x, y == null ? 0 : y);
+            break;
         }
     }
 

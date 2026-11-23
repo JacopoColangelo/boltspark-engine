@@ -20,7 +20,8 @@ param(
     [switch]$ImportFiles,
     [switch]$ExplorerDrop,
     [switch]$UntitledSession,
-    [switch]$AssetWatcher
+    [switch]$AssetWatcher,
+    [switch]$FloatExplorerDrop
 )
 
 $ErrorActionPreference = 'Stop'
@@ -295,6 +296,10 @@ try {
     if ($AssetWatcher) {
         & (Join-Path $repoRoot 'tests\native\Test-AssetWatcher.ps1')
         Assert-LastExitCode 'Asset filesystem watcher probe'
+    }
+    if ($FloatExplorerDrop) {
+        & (Join-Path $repoRoot 'tests\native\Test-FloatExplorerDrop.ps1')
+        Assert-LastExitCode 'Floating-browser Explorer drop probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green

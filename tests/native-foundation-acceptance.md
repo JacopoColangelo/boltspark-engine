@@ -368,8 +368,12 @@ folder on every run.
   folder renaming). `tests/native/Test-AssetWatcher.ps1` asserts a top-level
   file and a nested folder/file each produce a `[watcher]` signal and a browser
   re-scan; evidence under `bin/test-results/asset-watcher/`.
-- [ ] Explorer drops into a *floating* Asset Browser window (deferred: the
-  pinned `winfloat.c` bridge has no drop-files primitive).
+- [x] Explorer drops into a *floating* Asset Browser window. `winfloat.c`
+  accepts `WM_DROPFILES`, latches UCS-2 paths in GC memory, and Haxe drains them
+  after the native pump; the float maps the point to its own folder and reuses
+  the import command. Multi-file placement and the Play-mode guard pass in
+  `tests/native/Test-FloatExplorerDrop.ps1` (evidence under
+  `bin/test-results/float-explorer-drop/`).
 - [ ] Material albedo texture slots bound to imported textures (next milestone).
 
 ## Platform and toolchain

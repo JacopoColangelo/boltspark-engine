@@ -107,6 +107,8 @@ class BoltUI {
     public var onCopyAssetPath:Null<String->Void>;
     /** External texture import request, with the browser's target folder. */
     public var onImportAssets:Null<String->Void>;
+    /** Explorer drop on a floating browser: paths and the resolved folder. */
+    public var onFloatFilesDropped:Null<Array<String>->String->Void>;
     /** Decoded thumbnail tile for a texture asset. */
     public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
     /** Open an editor dialog as its own native top-level application window. */
@@ -334,6 +336,9 @@ class BoltUI {
         };
         shell.onImportAssets = function(folder) {
             if (onImportAssets != null) onImportAssets(folder);
+        };
+        shell.onFloatFilesDropped = function(paths, folder) {
+            if (onFloatFilesDropped != null) onFloatFilesDropped(paths, folder);
         };
         shell.onQueryTextureTile = function(source) {
             return onQueryTextureTile != null ? onQueryTextureTile(source) : null;

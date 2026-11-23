@@ -268,23 +268,36 @@ project because they need a real filesystem root to expose. Scratch content is
 not migrated when a project is later created — it is a testing sandbox, not a
 project stub.
 
+## External-change watcher
+
+`AssetWatcher` re-snapshots the asset root from `Main.update()` and refreshes
+the browser when a path appears, disappears, or changes size/mtime. The walk is
+capped at 4096 paths / 24 levels and skips build/VCS/dependency folders; the
+root follows project/untitled switches and external changes appear within
+roughly 0.35 s without a manual refresh. It deliberately uses polling rather
+than `hl.uv.Fs`: on Windows that primitive's persistent directory handle blocks
+renaming or deleting watched folders, which the folder-reparent native probe
+reproduced as a `SysError`.
+
+## Explorer drops on floating browsers
+
+`winfloat.c` calls `DragAcceptFiles` for each floating panel and handles
+`WM_DROPFILES` in its own `WndProc`. Paths are copied from the shell `HDROP`
+into GC-owned UCS-2 buffers and latched on the panel; `takeDrops()` drains the
+latch from `FloatWindowManager.update()` after the native pump has unwound, so
+the VM is never re-entered from a window-procedure stack. The float resolves the
+drop point with its own `AssetBrowser.folderAtWindowPoint()`, then the existing
+import command performs validation, copy, manifest write, and refresh. Drops are
+refused in Play mode just like main-window drops. A probe hook feeds the same
+native latch via numbered instruction files because a cross-process synthetic
+`WM_DROPFILES` cannot marshal its `HGLOBAL`.
+
 ## Remaining limitations
 
-- **Watcher uses bounded polling, not OS notifications.** `AssetWatcher` re-snapshots the
-  asset root from `Main.update()` and refreshes the browser on a path/size/mtime
-  change. `hl.uv.Fs` was rejected: on Windows its persistent directory handle
-  blocks renaming or deleting watched folders (reproduced by the folder-reparent
-  native probe), so polling is required to keep asset operations safe. The walk
-  is capped at 4096 paths / 24 levels and skips build/VCS/dependency folders;
-  external changes appear within roughly 0.35 s without a manual refresh.
 - **Cross-panel drop is limited to engine assets.** The path-array payload used
   by filesystem assets is still browser-local; only engine assets (primitives
   and materials) carry a typed drag payload that the MeshRenderer Inspector
   slots consume.
-- **Explorer drops into floating Asset Browser windows are not supported.** The
-  pinned `winfloat.c` bridge has no `WM_DROPFILES` primitive, so a drop on a
-  floating panel is not delivered to the editor; only the main window and its
-  docked browser are drop targets.
 - **Only textures have a real importer.** Meshes (OBJ/glTF), audio, and other
   binary files are still generic files. Material texture slots are the next
   milestone; imported textures are not yet bound to `MeshRenderer`.

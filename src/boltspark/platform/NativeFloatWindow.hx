@@ -4,6 +4,8 @@ package boltspark.platform;
 typedef WinFloatHandle = hl.Abstract<"winfloat_panel">;
 /** Opaque handle to the always-on-top drag-label overlay HWND. */
 typedef WinFloatLabelHandle = hl.Abstract<"winfloat_label">;
+/** Explorer drop latched by winfloat.c and drained on the next pump(). */
+typedef WinFloatDrop = { paths:Array<String>, x:Int, y:Int };
 
 /**
  * Thin Haxe binding for the raw-Win32 floating panel module. The module is
@@ -97,4 +99,53 @@ class NativeFloatWindow {
 
     @:hlNative("winfloat", "destroy")
     public static function destroy(handle:WinFloatHandle):Void {}
+
+    // Explorer file drops, latched by WM_DROPFILES in WndProc and delivered
+    // only when Haxe calls takeDrops() after pump() has returned.
+    @:hlNative("winfloat", "drop_count")
+    static function dropCount(handle:WinFloatHandle):Int return 0;
+
+    @:hlNative("winfloat", "drop_path")
+    static function dropPath(handle:WinFloatHandle, index:Int):hl.Bytes return null;
+
+    @:hlNative("winfloat", "drop_x")
+    static function dropX(handle:WinFloatHandle):Int return 0;
+
+    @:hlNative("winfloat", "drop_y")
+    static function dropY(handle:WinFloatHandle):Int return 0;
+
+    @:hlNative("winfloat", "clear_drops")
+    static function clearDrops(handle:WinFloatHandle):Void {}
+
+    /** Drain one latched drop, or null when nothing arrived. */
+    public static function takeDrops(handle:WinFloatHandle):Null<WinFloatDrop> {
+        var count = dropCount(handle);
+        if (count <= 0) return null;
+        var paths:Array<String> = [];
+        for (index in 0...count) {
+            var bytes = dropPath(handle, index);
+            if (bytes == null) continue;
+            paths.push(@:privateAccess String.fromUCS2(bytes));
+        }
+        var x = dropX(handle);
+        var y = dropY(handle);
+        clearDrops(handle);
+        return { paths: paths, x: x, y: y };
+    }
+
+    /** Deterministic probe hook: fills the same latch a real drop would. */
+    @:hlNative("winfloat", "inject_drop")
+    public static function injectDrops(handle:WinFloatHandle,
+            paths:hl.NativeArray<hl.Bytes>, x:Int, y:Int):Void {}
+
+    /** Convert a Haxe string to the NUL-terminated UCS-2 bytes winfloat latches. */
+    public static function toUcs2(text:String):hl.Bytes {
+        var out = haxe.io.Bytes.alloc((text.length + 1) * 2);
+        for (index in 0...text.length) {
+            var code = text.charCodeAt(index);
+            out.set(index * 2, code & 0xFF);
+            out.set(index * 2 + 1, (code >> 8) & 0xFF);
+        }
+        return @:privateAccess out.b;
+    }
 }

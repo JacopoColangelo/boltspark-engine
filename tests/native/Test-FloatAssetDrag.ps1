@@ -264,26 +264,37 @@ try {
     Write-Host '[float-drag] Floating Asset Browser settings passed.' -ForegroundColor DarkGray
 
     # Engine assets live under the Engine folder, which is collapsed on startup.
-    # Open it so the grid contains draggable engine tiles.
-    Send-Mouse $floatWindow 0x0200 55 110
-    Send-Mouse $floatWindow 0x0201 55 110
-    Send-Mouse $floatWindow 0x0202 55 110
-    Start-Sleep -Milliseconds 300
-    if ((Read-Log) -notmatch '\[probe\] asset browser navigate folder=Engine') {
+    # Open it so the grid contains draggable engine tiles. The untitled scratch
+    # Content row shifts Engine down one row compared to a project-backed
+    # session, so locate it by probing candidate rows instead of hard-coding y.
+    $engineY = -1
+    foreach ($candidateY in 110, 132, 154, 176) {
+        Send-Mouse $floatWindow 0x0200 55 $candidateY
+        Send-Mouse $floatWindow 0x0201 55 $candidateY
+        Send-Mouse $floatWindow 0x0202 55 $candidateY
+        Start-Sleep -Milliseconds 220
+        if ((Read-Log) -match '\[probe\] asset browser navigate folder=Engine') {
+            $engineY = $candidateY
+            break
+        }
+    }
+    if ($engineY -lt 0) {
         throw 'Could not open the Engine folder in the floating Asset Browser.'
     }
 
     # Engine content is split into Meshes/Materials subfolders. Expand Engine
     # and open Meshes so the grid contains draggable mesh tiles again.
-    Send-Mouse $floatWindow 0x0200 55 110
-    Send-Mouse $floatWindow 0x0201 55 110
-    Send-Mouse $floatWindow 0x0202 55 110
-    Send-Mouse $floatWindow 0x0201 55 110
-    Send-Mouse $floatWindow 0x0202 55 110
+    Send-Mouse $floatWindow 0x0200 55 $engineY
+    Send-Mouse $floatWindow 0x0201 55 $engineY
+    Send-Mouse $floatWindow 0x0202 55 $engineY
+    Send-Mouse $floatWindow 0x0201 55 $engineY
+    Send-Mouse $floatWindow 0x0202 55 $engineY
     Start-Sleep -Milliseconds 200
-    Send-Mouse $floatWindow 0x0200 69 154
-    Send-Mouse $floatWindow 0x0201 69 154
-    Send-Mouse $floatWindow 0x0202 69 154
+    # Children are sorted alphabetically: Materials precedes Meshes.
+    $meshesY = $engineY + 44
+    Send-Mouse $floatWindow 0x0200 69 $meshesY
+    Send-Mouse $floatWindow 0x0201 69 $meshesY
+    Send-Mouse $floatWindow 0x0202 69 $meshesY
     Start-Sleep -Milliseconds 300
     if ((Read-Log) -notmatch
             '\[probe\] asset browser navigate folder=Engine/Meshes') {
