@@ -22,6 +22,14 @@ class DocumentStore {
         return SceneCodec.decode(read(path));
     }
 
+    public static function saveMaterial(path:String, material:MaterialDocument):Void {
+        saveAtomic(path, MaterialCodec.encode(material));
+    }
+
+    public static function loadMaterial(path:String):MaterialDocument {
+        return MaterialCodec.decode(read(path));
+    }
+
     public static function saveAtomic(path:String, contents:String):Void {
         var directory = Path.directory(path);
         if (directory != null && directory != "" && !FileSystem.exists(directory)) {

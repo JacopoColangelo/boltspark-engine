@@ -374,7 +374,12 @@ folder on every run.
   the import command. Multi-file placement and the Play-mode guard pass in
   `tests/native/Test-FloatExplorerDrop.ps1` (evidence under
   `bin/test-results/float-explorer-drop/`).
-- [ ] Material albedo texture slots bound to imported textures (next milestone).
+- [x] Project material assets with an albedo texture reference, authored in a
+  dockable Material Editor panel that can also float as a native HWND.
+  Double-clicking a material opens (or focuses) the editor. Albedo maps bind to
+  the viewport renderer through `MaterialTextureBindings`; `MeshRenderer` stays
+  unchanged. Evidence: `tests/native/Test-MaterialEditor.ps1` and
+  `tests/repro/MaterialEditorRepro.hx`.
 
 ## Platform and toolchain
 

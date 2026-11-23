@@ -79,6 +79,8 @@ class AssetBrowser extends h2d.Object {
     public var onCopyAssetPath:Null<String->Void>;
     /** Request an external file import into the given folder (empty = default). */
     public var onImportAssets:Null<String->Void>;
+    /** Create a new project material asset. */
+    public var onNewMaterial:Null<Void->Void>;
     /** Decoded thumbnail tile for a texture asset, or null when unavailable. */
     public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
 
@@ -432,6 +434,12 @@ class AssetBrowser extends h2d.Object {
                 // copy, and manifest write all live above this widget.
                 label: "Import Asset...",
                 onClick: importAssets
+            }, {
+                // Added after Import so probe row offsets stay stable.
+                label: "Material",
+                onClick: function() {
+                    if (onNewMaterial != null) onNewMaterial();
+                }
             }]);
         };
         addMenu = new MenuDropdown(ctx, menus);

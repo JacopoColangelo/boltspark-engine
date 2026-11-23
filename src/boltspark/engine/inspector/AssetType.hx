@@ -7,4 +7,6 @@ package boltspark.engine.inspector;
 enum abstract AssetType(String) from String to String {
     var MeshAsset = "mesh";
     var MaterialAsset = "material";
+    /** Imported texture used by a material's albedo slot. */
+    var TextureAsset = "texture";
 }

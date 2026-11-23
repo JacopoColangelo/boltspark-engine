@@ -299,8 +299,10 @@ native latch via numbered instruction files because a cross-process synthetic
   and materials) carry a typed drag payload that the MeshRenderer Inspector
   slots consume.
 - **Only textures have a real importer.** Meshes (OBJ/glTF), audio, and other
-  binary files are still generic files. Material texture slots are the next
-  milestone; imported textures are not yet bound to `MeshRenderer`.
+  binary files are still generic files. Project material assets can be created
+  and edited, and their albedo texture is bound to the viewport renderer, but
+  `MeshRenderer` still stores only a material reference — it has no per-slot
+  texture data.
 - **Explorer integration is Windows-shell based.** Reveal launches
   `explorer.exe /select,<native path>`; project paths use forward slashes
   internally, so the handler converts them to Windows separators before the

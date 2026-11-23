@@ -1,6 +1,10 @@
 package boltspark.project;
 
 import boltspark.editor.EditorSession;
+import boltspark.engine.Material;
+import boltspark.engine.MaterialCulling;
+import boltspark.engine.MaterialTexture;
+import boltspark.engine.MaterialTextureLibrary;
 import haxe.io.Path;
 
 /** One asset discovered under the project root for the Asset Browser. */
@@ -58,6 +62,8 @@ typedef AssetDetails = {
 class ProjectSession {
     public static inline var PROJECT_EXT:String = "boltproject";
     public static inline var SCENE_EXT:String = "boltscene";
+    public static inline var MATERIAL_EXT:String = "boltmaterial";
+    public static inline var MATERIAL_FOLDER:String = "Materials";
     /** Default destination for external imports: the Content root, no extra subfolder. */
     public static inline var TEXTURE_FOLDER:String = "Content";
 
@@ -88,6 +94,7 @@ class ProjectSession {
         scenePath = "";
         dirty = false;
         savedRevision = 0;
+        refreshMaterialAssets();
         stateChanged();
     }
 
@@ -119,6 +126,7 @@ class ProjectSession {
         sceneSource = allocated.source;
         var _ = bindSceneAsset();
         scenePath = resolvePath(sceneSource);
+        refreshMaterialAssets();
         saveDocuments();
     }
 
@@ -139,6 +147,7 @@ class ProjectSession {
         scenePath = sceneFile;
         dirty = false;
         savedRevision = 0;
+        refreshMaterialAssets();
         stateChanged();
     }
 
@@ -407,6 +416,144 @@ class ProjectSession {
     public function isScenePath(source:String):Bool {
         return StringTools.endsWith(ProjectPath.normalizeRelative(source).toLowerCase(),
             "." + SCENE_EXT);
+    }
+
+    public function isMaterialPath(source:String):Bool {
+        return StringTools.endsWith(ProjectPath.normalizeRelative(source).toLowerCase(),
+            "." + MATERIAL_EXT);
+    }
+
+    /**
+     * Reload project material documents into the shared Material catalog and
+     * refresh the imported textures offered by the material editor. Called
+     * after project loads and after any asset change.
+     */
+    public function refreshMaterialAssets():Void {
+        var loaded:Array<Material> = [];
+        for (asset in project.assets) {
+            if (asset.type != "material") continue;
+            var source = ProjectPath.normalizeRelative(asset.source);
+            var path = materialPath(source);
+            if (!sys.FileSystem.exists(path)) continue;
+            try {
+                var doc = DocumentStore.loadMaterial(path);
+                var culling:MaterialCulling = cast doc.culling;
+                loaded.push(new Material(doc.id, doc.name, doc.baseColor, doc.shadows,
+                    doc.specularAmount, doc.specularPower, culling,
+                    doc.albedoTexture, source));
+            } catch (e:Dynamic) {}
+        }
+        Material.setProjectMaterials(loaded);
+
+        var textures:Array<MaterialTexture> = [];
+        for (info in scanAllAssets()) {
+            if (info.kind != AssetTypeRegistry.KIND_TEXTURE) continue;
+            textures.push({ id: info.source, label: info.name, source: info.source });
+        }
+        MaterialTextureLibrary.setTextures(textures);
+        MaterialTextureLibrary.resolvePath = function(path) return absoluteAssetPath(path);
+    }
+
+    /** Create a material document under Materials/ and register its asset record. */
+    public function newMaterial(name:String, folder:String = MATERIAL_FOLDER):String {
+        var trimmed = StringTools.trim(name);
+        if (trimmed.length == 0) throw "Material name cannot be empty.";
+        var baseFile = safeFileName(trimmed);
+        var directory = materialFolder(folder);
+        var candidate = directory + "/" + baseFile + "." + MATERIAL_EXT;
+        var suffix = 2;
+        while (sys.FileSystem.exists(materialPath(candidate))) {
+            var nextName = baseFile + " " + suffix;
+            candidate = directory + "/" + safeFileName(nextName) + "." + MATERIAL_EXT;
+            trimmed = nextName;
+            suffix++;
+        }
+        var doc = new MaterialDocument(StableId.create("material"), trimmed);
+        DocumentStore.saveMaterial(materialPath(candidate), doc);
+        project.assets.push(new AssetRecord(doc.id, "material", candidate));
+        dirty = true;
+        refreshMaterialAssets();
+        stateChanged();
+        return candidate;
+    }
+
+    /** Material docs resolve against the scanned root, including untitled scratch. */
+    function materialPath(source:String):String {
+        return resolveAgainst(projectRootDir(), ProjectPath.normalizeRelative(source));
+    }
+
+    function materialFolder(folder:String):String {
+        var trimmed = StringTools.trim(folder).split("\\").join("/");
+        var normalized = trimmed.length == 0 ? MATERIAL_FOLDER
+            : ProjectPath.normalizeRelative(trimmed);
+        return isUntitled() ? UNTITLED_FOLDER + "/" + normalized : normalized;
+    }
+
+    public function loadMaterialDocument(source:String):MaterialDocument {
+        requireMaterialPath(source);
+        return DocumentStore.loadMaterial(materialPath(source));
+    }
+
+    /** Persist an edited document and refresh the runtime material catalog. */
+    public function saveMaterialDocument(source:String, doc:MaterialDocument):Void {
+        requireMaterialPath(source);
+        DocumentStore.saveMaterial(materialPath(source), doc);
+        for (asset in project.assets) {
+            if (asset.type == "material"
+                    && ProjectPath.normalizeRelative(asset.source) == source) {
+                asset.id = doc.id;
+                break;
+            }
+        }
+        dirty = true;
+        refreshMaterialAssets();
+        stateChanged();
+    }
+
+    public function renameMaterial(source:String, newName:String):String {
+        requireMaterialPath(source);
+        var doc = loadMaterialDocument(source);
+        var trimmed = StringTools.trim(newName);
+        if (trimmed.length == 0) throw "Material name cannot be empty.";
+        doc.name = trimmed;
+        var folder = new Path(source).dir;
+        var destination = uniqueAssetPath(folder,
+            safeFileName(trimmed) + "." + MATERIAL_EXT, source);
+        DocumentStore.saveMaterial(materialPath(destination), doc);
+        if (destination != source && sys.FileSystem.exists(materialPath(source))) {
+            sys.FileSystem.deleteFile(materialPath(source));
+        }
+        for (asset in project.assets) {
+            if (asset.type == "material"
+                    && ProjectPath.normalizeRelative(asset.source) == source) {
+                asset.source = destination;
+                break;
+            }
+        }
+        dirty = true;
+        refreshMaterialAssets();
+        stateChanged();
+        return destination;
+    }
+
+    public function deleteMaterial(source:String):Void {
+        requireMaterialPath(source);
+        for (asset in project.assets) {
+            if (asset.type == "material"
+                    && ProjectPath.normalizeRelative(asset.source) == source) {
+                project.assets.remove(asset);
+                break;
+            }
+        }
+        var path = materialPath(source);
+        if (sys.FileSystem.exists(path)) sys.FileSystem.deleteFile(path);
+        dirty = true;
+        refreshMaterialAssets();
+        stateChanged();
+    }
+
+    function requireMaterialPath(source:String):Void {
+        if (!isMaterialPath(source)) throw 'Not a material asset: ${source}';
     }
 
     /** Absolute path of a project-relative source, for reveal/copy-path. */

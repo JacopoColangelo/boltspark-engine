@@ -25,6 +25,21 @@ class ProjectValidator {
         }
     }
 
+    public static function validateMaterial(material:MaterialDocument):Void {
+        StableId.require(material.id, "material.id");
+        requireName(material.name, "material.name");
+        if (!Math.isFinite(material.specularAmount)
+                || material.specularAmount < 0 || material.specularAmount > 1) {
+            throw 'Material ${material.id} has invalid specular amount';
+        }
+        if (!Math.isFinite(material.specularPower) || material.specularPower < 0) {
+            throw 'Material ${material.id} has invalid specular power';
+        }
+        if (material.albedoTexture != null && material.albedoTexture.length > 0) {
+            material.albedoTexture = ProjectPath.normalizeRelative(material.albedoTexture);
+        }
+    }
+
     public static function validateScene(scene:SceneDocument):Void {
         StableId.require(scene.id, "scene.id");
         requireName(scene.name, "scene.name");

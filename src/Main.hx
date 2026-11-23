@@ -36,6 +36,7 @@ import boltspark.platform.NativeMultiFilePicker;
 import boltspark.project.AssetTypeRegistry;
 import boltspark.project.AssetWatcher;
 import boltspark.project.EngineAssetCatalog;
+import boltspark.project.MaterialDocument;
 import boltspark.project.ProjectPath;
 import boltspark.project.ProjectSession;
 import boltspark.project.SceneSerializer;
@@ -411,6 +412,9 @@ class Main extends hxd.App {
         boltUI.onQueryEngineAssets = function() return EngineAssetCatalog.all();
         boltUI.onQueryAssetDetails = function(source) return projectSession.assetDetails(source);
         boltUI.onOpenAsset = openAsset;
+        boltUI.onSaveMaterial = saveMaterialAsset;
+        boltUI.onNewMaterial = createMaterialAsset;
+        boltUI.onDeleteMaterial = deleteMaterialAsset;
         boltUI.onNewScene = createAssetScene;
         boltUI.onRenameAsset = renameAsset;
         boltUI.onDeleteAsset = deleteAsset;
@@ -3246,10 +3250,12 @@ class Main extends hxd.App {
 
     function openAsset(source:String):Void {
         // Textures are loadable in the browser (so they can be previewed and
-        // dragged) but do not open a scene document. Material slots are the
-        // next milestone; fail softly instead of reporting a false open error.
+        if (projectSession.isMaterialPath(source)) {
+            openMaterialAsset(source);
+            return;
+        }
         if (!projectSession.isScenePath(source)) {
-            boltUI.log('asset: ${source} has no editor view yet — texture import is ready, material slots are next');
+            boltUI.log('asset: ${source} has no editor view');
             return;
         }
         if (!confirmDiscardChanges()) return;
@@ -3258,6 +3264,52 @@ class Main extends hxd.App {
             reloadEditorSession();
             boltUI.log('asset: opened ${projectSession.scenePath}');
         } catch (e:Dynamic) reportProjectError('open asset', e);
+    }
+
+    function openMaterialAsset(source:String):Void {
+        try {
+            var document = projectSession.loadMaterialDocument(source);
+            boltUI.openMaterialEditor(source, document);
+            printActivity('[material] open source=${source}');
+            boltUI.log('asset: opened material ${document.name}');
+        } catch (e:Dynamic) {
+            reportProjectError('open material', e);
+        }
+    }
+
+    function createMaterialAsset():Void {
+        try {
+            var source = projectSession.newMaterial("New Material");
+            boltUI.refreshAssetBrowser();
+            openMaterialAsset(source);
+            boltUI.log('asset: created ${source}');
+        } catch (e:Dynamic) {
+            reportProjectError('create material', e);
+        }
+    }
+
+    function saveMaterialAsset(source:String, document:MaterialDocument):Void {
+        try {
+            projectSession.saveMaterialDocument(source, document);
+            boltUI.refreshAssetBrowser();
+            printActivity('[material] saved source=${source} name=${document.name}');
+            boltUI.log('material: saved ${document.name}');
+        } catch (e:Dynamic) {
+            reportProjectError('save material', e);
+        }
+    }
+
+    function deleteMaterialAsset(source:String):Void {
+        if (!confirmDestructive('Delete Material',
+                'Delete material ${source}? This cannot be undone.')) return;
+        try {
+            projectSession.deleteMaterial(source);
+            boltUI.clearMaterialEditor();
+            boltUI.refreshAssetBrowser();
+            boltUI.log('material: deleted ${source}');
+        } catch (e:Dynamic) {
+            reportProjectError('delete material', e);
+        }
     }
 
     function createAssetScene(folder:String, name:String):Void {

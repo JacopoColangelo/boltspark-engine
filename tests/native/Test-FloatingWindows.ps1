@@ -384,7 +384,8 @@ try {
             throw 'Window menu did not open.'
         }
     }
-    Send-Click $main 264 237   # Float Focused Panel (section/separator heights vary)
+    # Material Editor is the sixth non-fixed panel, adding one 22px Window row.
+    Send-Click $main 264 259   # Float Focused Panel (section/separator heights vary)
     $secondFloat = [IntPtr]::Zero
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -466,7 +467,7 @@ try {
     Send-Click $main 760 76
     Start-Sleep -Milliseconds 250
     Send-Click $main 219 15
-    Send-Click $main 264 237
+    Send-Click $main 264 259
     $thirdFloat = [IntPtr]::Zero
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {

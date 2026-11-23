@@ -13,15 +13,21 @@ class Material {
     public var specularAmount:Float;
     public var specularPower:Float;
     public var culling:MaterialCulling;
+    /** Optional albedo texture asset id (project-relative texture source). */
+    public var albedoTexture:String;
+    /** Project-relative source of a authored material document, "" for built-ins. */
+    public var source:String;
 
     static var sharedDefault:Null<Material>;
     static var sharedOrange:Null<Material>;
     static var registered:Array<Material> = [];
+    /** Materials loaded from the current project's `type:"material"` records. */
+    static var projectCatalog:Array<Material> = [];
 
     public function new(id:String, name:String, color:Int = 0xFFFFFF,
             shadows:Bool = false, specularAmount:Float = 0.18,
             specularPower:Float = 24,
-            culling:MaterialCulling = Back) {
+            culling:MaterialCulling = Back, ?albedoTexture:String, ?source:String) {
         if (id == null || StringTools.trim(id).length == 0) {
             throw "Material ID cannot be empty";
         }
@@ -35,6 +41,8 @@ class Material {
         this.specularAmount = specularAmount;
         this.specularPower = specularPower;
         this.culling = culling;
+        this.albedoTexture = albedoTexture == null ? "" : albedoTexture;
+        this.source = source == null ? "" : source;
     }
 
     /** Neutral white default assigned to newly created primitives. */
@@ -73,6 +81,23 @@ class Material {
         registered.push(material);
     }
 
+    /** Replace the project-authored materials (called on project load/close). */
+    public static function setProjectMaterials(list:Array<Material>):Void {
+        projectCatalog = list == null ? [] : list.copy();
+    }
+
+    public static function projectMaterials():Array<Material> {
+        return projectCatalog.copy();
+    }
+
+    public static function findBySource(source:String):Null<Material> {
+        if (source == null || source.length == 0) return null;
+        for (material in projectCatalog) {
+            if (material.source == source) return material;
+        }
+        return null;
+    }
+
     /** Stable asset list for type-aware Inspector pickers. */
     public static function all():Array<Material> {
         var result = [defaultMaterial(), orangeMaterial()];
@@ -81,6 +106,7 @@ class Material {
                 result.push(material);
             }
         }
+        for (material in projectCatalog) result.push(material);
         return result;
     }
 
@@ -94,6 +120,9 @@ class Material {
         }
         if (id == ORANGE_ID || id == "Orange Material") return orangeMaterial();
         for (material in registered) {
+            if (material.id == id) return material;
+        }
+        for (material in projectCatalog) {
             if (material.id == id) return material;
         }
         return null;

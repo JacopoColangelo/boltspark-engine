@@ -6,6 +6,7 @@ import boltspark.engine.ComponentTypeInfo;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.ui.layout.LayoutRect;
 import boltspark.ui.HierarchyEntry;
+import boltspark.project.MaterialDocument;
 import boltspark.project.ProjectSession.AssetDetails;
 import boltspark.project.ProjectSession.AssetFileInfo;
 import boltspark.ui.windows.ApplicationWindowKind;
@@ -90,6 +91,10 @@ class BoltUI {
     public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
     public var onQueryEngineAssets:Null<Void->Array<AssetFileInfo>>;
     public var onOpenAsset:Null<String->Void>;
+    /** Material editor commands, routed upward to ProjectSession. */
+    public var onSaveMaterial:Null<String->MaterialDocument->Void>;
+    public var onNewMaterial:Null<Void->Void>;
+    public var onDeleteMaterial:Null<String->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
     public var onRenameFolder:Null<String->String->String>;
@@ -288,6 +293,15 @@ class BoltUI {
         };
         shell.onOpenAsset = function(source) {
             if (onOpenAsset != null) onOpenAsset(source);
+        };
+        shell.onSaveMaterial = function(source, document) {
+            if (onSaveMaterial != null) onSaveMaterial(source, document);
+        };
+        shell.onNewMaterial = function() {
+            if (onNewMaterial != null) onNewMaterial();
+        };
+        shell.onDeleteMaterial = function(source) {
+            if (onDeleteMaterial != null) onDeleteMaterial(source);
         };
         shell.onNewScene = function(folder, name) {
             if (onNewScene != null) onNewScene(folder, name);
@@ -498,6 +512,16 @@ class BoltUI {
     /** Rebuild the Asset Browser after a project asset changes. */
     public function refreshAssetBrowser():Void {
         shell.refreshAssetBrowser();
+    }
+
+    /** Open or focus the Material Editor dock panel with a document loaded. */
+    public function openMaterialEditor(source:String,
+            document:MaterialDocument):Void {
+        shell.openMaterialEditor(source, document);
+    }
+
+    public function clearMaterialEditor():Void {
+        shell.clearMaterialEditor();
     }
 
     /** Live component-vector update during viewport gizmo drags. */

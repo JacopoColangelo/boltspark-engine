@@ -9,6 +9,7 @@ import boltspark.engine.PrimitiveMeshes;
 import boltspark.engine.inspector.AssetType;
 import boltspark.engine.inspector.ComponentInspectorData;
 import boltspark.engine.inspector.ComponentPropertyData;
+import boltspark.project.MaterialDocument;
 import boltspark.ui.AssetDragSession;
 import boltspark.ui.AssetDropRect;
 import boltspark.ui.AssetDropTarget;
@@ -28,6 +29,7 @@ import boltspark.ui.widgets.BottomDockTab;
 import boltspark.ui.widgets.ConsolePanel;
 import boltspark.ui.widgets.ComponentInspectorSection;
 import boltspark.ui.widgets.GameObjectPalette;
+import boltspark.ui.widgets.MaterialEditor;
 import boltspark.ui.widgets.HierarchyRow;
 import boltspark.ui.widgets.InspectorSection;
 import boltspark.ui.widgets.AssetBrowser;
@@ -186,10 +188,12 @@ class EditorShell {
     public var dockManager(default, null):DockingManager;
     var hierarchyDockHost:h2d.Object;
     var inspectorDockHost:h2d.Object;
+    var materialDockHost:h2d.Object;
     final palette:GameObjectPalette;
     final menuDropdown:MenuDropdown;
     final tooltip:UiTooltip;
     final assetBrowser:AssetBrowser;
+    public var materialEditor:MaterialEditor;
 
     /** Create a primitive in front of the viewport camera (Add menu click). */
     public var onCreatePrimitive:Null<String->Void>;
@@ -254,6 +258,10 @@ class EditorShell {
     public var onQueryAssets:Null<Void->Array<AssetFileInfo>>;
     public var onQueryEngineAssets:Null<Void->Array<AssetFileInfo>>;
     public var onOpenAsset:Null<String->Void>;
+    /** Material editor commands, routed upward to ProjectSession. */
+    public var onSaveMaterial:Null<String->MaterialDocument->Void>;
+    public var onNewMaterial:Null<Void->Void>;
+    public var onDeleteMaterial:Null<String->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
     public var onRenameFolder:Null<String->String->String>;
@@ -1191,9 +1199,25 @@ class EditorShell {
         assetBrowser.onImportAssets = function(folder) {
             if (onImportAssets != null) onImportAssets(folder);
         };
+        assetBrowser.onNewMaterial = function() {
+            if (onNewMaterial != null) onNewMaterial();
+        };
         assetBrowser.onQueryTextureTile = function(source) {
             return onQueryTextureTile != null ? onQueryTextureTile(source) : null;
         };
+        materialDockHost = new h2d.Object(panelLayer);
+        materialEditor = new MaterialEditor(ctx, materialDockHost);
+        materialEditor.onSave = function(source, document) {
+            if (onSaveMaterial != null) onSaveMaterial(source, document);
+        };
+        materialEditor.onNewMaterial = function() {
+            if (onNewMaterial != null) onNewMaterial();
+        };
+        materialEditor.onDeleteMaterial = function(source) {
+            if (onDeleteMaterial != null) onDeleteMaterial(source);
+        };
+        materialEditor.onStatus = function(message) log(message);
+
         palette = new GameObjectPalette(ctx, root);
         palette.onCreatePrimitive = function(meshId) {
             if (onCreatePrimitive != null) onCreatePrimitive(meshId);
@@ -1247,6 +1271,7 @@ class EditorShell {
         dockManager.bindHostId("boltspark.inspector", inspectorDockHost);
         dockManager.bindHostId("boltspark.console", console);
         dockManager.bindHostId("boltspark.assets", assetBrowser);
+        dockManager.bindHostId("boltspark.material", materialDockHost);
         dockManager.initialize(dockLayout);
         activeBottomTab = dockManager.legacySizes().bottomTab;
         console.visible = activeBottomTab == 1;
@@ -3034,6 +3059,12 @@ class EditorShell {
             defaultSide: DockSide.Bottom, minWidth: 240, minHeight: 130,
             canClose: true, canFloat: true, canDock: true
         });
+        dockRegistry.register({
+            id: "boltspark.material", displayName: "Material Editor", icon: 14,
+            factory: function() return new MaterialEditorDockView(this, materialDockHost),
+            defaultSide: DockSide.Right, minWidth: 220, minHeight: 200,
+            canClose: true, canFloat: true, canDock: true
+        });
     }
 
     function setBottomTabFromDock(index:Int):Void {
@@ -3153,6 +3184,20 @@ class EditorShell {
     /** Called by Main after editor state changes to refresh native floats. */
     public function refreshNativePanels():Void {
         if (dockManager != null) dockManager.refreshNativePanels();
+    }
+
+    /** Open (or focus) the Material Editor dock panel and load a document. */
+    public function openMaterialEditor(source:String,
+            document:MaterialDocument):Void {
+        Sys.println('[probe] material editor opened source=${source}');
+        dockManager.open("boltspark.material");
+        materialEditor.edit(source, document);
+        refreshNativePanels();
+    }
+
+    public function clearMaterialEditor():Void {
+        materialEditor.clear();
+        refreshNativePanels();
     }
 
     public function shutdownDockWindows():Void {
@@ -3276,6 +3321,31 @@ private class AssetDockView implements DockPanelView {
     public function setVisible(value:Bool):Void browser.visible = value;
 
     public function serializeState():Dynamic return null;
+
+    public function restoreState(state:Dynamic):Void {}
+}
+
+private class MaterialEditorDockView implements DockPanelView {
+    public var panelId(default, null):String = "boltspark.material";
+    final host:h2d.Object;
+    final editor:MaterialEditor;
+
+    public function new(shell:EditorShell, host:h2d.Object) {
+        this.host = host;
+        this.editor = shell.materialEditor;
+    }
+
+    public function layout(rect:LayoutRect):Void {
+        host.x = Math.round(rect.x);
+        host.y = Math.round(rect.y);
+        editor.layout(Math.max(0, rect.width), Math.max(0, rect.height));
+    }
+
+    public function setVisible(value:Bool):Void host.visible = value;
+
+    public function serializeState():Dynamic {
+        return { source: editor.currentSourcePath() };
+    }
 
     public function restoreState(state:Dynamic):Void {}
 }

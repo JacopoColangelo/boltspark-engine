@@ -1,6 +1,7 @@
 package boltspark.editor;
 
 import boltspark.engine.MaterialCulling;
+import boltspark.engine.MaterialTextureBindings;
 import boltspark.engine.MeshRenderer;
 
 /** Heaps projection of one renderer-independent MeshRenderer component. */
@@ -37,6 +38,9 @@ class SceneRendererView {
             material.shadows = definition.shadows;
             material.specularAmount = definition.specularAmount;
             material.specularPower = definition.specularPower;
+            // Material assets own their albedo map; MeshRenderer only stores a
+            // reference to the material, so the renderer reads it from there.
+            material.texture = MaterialTextureBindings.get(definition.albedoTexture);
             var culling = toHeapsCulling(definition.culling);
             material.mainPass.culling = culling;
             var shadowPass = material.getPass("shadow");

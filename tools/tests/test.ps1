@@ -21,7 +21,8 @@ param(
     [switch]$ExplorerDrop,
     [switch]$UntitledSession,
     [switch]$AssetWatcher,
-    [switch]$FloatExplorerDrop
+    [switch]$FloatExplorerDrop,
+    [switch]$MaterialEditor
 )
 
 $ErrorActionPreference = 'Stop'
@@ -140,7 +141,8 @@ try {
             'PlayModeRepro',
             'ProjectSerializationRepro',
             'ProjectSessionRepro',
-            'AssetBrowserRepro'
+            'AssetBrowserRepro',
+            'MaterialEditorRepro'
         )) {
             Invoke-Haxe ($directClassPaths + @('--interp', '-main', $test)) `
                 "Portable $test"
@@ -186,6 +188,7 @@ try {
         @{ Name = 'ProjectSerializationRepro'; Output = 'project-serialization-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ProjectSessionRepro'; Output = 'project-session-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'AssetBrowserRepro'; Output = 'asset-browser-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'format') },
+        @{ Name = 'MaterialEditorRepro'; Output = 'material-editor-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro') },
         @{ Name = 'ThumbnailPipelineRepro'; Output = 'thumbnail-pipeline-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') },
         @{ Name = 'TextureCacheRepro'; Output = 'texture-cache-repro.hl'; Args = @('-cp', 'src', '-cp', 'tests/repro', '-lib', 'heaps', '-lib', 'format') }
     )
@@ -300,6 +303,10 @@ try {
     if ($FloatExplorerDrop) {
         & (Join-Path $repoRoot 'tests\native\Test-FloatExplorerDrop.ps1')
         Assert-LastExitCode 'Floating-browser Explorer drop probe'
+    }
+    if ($MaterialEditor) {
+        & (Join-Path $repoRoot 'tests\native\Test-MaterialEditor.ps1')
+        Assert-LastExitCode 'Material editor probe'
     }
 
     Write-Host '[test] All requested Boltspark tests passed.' -ForegroundColor Green
