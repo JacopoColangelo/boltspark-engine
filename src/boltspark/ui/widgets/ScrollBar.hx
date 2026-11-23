@@ -40,7 +40,7 @@ class ScrollBar extends h2d.Object {
 
         thumb = new h2d.Interactive(1, 1, this);
         thumb.backgroundColor = 0;
-        thumb.cursor = hxd.Cursor.Default;
+        thumb.cursor = hxd.Cursor.Move;
         thumb.onOver = function(_) {
             hovered = true;
             refresh();

@@ -1,25 +1,19 @@
 package boltspark.editor;
 
+import boltspark.editor.shaders.OverlayDepthOcclusion;
 import boltspark.ui.Theme;
 
 /**
  * Independent editor floor grid.
  *
- * The grid lives in its own h3d.scene.Scene that is rendered as a dedicated
- * editor pass by EditorViewport — it is never parented into the gameplay
- * scene graph, never serialized with a scene, and never visible to hierarchy
- * inspection. Its camera is synchronized from the editor camera every frame,
- * so the grid stays aligned with the world origin at any camera position.
+ * The grid is a non-serialized helper object inside the world scene, drawn in
+ * the deferred renderer's `overlay` pass after tonemapping. It is never part
+ * of the editor session, hierarchy, picking, or scene documents. A small
+ * shader discards grid fragments hidden by the PBR depth buffer, preserving
+ * the historical "objects sit in front of the grid" look (and the dedicated
+ * render pass is gone, so the deferred final blit cannot overwrite it).
  *
- * Depth behavior matches the previous in-scene layering: the grid draws
- * before the world scene with no depth write, so scene geometry always
- * paints over it (objects appear naturally in front of the grid), while the
- * grid itself stays anchored to y = 0 regardless of scene transforms.
- *
- * Visibility is controlled through `visible` (G / Game View). Toggling only
- * flips the render flag: scene rendering, camera navigation and the axis
- * gizmo are untouched, and the grid resources are kept alive for the next
- * toggle.
+ * Visibility is controlled through `visible` (G / Game View).
  */
 class EditorGridRenderer {
     static inline var EXTENT:Int = 20;
@@ -27,15 +21,19 @@ class EditorGridRenderer {
 
     public var visible(default, set):Bool = true;
 
-    /** Dedicated editor render scene; never part of the world hierarchy. */
-    public final scene:h3d.scene.Scene;
-    final grid:h3d.scene.Graphics;
+    /** Grid graphics node; deliberately not tracked by the editor session. */
+    public final grid:h3d.scene.Graphics;
 
-    public function new() {
-        scene = new h3d.scene.Scene();
-        grid = new h3d.scene.Graphics(scene);
+    public function new(parent:h3d.scene.Object) {
+        grid = new h3d.scene.Graphics(parent);
         grid.name = "EditorGrid";
+        grid.material.mainPass.setPassName("overlay");
         grid.material.mainPass.depthWrite = false;
+        // The LDR overlay target has no depth buffer: visibility is resolved
+        // against the PBR depth texture inside OverlayDepthOcclusion.
+        grid.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
+        grid.material.mainPass.layer = 5;
+        grid.material.mainPass.addShader(new OverlayDepthOcclusion());
         build();
     }
 
@@ -60,17 +58,6 @@ class EditorGridRenderer {
         grid.lineStyle(1.35, Theme.AXIS_Z, 1);
         grid.moveTo(0, gridY + 0.003, -EXTENT);
         grid.lineTo(0, gridY + 0.003, EXTENT);
-    }
-
-    /** Copy the editor camera so the grid view matches the world exactly. */
-    public function syncCamera(camera:h3d.Camera):Void {
-        scene.camera.load(camera);
-    }
-
-    /** Render the dedicated editor grid pass. */
-    public function render(engine:h3d.Engine):Void {
-        if (!visible) return;
-        scene.render(engine);
     }
 
     function set_visible(value:Bool):Bool {

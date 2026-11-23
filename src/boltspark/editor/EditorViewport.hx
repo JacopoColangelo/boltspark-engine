@@ -7,13 +7,12 @@ import boltspark.ui.layout.LayoutRect;
  * rendering, picking, and gizmo pointers. Keeping this outside Main prevents
  * panel-resize and backbuffer scaling rules from drifting apart.
  *
- * Render sequence (all editor-only passes stay outside the world scene):
- *   1. the world/scene renderer (gameplay objects),
- *   2. the independent editor grid scene (dedicated h3d.scene.Scene pass),
- *   3. the axis gizmo overlay (drawn within the 2D scene above everything).
- * The grid draws before the world scene — with no depth write — so scene
- * geometry always paints over it, matching the historical layering without
- * the grid ever being a node in the scene graph.
+ * Render sequence:
+ *   1. the deferred world renderer (gameplay objects + depth-aware editor
+ *      grid/gizmo overlays, which live in the scene but not in the session),
+ *   2. the axis gizmo overlay (drawn within the 2D scene above everything).
+ * The grid, selection outlines and transform gizmos use the PBR renderer's
+ * `overlay` pass; the final HDR->LDR blit therefore cannot paint over them.
  */
 class EditorViewport {
     /** Shared horizontal FOV, adjustable from the viewport camera menu. The
@@ -24,17 +23,15 @@ class EditorViewport {
     final scene3d:h3d.scene.Scene;
     final scene2d:h2d.Scene;
     final viewportRect:Void->LayoutRect;
-    var gridRenderer:Null<EditorGridRenderer>;
     var gizmoRenderer:Null<EditorAxisGizmoRenderer>;
 
     public function new(window:hxd.Window, scene3d:h3d.scene.Scene,
             scene2d:h2d.Scene, viewportRect:Void->LayoutRect,
-            ?grid:EditorGridRenderer, ?gizmo:EditorAxisGizmoRenderer) {
+            ?gizmo:EditorAxisGizmoRenderer) {
         this.window = window;
         this.scene3d = scene3d;
         this.scene2d = scene2d;
         this.viewportRect = viewportRect;
-        gridRenderer = grid;
         gizmoRenderer = gizmo;
     }
 
@@ -54,11 +51,8 @@ class EditorViewport {
             scene3d.camera.viewY = 1 - centerY * 2 / engine.height;
             engine.setRenderZone(x, y, width, height);
             engine.clear(0xFF000000 | backgroundColor, 1, 0);
-            // Dedicated editor grid pass, independent of the world scene.
-            if (gridRenderer != null && gridRenderer.visible) {
-                gridRenderer.syncCamera(scene3d.camera);
-                gridRenderer.render(engine);
-            }
+            // The deferred world renderer draws PBR geometry first, then its
+            // overlay pass (grid, outlines, gizmos), all inside this zone.
             scene3d.render(engine);
             engine.setRenderZone();
         }

@@ -94,7 +94,9 @@ class BoltUI {
     /** Material editor commands, routed upward to ProjectSession. */
     public var onSaveMaterial:Null<String->MaterialDocument->Void>;
     public var onNewMaterial:Null<Void->Void>;
+    public var onNewMaterialInFolder:Null<String->Void>;
     public var onDeleteMaterial:Null<String->Void>;
+    public var onMaterialChanged:Null<String->MaterialDocument->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
     public var onRenameFolder:Null<String->String->String>;
@@ -299,8 +301,15 @@ class BoltUI {
         shell.onSaveMaterial = function(source, document) {
             if (onSaveMaterial != null) onSaveMaterial(source, document);
         };
+        shell.onMaterialChanged = function(source, document) {
+            if (onMaterialChanged != null) onMaterialChanged(source, document);
+        };
         shell.onNewMaterial = function() {
             if (onNewMaterial != null) onNewMaterial();
+        };
+        shell.onNewMaterialInFolder = function(folder) {
+            if (onNewMaterialInFolder != null) onNewMaterialInFolder(folder);
+            else if (onNewMaterial != null) onNewMaterial();
         };
         shell.onImportMeshes = function(folder) {
             if (onImportMeshes != null) onImportMeshes(folder);

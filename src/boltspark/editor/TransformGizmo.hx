@@ -1001,6 +1001,10 @@ class TransformGizmo {
 		material.mainPass.depthWrite = false;
 		material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
 		material.mainPass.culling = h3d.mat.Data.Face.None;
+		// Deferred editor helpers are drawn in the overlay pass, after the
+		// HDR->LDR blit. Set it last: Material.set_blendMode rewrites the pass
+		// name, and callers configure the blend mode first.
+		material.mainPass.setPassName("overlay");
 	}
 
 	/**
@@ -1010,8 +1014,8 @@ class TransformGizmo {
 	function createSolid(primitive:h3d.prim.Primitive, name:String):h3d.scene.Mesh {
 		var mesh = new h3d.scene.Mesh(primitive, null, solidRoot);
 		mesh.name = name;
-		configureOverlayMaterial(mesh.material);
 		mesh.material.blendMode = Alpha;
+		configureOverlayMaterial(mesh.material);
 		mesh.visible = false;
 		return mesh;
 	}

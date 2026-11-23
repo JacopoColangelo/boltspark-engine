@@ -8,8 +8,11 @@ the editor's File menu.
 
 - Project manifest: `*.boltproject`, schema version `1`.
 - Scene document: `*.boltscene`, schema version `1`.
-- Implementations: `src/boltspark/project/ProjectCodec.hx` and
-  `src/boltspark/project/SceneCodec.hx`.
+- Material document: `*.boltmaterial`, schema version `2` (metallic/smoothness
+  PBR). Schema `1` Blinn-Phong materials still decode with neutral PBR defaults.
+- Implementations: `src/boltspark/project/ProjectCodec.hx`,
+  `src/boltspark/project/SceneCodec.hx`, and
+  `src/boltspark/project/MaterialCodec.hx`.
 - Round-trip fixtures: `tests/fixtures/project/`.
 
 Both roots carry an integer `version`. An unsupported version is rejected
@@ -55,6 +58,43 @@ is written back with additive generic mesh/material identities.
 Unknown component types and unknown fields on known component envelopes remain
 preserved. This lets an older editor retain newer component data even when it
 cannot instantiate that component's behavior.
+
+## PBR materials
+
+Material documents use the metallic/smoothness workflow exposed by the Unity-style
+Material Editor. Besides `id`, `name`, `baseColor`, `albedoTexture`, `culling` and
+`shadows`, schema 2 stores:
+
+- `metallic` and `smoothness` (both 0..1), plus `smoothnessSource`
+  (`metallicAlpha` reads smoothness from the metallic map's alpha,
+  `albedoAlpha` from the albedo's alpha);
+- `metallicTexture` (R = metallic, A = smoothness), an optional dedicated
+  `roughnessTexture` (G = roughness, overrides the alpha source), `normalTexture`
+  with `normalStrength`, and `occlusionTexture` with `occlusionStrength`;
+- `emissionColor` (RGB integer) and `emissionIntensity`;
+- `tilingX`, `tilingY`, `offsetX`, `offsetY`.
+
+All texture fields are project-relative paths or empty. Authored materials are
+created in the folder the user picks: right-click a Content folder and choose
+**New... → Material**, or use the toolbar Add button while browsing a folder.
+With no folder selected the Content root is used. The `Engine` tree is
+read-only and never receives user assets. `MaterialEditor` assigns texture
+fields by dragging a texture tile from the Asset Browser onto a typed slot (the
+same `AssetDragSession` mechanism Inspector slots use); the picker menu and
+clear button remain available. Edits preview live on the runtime material and
+persist automatically after a short debounce — there is no Save button; assets
+are created/renamed/deleted from the Asset Browser, and double-clicking a
+material opens it for editing. Deleting a material clears the editor and
+rebinds any object still using it to the default material.
+
+At render time `SceneRendererView` projects each `Material` onto a Heaps
+`PbrMaterial` drawn by `BoltsparkRenderer` (a deferred MRT renderer with HDR
+lighting, IBL, tonemapping, FXAA and shadow maps). Custom shaders under
+`src/boltspark/editor/shaders/` map the Unity-style values onto the G-buffer,
+add colored emission, support tangent-space normal maps and transform UVs.
+Editor helpers (grid, outlines, gizmos) draw in the deferred `overlay` pass and
+use the PBR depth buffer for occlusion. Renderer hooks are exposed for future
+screen-space techniques (SSAO, SSR, bloom, volumetrics, TAA).
 
 ## Compatibility and safety
 

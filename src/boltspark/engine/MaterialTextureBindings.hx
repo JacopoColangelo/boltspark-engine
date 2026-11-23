@@ -22,6 +22,8 @@ class MaterialTextureBindings {
                 path, sys.io.File.getBytes(path));
             var texture = new hxd.res.Image(entry).toTexture();
             texture.filter = h3d.mat.Data.Filter.Linear;
+            // PBR slots share one tiling/offset transform and repeat by design.
+            texture.wrap = h3d.mat.Data.Wrap.Repeat;
             texture.setName("materialTexture:" + id);
             cache.set(id, texture);
             Sys.println('[material-texture] loaded id=${id} source=${asset.source}');

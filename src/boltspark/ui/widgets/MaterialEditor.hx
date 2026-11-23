@@ -3,46 +3,84 @@ package boltspark.ui.widgets;
 import boltspark.engine.Material;
 import boltspark.engine.MaterialCulling;
 import boltspark.engine.MaterialTextureLibrary;
+import boltspark.engine.inspector.AssetType;
 import boltspark.project.MaterialDocument;
 import boltspark.ui.Theme;
 import boltspark.ui.UiContext;
 import boltspark.ui.UiSurface;
 import boltspark.ui.UiText;
-import boltspark.ui.widgets.MenuDropdown;
 import boltspark.ui.widgets.MenuDropdown.MenuItem;
+import boltspark.ui.widgets.ScrollBar;
 
 /**
- * Editor for project-authored Material assets. Docked by default, and floated
- * as a real native HWND by the standard dock-panel path when dragged out.
- * All persistence goes through callbacks; this widget never touches documents.
+ * Unity-style metallic/smoothness material editor, laid out with the same
+ * collapsible `InspectorSection` groups, label column and row rhythm as the
+ * regular Inspector. Every PBR map is a typed drop target fed directly by the
+ * Asset Browser's texture payload, with picker/clear fallbacks.
+ *
+ * All persistence and live preview still flow out through callbacks: this
+ * widget never writes documents to disk or mutates engine state directly.
  */
 class MaterialEditor extends h2d.Object {
     public var onSave:Null<String->MaterialDocument->Void>;
     public var onNewMaterial:Null<Void->Void>;
     public var onDeleteMaterial:Null<String->Void>;
     public var onStatus:Null<String->Void>;
+    /** Live preview: apply the edited document to the runtime material. */
+    public var onChanged:Null<MaterialDocument->Void>;
+    public var onQueryTextureTile:Null<String->Null<h2d.Tile>>;
+    public var onBrowseTexture:Null<String->Void>;
 
-    final ctx:UiContext;
-    final background:UiSurface;
-    final title:UiText;
-    final materialButton:UiButton;
-    final newButton:UiButton;
-    final deleteButton:UiButton;
-    final saveButton:UiButton;
-    final nameField:TextInputField;
-    final colorField:TextInputField;
-    final albedoButton:UiButton;
-    final specAmountField:TextInputField;
-    final specPowerField:TextInputField;
-    final cullingButton:UiButton;
-    final shadowsCheckbox:UiCheckbox;
-    final statusText:UiText;
-    final menu:MenuDropdown;
+    static inline var HEADER_HEIGHT:Float = 12;
+    static inline var STATUS_HEIGHT:Float = 26;
+    static inline var LABEL_WIDTH:Float = 92;
+    static inline var EDGE:Float = 12;
+    static inline var GAP:Float = Theme.SPACING;
+    static inline var ROW:Float = Theme.CONTROL_HEIGHT;
+    static inline var SLOT:Float = AssetSlotField.SLOT_HEIGHT;
 
+    var ctx:UiContext;
+    var background:UiSurface;
+    var statusText:UiText;
+    var mask:h2d.Mask;
+    var content:h2d.Object;
+    var wheelHit:h2d.Interactive;
+    var scrollBar:ScrollBar;
+
+    var nameField:TextInputField;
+    var mainSection:InspectorSection;
+    var emissionSection:InspectorSection;
+    var tilingSection:InspectorSection;
+    var advancedSection:InspectorSection;
+    var colorField:TextInputField;
+    var colorSwatch:UiSurface;
+    var albedoSlot:AssetSlotField;
+    var metallicSlider:UiSlider;
+    var metallicSlot:AssetSlotField;
+    var smoothnessSlider:UiSlider;
+    var roughnessSlot:AssetSlotField;
+    var sourceButton:UiButton;
+    var normalSlot:AssetSlotField;
+    var occlusionSlot:AssetSlotField;
+    var emissionField:TextInputField;
+    var emissionSwatch:UiSurface;
+    var emissionSlider:UiSlider;
+    var tilingX:NumericDragField;
+    var tilingY:NumericDragField;
+    var offsetX:NumericDragField;
+    var offsetY:NumericDragField;
+    var cullingButton:UiButton;
+    var shadowsCheckbox:UiCheckbox;
+
+    var menu:Null<MenuDropdown> = null;
     var currentSource:String = "";
     var currentDocument:Null<MaterialDocument> = null;
     var widthValue:Float = 320;
     var heightValue:Float = 360;
+    var innerWidth:Float = 296;
+    var contentHeightValue:Float = 600;
+    var scrollY:Float = 0;
+    var suppressChange:Bool = false;
 
     public function new(ctx:UiContext, ?parent:h2d.Object) {
         super(parent);
@@ -51,102 +89,408 @@ class MaterialEditor extends h2d.Object {
         background = new UiSurface(ctx, this);
         background.setStyle(Theme.PANEL, Theme.BORDER, 0);
 
-        title = new UiText(ctx.font, this);
-        title.text = "Material Editor";
-        title.textColor = Theme.TEXT;
-        title.lineBreak = false;
-        title.x = 12;
-        title.y = 10;
-
-        materialButton = new UiButton(ctx, "No material", 150, 26, this);
-        materialButton.onClick = openMaterialMenu;
-        newButton = new UiButton(ctx, "New", 48, 26, this);
-        newButton.onClick = function() {
-            if (onNewMaterial != null) onNewMaterial();
-        };
-        deleteButton = new UiButton(ctx, "Delete", 60, 26, this);
-        deleteButton.onClick = function() {
-            if (currentSource == "") return;
-            if (onDeleteMaterial != null) onDeleteMaterial(currentSource);
-        };
-        saveButton = new UiButton(ctx, "Save", 56, 26, this);
-        saveButton.onClick = saveCurrent;
-
-        nameField = new TextInputField(ctx, "Name", 260, 26, "", this);
-        nameField.onCommit = function(value) {
-            if (currentDocument != null) currentDocument.name = value;
-        };
-        colorField = new TextInputField(ctx, "Base color", 260, 26, "FFFFFF", this);
-        colorField.onCommit = function(value) {
-            if (currentDocument == null) return;
-            var parsed = Std.parseInt("0x" + StringTools.replace(
-                StringTools.trim(value), "#", ""));
-            if (parsed != null) currentDocument.baseColor = parsed;
-        };
-        albedoButton = new UiButton(ctx, "Albedo: None", 260, 26, this);
-        albedoButton.onClick = openTextureMenu;
-        specAmountField = new TextInputField(ctx, "Specular", 260, 26, "0.18", this);
-        specAmountField.onCommit = function(value) {
-            if (currentDocument != null) currentDocument.specularAmount = parseNumber(value, currentDocument.specularAmount);
-        };
-        specPowerField = new TextInputField(ctx, "Shininess", 260, 26, "24", this);
-        specPowerField.onCommit = function(value) {
-            if (currentDocument != null) currentDocument.specularPower = parseNumber(value, currentDocument.specularPower);
-        };
-        cullingButton = new UiButton(ctx, "Culling: Back", 260, 26, this);
-        cullingButton.onClick = openCullingMenu;
-        shadowsCheckbox = new UiCheckbox(ctx, "Cast shadows", this);
-        shadowsCheckbox.onChanged = function(value) {
-            if (currentDocument != null) currentDocument.shadows = value;
-        };
-
         statusText = new UiText(ctx.font, this);
         statusText.textColor = Theme.TEXT_SECONDARY;
         statusText.lineBreak = false;
 
-        var scene = getScene();
-        menu = new MenuDropdown(ctx, scene == null ? this : scene);
+        mask = new h2d.Mask(200, 100, this);
+        content = new h2d.Object(mask);
+        content.x = Std.int(EDGE);
+
+        // Title row: same label/field grid as every Inspector property.
+        rowLabel(content, 0, ROW, "Name");
+        nameField = new TextInputField(ctx, "", 200, Std.int(ROW), "", content);
+        nameField.x = fieldX();
+        nameField.onCommit = function(value) {
+            if (currentDocument == null) return;
+            currentDocument.name = value;
+            notifyChanged();
+        };
+
+        mainSection = createSection("Main Maps", true);
+        emissionSection = createSection("Emission", true);
+        tilingSection = createSection("Tiling / Offset", true);
+        advancedSection = createSection("Advanced", false);
+
+        buildMainRows();
+        buildEmissionRows();
+        buildTilingRows();
+        buildAdvancedRows();
+
+        // Wheel-only body capture. Heaps propagates wheel events by default,
+        // and propagateEvents keeps clicks reaching every control underneath.
+        wheelHit = new h2d.Interactive(200, 100, this);
+        wheelHit.backgroundColor = 0;
+        // h2d.Interactive defaults to the pointing-hand cursor; this catcher
+        // spans the whole body, so leave the cursor to the control beneath.
+        wheelHit.cursor = null;
+        wheelHit.propagateEvents = true;
+        wheelHit.onWheel = function(event) {
+            if (scrollBy(event.wheelDelta)) event.propagate = false;
+        };
+
+        // Same scrollbar/catcher pattern as the Inspector: the mask owns the
+        // scroll offset so h2d keeps clipped interactives aligned while the
+        // thumb provides a draggable fallback.
+        scrollBar = new ScrollBar(ctx, this);
+        scrollBar.onChange = function(value) {
+            scrollY = maxScroll() * value;
+            applyScroll();
+        };
+        scrollBar.onWheel = scrollBy;
+
         layout(widthValue, heightValue);
     }
 
-    static function parseNumber(value:String, fallback:Float):Float {
-        var parsed = Std.parseFloat(StringTools.trim(value));
-        return Math.isFinite(parsed) ? parsed : fallback;
+    // ------------------------------------------------------------------
+    // Construction helpers
+    // ------------------------------------------------------------------
+
+    inline function fieldX():Float return LABEL_WIDTH + GAP;
+
+    inline function fieldWidth():Float return Math.max(80, innerWidth - fieldX());
+
+    function rowLabel(parent:h2d.Object, y:Float, height:Float,
+            text:String):UiText {
+        var result = new UiText(ctx.labelFont, parent);
+        result.text = text;
+        result.textColor = Theme.TEXT_SECONDARY;
+        result.lineBreak = false;
+        // Integer placement keeps hlfreetype's exact-size glyphs pixel-aligned;
+        // fractional positions make the atlas sample blurry.
+        result.y = Math.round(y + (height - result.textHeight) * 0.5);
+        return result;
     }
+
+    function createSection(title:String, expanded:Bool):InspectorSection {
+        var section = new InspectorSection(ctx, title, content);
+        if (!expanded) section.setExpanded(false);
+        section.onToggle = function() {
+            relayoutSections();
+            refreshScroll();
+        };
+        return section;
+    }
+
+    function buildMainRows():Void {
+        var rows = mainSection.content;
+        var y = 0.0;
+        rowLabel(rows, y, ROW, "Base Color");
+        colorField = new TextInputField(ctx, "", 200, Std.int(ROW), "FFFFFF", rows);
+        colorField.x = fieldX();
+        colorField.y = y;
+        colorField.onCommit = function(value) {
+            if (currentDocument == null) return;
+            var parsed = parseHex(value);
+            if (parsed != null) {
+                currentDocument.baseColor = parsed;
+                refreshFields();
+                notifyChanged();
+            }
+        };
+        colorSwatch = new UiSurface(ctx, rows);
+        colorSwatch.setSize(26, ROW);
+        colorSwatch.y = y;
+        y += ROW + GAP;
+
+        rowLabel(rows, y, SLOT, "Albedo");
+        albedoSlot = makeTextureSlot(rows, y, "Albedo: None", "albedoTexture");
+        y += SLOT + GAP;
+
+        rowLabel(rows, y, ROW, "Metallic");
+        metallicSlider = makeSlider(rows, y, 0, 1, 0, "metallic");
+        y += ROW + GAP;
+
+        rowLabel(rows, y, SLOT, "Metallic Map");
+        metallicSlot = makeTextureSlot(rows, y, "Metallic: None", "metallicTexture");
+        y += SLOT + GAP;
+
+        rowLabel(rows, y, ROW, "Smoothness");
+        smoothnessSlider = makeSlider(rows, y, 0, 1, 0.5, "smoothness");
+        y += ROW + GAP;
+
+        rowLabel(rows, y, ROW, "Source");
+        sourceButton = new UiButton(ctx, "Source: Metallic Alpha", 200,
+            Std.int(ROW), rows);
+        sourceButton.x = fieldX();
+        sourceButton.y = y;
+        sourceButton.onClick = openSourceMenu;
+        y += ROW + GAP;
+
+        rowLabel(rows, y, SLOT, "Roughness Map");
+        roughnessSlot = makeTextureSlot(rows, y, "Roughness: None", "roughnessTexture");
+        y += SLOT + GAP;
+
+        rowLabel(rows, y, SLOT, "Normal Map");
+        normalSlot = makeTextureSlot(rows, y, "Normal: None", "normalTexture");
+        y += SLOT + GAP;
+
+        rowLabel(rows, y, SLOT, "Occlusion");
+        occlusionSlot = makeTextureSlot(rows, y, "Occlusion: None", "occlusionTexture");
+        y += SLOT;
+        mainSection.contentHeight = y;
+    }
+
+    function buildEmissionRows():Void {
+        var rows = emissionSection.content;
+        var y = 0.0;
+        rowLabel(rows, y, ROW, "Color");
+        emissionField = new TextInputField(ctx, "", 200, Std.int(ROW), "000000", rows);
+        emissionField.x = fieldX();
+        emissionField.y = y;
+        emissionField.onCommit = function(value) {
+            if (currentDocument == null) return;
+            var parsed = parseHex(value);
+            if (parsed != null) {
+                currentDocument.emissionColor = parsed;
+                refreshFields();
+                notifyChanged();
+            }
+        };
+        emissionSwatch = new UiSurface(ctx, rows);
+        emissionSwatch.setSize(26, ROW);
+        emissionSwatch.y = y;
+        y += ROW + GAP;
+
+        rowLabel(rows, y, ROW, "Intensity");
+        emissionSlider = makeSlider(rows, y, 0, 8, 1, "emissionIntensity");
+        y += ROW;
+        emissionSection.contentHeight = y;
+    }
+
+    function buildTilingRows():Void {
+        var rows = tilingSection.content;
+        tilingX = makeNumber(rows, 0, "X", 1, function(v) {
+            if (currentDocument != null) currentDocument.tilingX = v;
+        });
+        tilingY = makeNumber(rows, 0, "Y", 1, function(v) {
+            if (currentDocument != null) currentDocument.tilingY = v;
+        });
+        offsetX = makeNumber(rows, ROW + GAP, "X", 0, function(v) {
+            if (currentDocument != null) currentDocument.offsetX = v;
+        });
+        offsetY = makeNumber(rows, ROW + GAP, "Y", 0, function(v) {
+            if (currentDocument != null) currentDocument.offsetY = v;
+        });
+        rowLabel(rows, 0, ROW, "Tiling");
+        rowLabel(rows, ROW + GAP, ROW, "Offset");
+        tilingSection.contentHeight = ROW * 2 + GAP;
+    }
+
+    function buildAdvancedRows():Void {
+        var rows = advancedSection.content;
+        rowLabel(rows, 0, ROW, "Culling");
+        cullingButton = new UiButton(ctx, "Culling: Back", 200, Std.int(ROW), rows);
+        cullingButton.x = fieldX();
+        cullingButton.onClick = openCullingMenu;
+        rowLabel(rows, ROW + GAP, ROW, "Shadows");
+        shadowsCheckbox = new UiCheckbox(ctx, "Cast shadows", rows);
+        shadowsCheckbox.x = fieldX();
+        shadowsCheckbox.y = ROW + GAP;
+        shadowsCheckbox.onChanged = function(value) {
+            if (currentDocument == null) return;
+            currentDocument.shadows = value;
+            notifyChanged();
+        };
+        advancedSection.contentHeight = ROW * 2 + GAP;
+    }
+
+    function makeSlider(parent:h2d.Object, y:Float, min:Float, max:Float,
+            initial:Float, property:String):UiSlider {
+        var slider = new UiSlider(ctx, 200, min, max, initial, "", parent);
+        slider.x = fieldX();
+        slider.y = y;
+        slider.displayDecimals = 2;
+        slider.onChange = function(value) {
+            if (currentDocument == null) return;
+            Reflect.setField(currentDocument, property, value);
+            notifyChanged();
+        };
+        return slider;
+    }
+
+    function makeNumber(parent:h2d.Object, y:Float, prefix:String,
+            initial:Float, apply:Float->Void):NumericDragField {
+        var field = new NumericDragField(ctx, 120, Std.int(ROW), -100, 100, 0.1,
+            initial, function(v) return Std.string(Math.round(v * 100) / 100),
+            prefix, Theme.TEXT_SECONDARY, parent);
+        field.y = y;
+        field.onValueChanged = function(value) {
+            apply(value);
+            notifyChanged();
+        };
+        return field;
+    }
+
+    function makeTextureSlot(parent:h2d.Object, y:Float, fallback:String,
+            property:String):AssetSlotField {
+        var slot = new AssetSlotField(ctx, 200, fallback, parent);
+        slot.x = fieldX();
+        slot.y = y;
+        slot.assetType = AssetType.TextureAsset;
+        slot.onQueryThumbnail = function(id) {
+            return onQueryTextureTile != null ? onQueryTextureTile(id) : null;
+        };
+        slot.onAssetDrop = function(id) {
+            if (currentDocument == null) return;
+            Reflect.setField(currentDocument, property, id);
+            refreshFields();
+            notifyChanged();
+        };
+        slot.onClear = function() {
+            if (currentDocument == null) return;
+            Reflect.setField(currentDocument, property, "");
+            refreshFields();
+            notifyChanged();
+        };
+        slot.onPick = function() {
+            var items:Array<MenuItem> = [{
+                label: "None",
+                selected: currentDocument != null
+                    && Reflect.field(currentDocument, property) == "",
+                onClick: function() { assignTexture(property, ""); }
+            }];
+            for (texture in MaterialTextureLibrary.all()) {
+                var id = texture.id;
+                items.push({
+                    label: texture.label,
+                    selected: currentDocument != null
+                        && Reflect.field(currentDocument, property) == id,
+                    onClick: function() { assignTexture(property, id); }
+                });
+            }
+            showMenu(slot, SLOT, items);
+        };
+        slot.onBrowse = function() {
+            var id = currentDocument == null ? "" : Reflect.field(currentDocument, property);
+            if (id != "" && onBrowseTexture != null) onBrowseTexture(id);
+        };
+        return slot;
+    }
+
+    function assignTexture(property:String, id:String):Void {
+        if (currentDocument == null) return;
+        Reflect.setField(currentDocument, property, id);
+        refreshFields();
+        notifyChanged();
+    }
+
+    // ------------------------------------------------------------------
+    // Layout
+    // ------------------------------------------------------------------
 
     public function layout(width:Float, height:Float):Void {
         widthValue = width < 120 ? 120 : width;
         heightValue = height < 200 ? 200 : height;
+        // Reserve the gutter for the scrollbar so no field is hidden under it.
+        innerWidth = Math.max(150, widthValue - EDGE * 2 - 8);
         background.setSize(widthValue, heightValue);
-        materialButton.setPosition(12, 40);
-        newButton.setPosition(166, 40);
-        deleteButton.setPosition(218, 40);
-        saveButton.setPosition(282, 40);
 
-        var fieldWidth = Math.max(150, widthValue - 24);
-        nameField.setWidth(fieldWidth);
-        nameField.setPosition(12, 78);
-        colorField.setWidth(fieldWidth);
-        colorField.setPosition(12, 110);
-        albedoButton.setWidth(fieldWidth);
-        albedoButton.setPosition(12, 142);
-        specAmountField.setWidth((fieldWidth - 12) * 0.5);
-        specAmountField.setPosition(12, 174);
-        specPowerField.setWidth((fieldWidth - 12) * 0.5);
-        specPowerField.setPosition(12 + (fieldWidth - 12) * 0.5 + 12, 174);
-        cullingButton.setWidth(fieldWidth);
-        cullingButton.setPosition(12, 206);
-        shadowsCheckbox.setWidth(fieldWidth);
-        shadowsCheckbox.setPosition(12, 238);
-        statusText.setPosition(12, heightValue - 26);
+        mask.width = Std.int(widthValue);
+        mask.height = Std.int(Math.max(1, heightValue - HEADER_HEIGHT - STATUS_HEIGHT));
+        mask.x = 0;
+        mask.y = HEADER_HEIGHT;
+        wheelHit.x = 0;
+        wheelHit.y = HEADER_HEIGHT;
+        wheelHit.width = widthValue;
+        wheelHit.height = mask.height;
+        statusText.setPosition(EDGE, heightValue - 22);
 
-        if (currentSource != "") refreshFields();
+        // TextInputField keeps an 82px label column by default; our labels live
+        // in the left grid column, so the input must fill the whole field.
+        for (field in [nameField, colorField, emissionField]) field.setLabelWidth(0);
+        nameField.setWidth(fieldWidth());
+        colorField.setWidth(fieldWidth() - 34);
+        emissionField.setWidth(fieldWidth() - 34);
+        colorSwatch.x = innerWidth - 26;
+        emissionSwatch.x = innerWidth - 26;
+        for (slot in [albedoSlot, metallicSlot, roughnessSlot, normalSlot, occlusionSlot]) {
+            slot.setWidth(fieldWidth());
+        }
+        for (slider in [metallicSlider, smoothnessSlider, emissionSlider]) {
+            slider.setWidth(fieldWidth());
+        }
+        sourceButton.setWidth(fieldWidth());
+        cullingButton.setWidth(fieldWidth());
+        shadowsCheckbox.setWidth(fieldWidth());
+        var pairWidth = Math.max(60, (fieldWidth() - GAP) * 0.5);
+        tilingX.x = fieldX();
+        tilingY.x = fieldX() + pairWidth + GAP;
+        tilingX.setWidth(pairWidth);
+        tilingY.setWidth(pairWidth);
+        tilingY.x = fieldX() + pairWidth + GAP;
+        offsetX.x = fieldX();
+        offsetY.x = fieldX() + pairWidth + GAP;
+        offsetX.setWidth(pairWidth);
+        offsetY.setWidth(pairWidth);
+        offsetY.x = fieldX() + pairWidth + GAP;
+
+        relayoutSections();
+        scrollBar.setBounds(widthValue - 7, HEADER_HEIGHT + 2, 5, mask.height - 4);
+        refreshScroll();
     }
+
+    function relayoutSections():Void {
+        for (section in [mainSection, emissionSection, tilingSection, advancedSection]) {
+            section.setWidth(innerWidth);
+        }
+        var y = ROW + GAP;
+        mainSection.y = y;
+        y += mainSection.totalHeight() + GAP;
+        emissionSection.y = y;
+        y += emissionSection.totalHeight() + GAP;
+        tilingSection.y = y;
+        y += tilingSection.totalHeight() + GAP;
+        advancedSection.y = y;
+        contentHeightValue = y + advancedSection.totalHeight() + GAP;
+    }
+
+    function refreshScroll():Void {
+        scrollY = Math.max(0, Math.min(maxScroll(), scrollY));
+        applyScroll();
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] material scroll metrics max=${Std.int(maxScroll())}'
+                + ' content=${Std.int(contentHeightValue)} view=${Std.int(mask.height)}');
+        }
+    }
+
+    function applyScroll():Void {
+        // The mask (not a content offset) owns the scroll: this keeps wheel
+        // routing, clipping and all widget hit boxes in the same coordinates.
+        mask.scrollY = scrollY;
+        var visible = mask.height / Math.max(1, contentHeightValue);
+        scrollBar.setMetrics(visible, maxScroll() <= 0 ? 0 : scrollY / maxScroll());
+        scrollBar.visible = visible < 1;
+    }
+
+    /** Wheel scroll; positive delta moves toward later properties. */
+    function scrollBy(delta:Float):Bool {
+        var maximum = maxScroll();
+        if (maximum <= 0) return false;
+        scrollY = Math.max(0, Math.min(maximum, scrollY + delta * 36));
+        applyScroll();
+        if (Sys.getEnv("BOLTSPARK_PROBE") != null) {
+            Sys.println('[probe] material scroll y=${Std.int(scrollY)}'
+                + ' max=${Std.int(maximum)} content=${Std.int(contentHeightValue)}'
+                + ' view=${Std.int(mask.height)}');
+        }
+        return true;
+    }
+
+    inline function maxScroll():Float {
+        return Math.max(0, contentHeightValue - mask.height);
+    }
+
+    // ------------------------------------------------------------------
+    // Document binding
+    // ------------------------------------------------------------------
 
     /** Load a material document for editing. */
     public function edit(source:String, document:MaterialDocument):Void {
         currentSource = source;
         currentDocument = document;
+        scrollY = 0;
+        applyScroll();
         refreshFields();
         setStatus('Editing ${document.name}');
     }
@@ -157,27 +501,67 @@ class MaterialEditor extends h2d.Object {
     public function clear():Void {
         currentSource = "";
         currentDocument = null;
-        materialButton.setText("No material");
-        nameField.setValue("");
-        colorField.setValue("FFFFFF");
-        albedoButton.setText("Albedo: None");
-        specAmountField.setValue("0.18");
-        specPowerField.setValue("24");
-        cullingButton.setText("Culling: Back");
-        shadowsCheckbox.value = false;
+        refreshFields();
         statusText.text = "";
     }
 
     function refreshFields():Void {
-        if (currentDocument == null) return;
-        nameField.setValue(currentDocument.name);
-        colorField.setValue(StringTools.hex(currentDocument.baseColor, 6).toUpperCase());
-        specAmountField.setValue(Std.string(currentDocument.specularAmount));
-        specPowerField.setValue(Std.string(currentDocument.specularPower));
-        shadowsCheckbox.value = currentDocument.shadows;
-        albedoButton.setText("Albedo: " + textureLabel(currentDocument.albedoTexture));
-        cullingButton.setText("Culling: " + currentDocument.culling.charAt(0).toUpperCase()
-            + currentDocument.culling.substr(1));
+        suppressChange = true;
+        var document = currentDocument;
+        nameField.setValue(document == null ? "" : document.name);
+        colorField.setValue(document == null ? "FFFFFF" : hex(document.baseColor));
+        colorSwatch.setStyle(document == null ? 0xFFFFFF : document.baseColor,
+            Theme.BORDER, 0);
+        emissionField.setValue(document == null ? "000000" : hex(document.emissionColor));
+        emissionSwatch.setStyle(document == null ? 0 : document.emissionColor,
+            Theme.BORDER, 0);
+        metallicSlider.setValue(document == null ? 0 : document.metallic);
+        smoothnessSlider.setValue(document == null ? 0.5 : document.smoothness);
+        emissionSlider.setValue(document == null ? 1 : document.emissionIntensity);
+        sourceButton.setText("Source: " + sourceLabel(document == null
+            ? Material.SMOOTHNESS_METALLIC_ALPHA : document.smoothnessSource));
+        cullingButton.setText("Culling: " + (document == null ? "Back"
+            : document.culling.charAt(0).toUpperCase() + document.culling.substr(1)));
+        shadowsCheckbox.value = document != null && document.shadows;
+
+        albedoSlot.assetId = document == null ? "" : document.albedoTexture;
+        albedoSlot.setValue("Albedo: " + textureLabel(albedoSlot.assetId));
+        metallicSlot.assetId = document == null ? "" : document.metallicTexture;
+        metallicSlot.setValue("Metallic: " + textureLabel(metallicSlot.assetId));
+        roughnessSlot.assetId = document == null ? "" : document.roughnessTexture;
+        roughnessSlot.setValue("Roughness: " + textureLabel(roughnessSlot.assetId));
+        normalSlot.assetId = document == null ? "" : document.normalTexture;
+        normalSlot.setValue("Normal: " + textureLabel(normalSlot.assetId));
+        occlusionSlot.assetId = document == null ? "" : document.occlusionTexture;
+        occlusionSlot.setValue("Occlusion: " + textureLabel(occlusionSlot.assetId));
+
+        tilingX.setValue(document == null ? 1 : document.tilingX);
+        tilingY.setValue(document == null ? 1 : document.tilingY);
+        offsetX.setValue(document == null ? 0 : document.offsetX);
+        offsetY.setValue(document == null ? 0 : document.offsetY);
+        suppressChange = false;
+    }
+
+    function notifyChanged():Void {
+        if (suppressChange || currentDocument == null || currentSource == "") return;
+        if (onChanged != null) onChanged(currentDocument);
+        // Changes persist automatically; Main debounces the disk write.
+        if (onSave != null) onSave(currentSource, currentDocument);
+    }
+
+    static function sourceLabel(value:String):String {
+        return value == Material.SMOOTHNESS_ALBEDO_ALPHA
+            ? "Albedo Alpha" : "Metallic Alpha";
+    }
+
+    static function hex(color:Int):String {
+        return StringTools.hex(color, 6).toUpperCase();
+    }
+
+    static function parseHex(value:String):Null<Int> {
+        var parsed = Std.parseInt("0x" + StringTools.replace(
+            StringTools.trim(value), "#", ""));
+        return parsed == null ? null : parsed & 0xFFFFFF;
     }
 
     static function textureLabel(id:String):String {
@@ -191,60 +575,22 @@ class MaterialEditor extends h2d.Object {
         if (onStatus != null) onStatus(message);
     }
 
-    function saveCurrent():Void {
-        if (currentDocument == null || currentSource == "") {
-            setStatus("Create or select a material first.");
-            return;
-        }
-        if (currentDocument.name.length == 0) {
-            setStatus("Material name cannot be empty.");
-            return;
-        }
-        if (onSave != null) onSave(currentSource, currentDocument);
-    }
-
-    function openMaterialMenu():Void {
+    function openSourceMenu():Void {
         var items:Array<MenuItem> = [];
-        for (material in Material.all()) {
-            if (material.source == "") continue;
-            var source = material.source;
+        for (value in [Material.SMOOTHNESS_METALLIC_ALPHA, Material.SMOOTHNESS_ALBEDO_ALPHA]) {
+            var label = sourceLabel(value);
             items.push({
-                label: material.name,
-                selected: source == currentSource,
+                label: label,
+                selected: currentDocument != null && currentDocument.smoothnessSource == value,
                 onClick: function() {
-                    if (onStatus != null) onStatus('open:${source}');
-                }
-            });
-        }
-        if (items.length == 0) items.push({ label: "No project materials", separator: true });
-        showMenu(materialButton, items);
-    }
-
-    function openTextureMenu():Void {
-        var items:Array<MenuItem> = [{
-            label: "None",
-            selected: currentDocument == null || currentDocument.albedoTexture == "",
-            onClick: function() {
-                if (currentDocument != null) {
-                    currentDocument.albedoTexture = "";
+                    if (currentDocument == null) return;
+                    currentDocument.smoothnessSource = value;
                     refreshFields();
-                }
-            }
-        }];
-        for (texture in MaterialTextureLibrary.all()) {
-            var id = texture.id;
-            items.push({
-                label: texture.label,
-                selected: currentDocument != null && currentDocument.albedoTexture == id,
-                onClick: function() {
-                    if (currentDocument != null) {
-                        currentDocument.albedoTexture = id;
-                        refreshFields();
-                    }
+                    notifyChanged();
                 }
             });
         }
-        showMenu(albedoButton, items);
+        showMenu(sourceButton, Std.int(ROW), items);
     }
 
     function openCullingMenu():Void {
@@ -257,18 +603,23 @@ class MaterialEditor extends h2d.Object {
                 label: value.charAt(0).toUpperCase() + value.substr(1),
                 selected: currentDocument != null && currentDocument.culling == value,
                 onClick: function() {
-                    if (currentDocument != null) {
-                        currentDocument.culling = value;
-                        refreshFields();
-                    }
+                    if (currentDocument == null) return;
+                    currentDocument.culling = value;
+                    refreshFields();
+                    notifyChanged();
                 }
             });
         }
-        showMenu(cullingButton, items);
+        showMenu(cullingButton, Std.int(ROW), items);
     }
 
-    function showMenu(anchor:UiButton, items:Array<MenuItem>):Void {
-        var point = anchor.localToGlobal(new h2d.col.Point(0, anchor.height + 2));
+    function showMenu(anchor:h2d.Object, height:Float, items:Array<MenuItem>):Void {
+        var scene = getScene();
+        if (menu == null || menu.getScene() != scene) {
+            if (menu != null) menu.remove();
+            menu = new MenuDropdown(ctx, scene == null ? this : scene);
+        }
+        var point = anchor.localToGlobal(new h2d.col.Point(0, height + 2));
         menu.open(point.x, point.y, items);
     }
 }

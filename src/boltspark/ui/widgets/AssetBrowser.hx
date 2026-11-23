@@ -1,6 +1,7 @@
 package boltspark.ui.widgets;
 
 import boltspark.assets.ImportedMeshLibrary;
+import boltspark.engine.Material;
 import boltspark.engine.inspector.AssetType;
 import boltspark.project.AssetTypeRegistry;
 import boltspark.project.EngineAssetCatalog;
@@ -81,7 +82,8 @@ class AssetBrowser extends h2d.Object {
     /** Request an external file import into the given folder (empty = default). */
     public var onImportAssets:Null<String->Void>;
     /** Create a new project material asset. */
-    public var onNewMaterial:Null<Void->Void>;
+    /** Create a material in the given browser folder ("" = default content folder). */
+    public var onNewMaterial:Null<String->Void>;
     /** Native mesh import request, with the browser's target folder. */
     public var onImportMeshes:Null<String->Void>;
     /** Decoded thumbnail tile for a texture asset, or null when unavailable. */
@@ -226,6 +228,11 @@ class AssetBrowser extends h2d.Object {
     var dragStartY:Float = 0;
     var widthValue:Float = 0;
     var heightValue:Float = 0;
+    /** Last geometry that produced a full row rebuild (resize throttle). */
+    var lastLayoutWidth:Float = -1;
+    var lastLayoutHeight:Float = -1;
+    var lastLayoutFolderWidth:Float = -1;
+    var lastLayoutColumnCount:Int = -1;
     var folderWidth:Float = 118;
     /** Remembered user width; `folderWidth` is the clamped on-screen value. */
     var preferredFolderWidth:Float = 118;
@@ -441,7 +448,11 @@ class AssetBrowser extends h2d.Object {
                 // Added after Import so probe row offsets stay stable.
                 label: "Material",
                 onClick: function() {
-                    if (onNewMaterial != null) onNewMaterial();
+                    // Create in the folder the user is currently browsing.
+                    // Engine folders are read-only; "" means the Content root.
+                    if (onNewMaterial != null) {
+                        onNewMaterial(isEngineFolder(selectedFolder) ? "" : selectedFolder);
+                    }
                 }
             }, {
                 label: "Import Mesh...",
@@ -878,8 +889,22 @@ class AssetBrowser extends h2d.Object {
         addChild(folderSplitterGrip);
         addChild(folderSplitter);
 
-        buildFolders();
-        buildAssets();
+        // Splitter drags call layout() every frame. Rebuilding every tile and
+        // tree row on a pure height change is wasted work; only geometry that
+        // affects columns/rows needs a fresh build.
+        var columnsChanged = lastLayoutColumnCount != gridColumns();
+        var folderChanged = Math.abs(folderWidth - lastLayoutFolderWidth) > 1;
+        var widthChanged = Math.abs(widthValue - lastLayoutWidth) > 1;
+        if (folderChanged || columnsChanged || lastLayoutWidth < 0) {
+            buildFolders();
+            lastLayoutFolderWidth = folderWidth;
+        }
+        if (widthChanged || folderChanged || columnsChanged || lastLayoutWidth < 0) {
+            buildAssets();
+            lastLayoutColumnCount = gridColumns();
+        }
+        lastLayoutWidth = widthValue;
+        lastLayoutHeight = heightValue;
         positionRenameOverlay();
     }
 
@@ -2085,6 +2110,12 @@ class AssetBrowser extends h2d.Object {
             var iconSize = cardSize * 0.62;
             UiIcons.draw(g, Cube, cx - iconSize * 0.5, cy - iconSize * 0.5,
                 iconSize, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
+        } else if (entry.kind == AssetTypeRegistry.KIND_MATERIAL) {
+            // Authored materials are not baked onto a sphere; use the crisp
+            // 64px Tabler `outline/box` mask instead of a file glyph.
+            var iconSize = cardSize * 0.72;
+            UiIcons.drawMaterialThumb(g, cx - iconSize * 0.5, cy - iconSize * 0.5,
+                iconSize, selected ? Theme.ACCENT : Theme.TEXT_SECONDARY);
         } else if (entry.loadable && entry.kind == AssetTypeRegistry.KIND_SCENE) {
             var iconSize = cardSize * 0.86;
             UiIcons.drawSceneThumb(g, cx - iconSize * 0.5, cy - iconSize * 0.5,
@@ -2253,6 +2284,10 @@ class AssetBrowser extends h2d.Object {
     function iconFor(entry:AssetFileInfo):UiIconKind {
         if (entry.kind == AssetTypeRegistry.KIND_SCENE) return Scene;
         if (entry.kind == AssetTypeRegistry.KIND_MESH) return Cube;
+        // Authored materials have no baked sphere preview (only built-in
+        // engine materials do), so use Tabler's `outline/box` glyph instead
+        // of a generic file icon.
+        if (entry.kind == AssetTypeRegistry.KIND_MATERIAL) return Box;
         return Document;
     }
 
@@ -2570,6 +2605,31 @@ class AssetBrowser extends h2d.Object {
             beginEngineAssetDrag(enginePayload, source, hit, event);
             return;
         }
+        // Project-authored materials carry the same typed payload as engine
+        // materials so they can be assigned to MeshRenderer material slots.
+        if (draggedEntry != null && draggedEntry.kind == AssetTypeRegistry.KIND_MATERIAL) {
+            var material = Material.findBySource(draggedEntry.source);
+            if (material != null) {
+                beginEngineAssetDrag({
+                    assetId: material.id,
+                    label: draggedEntry.name,
+                    assetType: AssetType.MaterialAsset,
+                    source: draggedEntry.source
+                }, source, hit, event);
+                return;
+            }
+        }
+        // Imported textures carry a typed payload so Material Editor slots
+        // accept them just like the Inspector accepts mesh/material assets.
+        if (draggedEntry != null && draggedEntry.kind == AssetTypeRegistry.KIND_TEXTURE) {
+            beginEngineAssetDrag({
+                assetId: draggedEntry.source,
+                label: draggedEntry.name,
+                assetType: AssetType.TextureAsset,
+                source: draggedEntry.source
+            }, source, hit, event);
+            return;
+        }
         // Imported meshes are project files, but they still carry a typed mesh
         // payload so Inspector slots and the viewport accept them like built-ins.
         if (draggedEntry != null && draggedEntry.kind == AssetTypeRegistry.KIND_MESH) {
@@ -2678,8 +2738,15 @@ class AssetBrowser extends h2d.Object {
                     // stopDragCapture clears its guard before onCancel runs.
                     stopDragCapture();
                     UiContext.dragLabel = null;
-                    if (wasDragging) AssetDragSession.drop(mouseX, mouseY);
-                    else AssetDragSession.cancel();
+                    if (wasDragging) {
+                        AssetDragSession.drop(mouseX, mouseY);
+                    } else {
+                        AssetDragSession.cancel();
+                        // A plain click already changed selection in onPush;
+                        // repaint the tiles now so the highlight appears on
+                        // the first click (the file-drag path did this too).
+                        buildAssets();
+                    }
                     dragging = false;
                     capturedEvent.propagate = false;
                 case EFocusLost:
@@ -2827,6 +2894,14 @@ class AssetBrowser extends h2d.Object {
             onClick: function() {
                 var target = parent == "" ? "Scenes" : parent;
                 if (onNewScene != null) onNewScene(target, "New Scene");
+            }
+        }, {
+            label: "Material",
+            onClick: function() {
+                // Create in the folder that was right-clicked. Engine content
+                // is read-only: fall back to the user Content root.
+                var folder = isEngineFolder(parent) ? "" : parent;
+                if (onNewMaterial != null) onNewMaterial(folder);
             }
         }, {
             // Last row, matching the toolbar Add menu.

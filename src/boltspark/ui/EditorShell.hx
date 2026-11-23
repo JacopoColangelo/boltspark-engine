@@ -261,7 +261,11 @@ class EditorShell {
     /** Material editor commands, routed upward to ProjectSession. */
     public var onSaveMaterial:Null<String->MaterialDocument->Void>;
     public var onNewMaterial:Null<Void->Void>;
+    /** Create a material in a specific content folder (Asset Browser context menu). */
+    public var onNewMaterialInFolder:Null<String->Void>;
     public var onDeleteMaterial:Null<String->Void>;
+    /** Live preview of edits made in the Material Editor. */
+    public var onMaterialChanged:Null<String->MaterialDocument->Void>;
     public var onNewScene:Null<String->String->Void>;
     public var onRenameAsset:Null<String->String->Void>;
     public var onRenameFolder:Null<String->String->String>;
@@ -1201,8 +1205,9 @@ class EditorShell {
         assetBrowser.onImportAssets = function(folder) {
             if (onImportAssets != null) onImportAssets(folder);
         };
-        assetBrowser.onNewMaterial = function() {
-            if (onNewMaterial != null) onNewMaterial();
+        assetBrowser.onNewMaterial = function(folder) {
+            if (onNewMaterialInFolder != null) onNewMaterialInFolder(folder);
+            else if (onNewMaterial != null) onNewMaterial();
         };
         assetBrowser.onImportMeshes = function(folder) {
             if (onImportMeshes != null) onImportMeshes(folder);
@@ -1211,6 +1216,9 @@ class EditorShell {
             return onQueryTextureTile != null ? onQueryTextureTile(source) : null;
         };
         materialDockHost = new h2d.Object(panelLayer);
+        // The Material Editor starts closed; leave its host hidden until the
+        // docking manager or openMaterialEditor() shows it.
+        materialDockHost.visible = false;
         materialEditor = new MaterialEditor(ctx, materialDockHost);
         materialEditor.onSave = function(source, document) {
             if (onSaveMaterial != null) onSaveMaterial(source, document);
@@ -1222,6 +1230,17 @@ class EditorShell {
             if (onDeleteMaterial != null) onDeleteMaterial(source);
         };
         materialEditor.onStatus = function(message) log(message);
+        materialEditor.onChanged = function(document) {
+            if (onMaterialChanged != null) {
+                onMaterialChanged(materialEditor.currentSourcePath(), document);
+            }
+        };
+        materialEditor.onQueryTextureTile = function(source) {
+            return onQueryTextureTile != null ? onQueryTextureTile(source) : null;
+        };
+        materialEditor.onBrowseTexture = function(source) {
+            if (onRevealAsset != null) onRevealAsset(source);
+        };
 
         palette = new GameObjectPalette(ctx, root);
         palette.onCreatePrimitive = function(meshId) {
@@ -3195,7 +3214,11 @@ class EditorShell {
     public function openMaterialEditor(source:String,
             document:MaterialDocument):Void {
         Sys.println('[probe] material editor opened source=${source}');
-        dockManager.open("boltspark.material");
+        // Share the Inspector's right-edge dock as a tab: its full width fits
+        // the texture slots, and opening relative to root.firstTab() would
+        // otherwise squeeze the editor into the narrow hierarchy split.
+        dockManager.open("boltspark.material", DockSide.Center,
+            dockManager.mainTab("boltspark.inspector"));
         materialEditor.edit(source, document);
         refreshNativePanels();
     }

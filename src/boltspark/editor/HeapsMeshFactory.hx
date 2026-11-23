@@ -59,6 +59,10 @@ class HeapsMeshFactory {
         var factory = factories.get(mesh.id);
         if (factory == null) throw 'No Heaps primitive registered for Mesh ${mesh.id}';
         primitive = factory(effective);
+        // Tangent-space normal mapping needs a tangent attribute on every
+        // primitive, including imported meshes and the procedural built-ins.
+        var polygon = Std.downcast(primitive, h3d.prim.Polygon);
+        if (polygon != null) polygon.addTangents();
         cache.set(key, primitive);
         return primitive;
     }

@@ -33,6 +33,12 @@ class PrimitiveThumbnails {
             g.beginTileFill(x, y, width / tile.width, height / tile.height, tile);
             g.drawRect(x, y, width, height);
             g.endFill();
+        } else if (Material.find(assetId) != null) {
+            // Authored materials have no baked sphere preview; use the crisp
+            // Tabler box mask, matching their Asset Browser tile.
+            var size = Math.min(width, height);
+            UiIcons.drawMaterialThumb(g, x + (width - size) * 0.5,
+                y + (height - size) * 0.5, size, accent);
         } else {
             // Unknown/custom assets get a neutral document glyph.
             g.smooth = false;

@@ -7,16 +7,42 @@ class Material {
     public static inline var ORANGE_ID:String = "material:orange";
 
     public final id:String;
-    public final name:String;
+    /** Mutable so a rename updates every live reference in place. */
+    public var name:String;
     public var color:Int;
     public var shadows:Bool;
-    public var specularAmount:Float;
-    public var specularPower:Float;
     public var culling:MaterialCulling;
     /** Optional albedo texture asset id (project-relative texture source). */
     public var albedoTexture:String;
     /** Project-relative source of a authored material document, "" for built-ins. */
     public var source:String;
+
+    // Metallic/Smoothness PBR workflow (Unity Standard-style).
+    public var metallic:Float;
+    public var smoothness:Float;
+    /** Where per-pixel smoothness comes from when a metallic map is bound:
+     *  "metallicAlpha" (map alpha) or "albedoAlpha" (albedo alpha). */
+    public var smoothnessSource:String;
+    /** Metallic map: R = metallic, A = smoothness. "" for none. */
+    public var metallicTexture:String;
+    /** Tangent-space normal map. "" for none. */
+    public var normalTexture:String;
+    public var normalStrength:Float;
+    /** Optional dedicated roughness map (G channel = roughness). Overrides
+     *  the metallic/albedo smoothness source when assigned. "" for none. */
+    public var roughnessTexture:String;
+    /** Ambient occlusion map (R channel). "" for none. */
+    public var occlusionTexture:String;
+    public var occlusionStrength:Float;
+    public var emissionColor:Int;
+    public var emissionIntensity:Float;
+    public var tilingX:Float;
+    public var tilingY:Float;
+    public var offsetX:Float;
+    public var offsetY:Float;
+
+    public static inline var SMOOTHNESS_METALLIC_ALPHA:String = "metallicAlpha";
+    public static inline var SMOOTHNESS_ALBEDO_ALPHA:String = "albedoAlpha";
 
     static var sharedDefault:Null<Material>;
     static var sharedOrange:Null<Material>;
@@ -25,9 +51,8 @@ class Material {
     static var projectCatalog:Array<Material> = [];
 
     public function new(id:String, name:String, color:Int = 0xFFFFFF,
-            shadows:Bool = false, specularAmount:Float = 0.18,
-            specularPower:Float = 24,
-            culling:MaterialCulling = Back, ?albedoTexture:String, ?source:String) {
+            shadows:Bool = false, culling:MaterialCulling = Back,
+            ?albedoTexture:String, ?source:String) {
         if (id == null || StringTools.trim(id).length == 0) {
             throw "Material ID cannot be empty";
         }
@@ -38,18 +63,33 @@ class Material {
         this.name = name;
         this.color = color;
         this.shadows = shadows;
-        this.specularAmount = specularAmount;
-        this.specularPower = specularPower;
         this.culling = culling;
         this.albedoTexture = albedoTexture == null ? "" : albedoTexture;
         this.source = source == null ? "" : source;
+        metallic = 0;
+        smoothness = 0.5;
+        smoothnessSource = SMOOTHNESS_METALLIC_ALPHA;
+        metallicTexture = "";
+        normalTexture = "";
+        normalStrength = 1;
+        roughnessTexture = "";
+        occlusionTexture = "";
+        occlusionStrength = 1;
+        emissionColor = 0x000000;
+        emissionIntensity = 1;
+        tilingX = 1;
+        tilingY = 1;
+        offsetX = 0;
+        offsetY = 0;
     }
+
+
 
     /** Neutral white default assigned to newly created primitives. */
     public static function defaultMaterial():Material {
         if (sharedDefault == null) {
             sharedDefault = new Material(DEFAULT_ID, "White Material",
-                0xFFFFFF, false, 0.18, 24, Back);
+                0xFFFFFF, false, Back);
         }
         return sharedDefault;
     }
@@ -58,7 +98,7 @@ class Material {
     public static function orangeMaterial():Material {
         if (sharedOrange == null) {
             sharedOrange = new Material(ORANGE_ID, "Orange Material",
-                0xE58A3A, false, 0.18, 24, Back);
+                0xE58A3A, false, Back);
         }
         return sharedOrange;
     }

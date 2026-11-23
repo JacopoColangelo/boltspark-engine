@@ -28,16 +28,40 @@ class ProjectValidator {
     public static function validateMaterial(material:MaterialDocument):Void {
         StableId.require(material.id, "material.id");
         requireName(material.name, "material.name");
-        if (!Math.isFinite(material.specularAmount)
-                || material.specularAmount < 0 || material.specularAmount > 1) {
-            throw 'Material ${material.id} has invalid specular amount';
+        requireUnitInterval(material.metallic, material.id, "metallic");
+        requireUnitInterval(material.smoothness, material.id, "smoothness");
+        requireUnitInterval(material.occlusionStrength, material.id, "occlusionStrength");
+        if (material.smoothnessSource != boltspark.engine.Material.SMOOTHNESS_METALLIC_ALPHA
+                && material.smoothnessSource != boltspark.engine.Material.SMOOTHNESS_ALBEDO_ALPHA) {
+            throw 'Material ${material.id} has invalid smoothness source';
         }
-        if (!Math.isFinite(material.specularPower) || material.specularPower < 0) {
-            throw 'Material ${material.id} has invalid specular power';
+        if (!Math.isFinite(material.normalStrength) || material.normalStrength < 0) {
+            throw 'Material ${material.id} has invalid normal strength';
         }
-        if (material.albedoTexture != null && material.albedoTexture.length > 0) {
-            material.albedoTexture = ProjectPath.normalizeRelative(material.albedoTexture);
+        if (!Math.isFinite(material.emissionIntensity) || material.emissionIntensity < 0) {
+            throw 'Material ${material.id} has invalid emission intensity';
         }
+        for (value in [material.tilingX, material.tilingY, material.offsetX, material.offsetY]) {
+            if (!Math.isFinite(value)) {
+                throw 'Material ${material.id} has non-finite tiling/offset';
+            }
+        }
+        material.albedoTexture = normalizeTextureReference(material.albedoTexture);
+        material.metallicTexture = normalizeTextureReference(material.metallicTexture);
+        material.normalTexture = normalizeTextureReference(material.normalTexture);
+        material.roughnessTexture = normalizeTextureReference(material.roughnessTexture);
+        material.occlusionTexture = normalizeTextureReference(material.occlusionTexture);
+    }
+
+    static function requireUnitInterval(value:Float, id:String, field:String):Void {
+        if (!Math.isFinite(value) || value < 0 || value > 1) {
+            throw 'Material ${id} has invalid ${field}';
+        }
+    }
+
+    static function normalizeTextureReference(source:String):String {
+        if (source == null || source.length == 0) return "";
+        return ProjectPath.normalizeRelative(source);
     }
 
     public static function validateScene(scene:SceneDocument):Void {

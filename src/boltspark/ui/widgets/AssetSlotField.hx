@@ -39,6 +39,9 @@ class AssetSlotField extends h2d.Object {
     public var onAssetDrop:Null<String->Void>;
     /** Invoked by the arrow action; the owner clears the assignment. */
     public var onClear:Null<Void->Void>;
+    /** Optional live preview for texture-family slots (project-relative path
+     *  in, cached tile out). Engine assets keep using PrimitiveThumbnails. */
+    public var onQueryThumbnail(get, set):Null<String->Null<h2d.Tile>>;
 
     public var assetType(get, set):Null<AssetType>;
     /** Currently assigned asset id; drives the large thumbnail. */
@@ -60,6 +63,7 @@ class AssetSlotField extends h2d.Object {
     final clearHit:h2d.Interactive;
 
     var typeValue:Null<AssetType> = null;
+    var queryThumbnail:Null<String->Null<h2d.Tile>> = null;
     var assetIdValue:String = "";
     var dropTarget:Null<AssetDropTarget> = null;
     var labelValue:String = "None";
@@ -130,6 +134,14 @@ class AssetSlotField extends h2d.Object {
         if (hovered == value) return;
         hovered = value;
         updateStyle();
+    }
+
+    function get_onQueryThumbnail():Null<String->Null<h2d.Tile>> return queryThumbnail;
+
+    function set_onQueryThumbnail(value:Null<String->Null<h2d.Tile>>):Null<String->Null<h2d.Tile>> {
+        queryThumbnail = value;
+        drawThumb();
+        return value;
     }
 
     function get_assetType():Null<AssetType> return typeValue;
@@ -230,9 +242,21 @@ class AssetSlotField extends h2d.Object {
             thumbFrame.lineStyle();
         }
         var tint = dropHighlighted ? Theme.ACCENT_HOVER : Theme.TEXT_SECONDARY;
-        if (assetIdValue != "") {
+        var preview = assetIdValue != "" && queryThumbnail != null
+            ? queryThumbnail(assetIdValue) : null;
+        if (preview != null) {
+            var bitmap = new h2d.Bitmap(preview, thumbIcon);
+            var box = THUMB_SIZE - 6;
+            var scale = Math.min(box / preview.width, box / preview.height);
+            bitmap.width = preview.width * scale;
+            bitmap.height = preview.height * scale;
+            bitmap.x = 3 + (box - bitmap.width) * 0.5;
+            bitmap.y = 3 + (box - bitmap.height) * 0.5;
+        } else if (assetIdValue != "") {
             PrimitiveThumbnails.draw(thumbIcon, assetIdValue, 3, 3,
                 THUMB_SIZE - 6, THUMB_SIZE - 6, tint);
+        } else if (typeValue == AssetType.TextureAsset) {
+            UiIcons.drawSceneThumb(thumbIcon, 8, 8, THUMB_SIZE - 16, tint);
         } else {
             var kind:UiIconKind = switch (typeValue) {
                 case AssetType.MeshAsset: Cube;

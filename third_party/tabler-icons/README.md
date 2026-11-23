@@ -13,12 +13,16 @@ BoltUI uses selected icons from **Tabler Icons v3.52.0**, released on
 - Scene thumbnail SHA-256: `BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722682CC8AD6B0C2`
 - Folder thumbnail mask: `src/res/icons/folder_thumb.png` (`outline/folder`, 64px)
 - Folder thumbnail SHA-256: `4BC891ECED4A5B17AA991C3CC82A6D1FF72D6D775534CAE4BEAB515013AB2A3A`
+- Material thumbnail mask: `src/res/icons/material_thumb.png` (`outline/box`, 64px)
+- Material thumbnail SHA-256: `33F4469ADE7AB324B141B3AB498FEDDA806BCA91DC863A036785C308A3738974`
 - Regeneration: `tools/assets/generate-tabler-icons.ps1`
 
 The generator downloads the official 240px PNG render of each pinned SVG and
 creates dedicated 6–16px alpha-mask rasters. It also renders `outline/photo`
 and `outline/folder` at 64px as `scene_thumb.png` and `folder_thumb.png`,
 because asset-browser tiles are larger than the atlas's maximum 16px raster.
+Authored materials use the `outline/box` 64px mask (`material_thumb.png`); only
+the built-in engine materials have baked sphere previews.
 All images are embedded in the HashLink bytecode/native executable, so
 Boltspark has no package-manager, network, browser, or loose icon-file
 dependency at runtime.

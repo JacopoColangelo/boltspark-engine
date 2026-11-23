@@ -1,3 +1,4 @@
+import boltspark.editor.BoltsparkRenderer;
 import boltspark.editor.EditorAction;
 import boltspark.editor.EditorAxisGizmoRenderer;
 import boltspark.editor.EditorCameraController;
@@ -189,6 +190,8 @@ class Main extends hxd.App {
     var lastSpeedModifierState:Int = -1;
     // Probe telemetry: at most one camera position line per second.
     var cameraTelemetryTimer:Float = 0;
+    /** Debounced material persistence; edits commit after the user settles. */
+    var materialSaveTimer:Null<haxe.Timer> = null;
     // Synthetic-input verification probes drive drags with WM_MOUSEMOVE,
     // which relative mode ignores; probes keep Absolute mode.
     var inputProbeMode:Bool = Sys.getEnv("BOLTSPARK_PROBE") != null;
@@ -282,11 +285,11 @@ class Main extends hxd.App {
         // Independent editor render components: the grid owns a dedicated
         // h3d.scene.Scene pass and the gizmo owns a 2D overlay object graph.
         // Neither is ever parented into the world scene.
-        gridRenderer = new EditorGridRenderer();
+        gridRenderer = new EditorGridRenderer(s3d);
         axisGizmo = new EditorAxisGizmoRenderer(s3d.camera, s2d,
             boltUI.viewportFont(), function() return boltUI.getViewportRect());
         editorViewport = new EditorViewport(nativeWindow, s3d, s2d,
-            function() return boltUI.getViewportRect(), gridRenderer, axisGizmo);
+            function() return boltUI.getViewportRect(), axisGizmo);
         boltUI.onViewportClick = onViewportClick;
         boltUI.onCreatePrimitive = createPrimitive;
         boltUI.onAddEmptyObjectInFront = createEmptyObjectInFront;
@@ -414,8 +417,10 @@ class Main extends hxd.App {
         boltUI.onQueryEngineAssets = function() return EngineAssetCatalog.all();
         boltUI.onQueryAssetDetails = function(source) return projectSession.assetDetails(source);
         boltUI.onOpenAsset = openAsset;
-        boltUI.onSaveMaterial = saveMaterialAsset;
+        boltUI.onSaveMaterial = autoSaveMaterialAsset;
+        boltUI.onMaterialChanged = applyMaterialPreview;
         boltUI.onNewMaterial = createMaterialAsset;
+        boltUI.onNewMaterialInFolder = createMaterialAssetInFolder;
         boltUI.onDeleteMaterial = deleteMaterialAsset;
         boltUI.onNewScene = createAssetScene;
         boltUI.onRenameAsset = renameAsset;
@@ -3323,14 +3328,45 @@ class Main extends hxd.App {
     }
 
     function createMaterialAsset():Void {
+        createMaterialAssetInFolder("");
+    }
+
+    /** Create a material under a chosen Content folder (never under Engine). */
+    function createMaterialAssetInFolder(folder:String):Void {
         try {
-            var source = projectSession.newMaterial("New Material");
+            var target = folder == null ? "" : folder;
+            var source = projectSession.newMaterial("New Material", target);
             boltUI.refreshAssetBrowser();
             openMaterialAsset(source);
             boltUI.log('asset: created ${source}');
         } catch (e:Dynamic) {
             reportProjectError('create material', e);
         }
+    }
+
+    /** Mirror unsaved Material Editor edits into the live scene immediately. */
+    function applyMaterialPreview(source:String,
+            document:MaterialDocument):Void {
+        var material = Material.findBySource(source);
+        if (material == null) return;
+        document.applyTo(material);
+        // Renderer views read their Material definitions on synchronize();
+        // mutating in place keeps their references valid.
+        synchronizeSceneObjects();
+    }
+
+    /** Debounce disk writes during scrubs/typing; a settled edit persists once. */
+    function autoSaveMaterialAsset(source:String,
+            document:MaterialDocument):Void {
+        if (materialSaveTimer != null) {
+            materialSaveTimer.stop();
+            materialSaveTimer = null;
+        }
+        materialSaveTimer = haxe.Timer.delay(function() {
+            materialSaveTimer = null;
+            saveMaterialAsset(source, document);
+            Sys.println('[probe] material auto-saved source=${source}');
+        }, 450);
     }
 
     function saveMaterialAsset(source:String, document:MaterialDocument):Void {
@@ -3348,7 +3384,9 @@ class Main extends hxd.App {
         if (!confirmDestructive('Delete Material',
                 'Delete material ${source}? This cannot be undone.')) return;
         try {
+            var material = Material.findBySource(source);
             projectSession.deleteMaterial(source);
+            if (material != null) rebindRemovedMaterial(material);
             boltUI.clearMaterialEditor();
             boltUI.refreshAssetBrowser();
             boltUI.log('material: deleted ${source}');
@@ -3371,15 +3409,46 @@ class Main extends hxd.App {
         try {
             var target = projectSession.renameAnyAsset(source, name);
             if (projectSession.isScenePath(source)) reloadEditorSession();
-            else boltUI.refreshAssetBrowser();
+            else {
+                boltUI.refreshAssetBrowser();
+                if (projectSession.isMaterialPath(source)) refreshSelectionInspector();
+            }
             boltUI.log('asset: renamed ${source} to ${target}');
         } catch (e:Dynamic) reportProjectError('rename asset', e);
+    }
+
+    /** Rebind any object still using a removed material to the safe default. */
+    function rebindRemovedMaterial(material:Material):Void {
+        var replacement = Material.defaultMaterial();
+        var changed = false;
+        for (sceneObject in sceneObjects) {
+            for (renderer in sceneObject.renderers) {
+                var component = renderer.component;
+                var slots = component.materialCount;
+                for (index in 0...slots) {
+                    if (component.getMaterial(index) == material) {
+                        component.setMaterial(index, replacement);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if (changed) {
+            synchronizeSceneObjects();
+            refreshSelectionInspector();
+        }
     }
 
     function deleteAsset(source:String):Void {
         if (!confirmDestructive("Delete asset", 'Delete ${source}? This cannot be undone.')) return;
         try {
+            var material = projectSession.isMaterialPath(source)
+                ? Material.findBySource(source) : null;
             projectSession.deleteAnyAsset(source);
+            if (material != null) {
+                rebindRemovedMaterial(material);
+                boltUI.clearMaterialEditor();
+            }
             if (projectSession.isScenePath(source)) reloadEditorSession();
             else boltUI.refreshAssetBrowser();
             boltUI.log('asset: deleted ${source}');
@@ -3563,10 +3632,17 @@ class Main extends hxd.App {
         if (!confirmDestructive("Delete assets", 'Delete ${label}? This cannot be undone.')) return;
         var scenesChanged = false;
         try {
+            var removedMaterials:Array<Material> = [];
             for (source in sources) {
                 if (projectSession.isScenePath(source)) scenesChanged = true;
+                if (projectSession.isMaterialPath(source)) {
+                    var material = Material.findBySource(source);
+                    if (material != null) removedMaterials.push(material);
+                }
                 projectSession.deleteAnyAsset(source);
             }
+            for (material in removedMaterials) rebindRemovedMaterial(material);
+            if (removedMaterials.length > 0) boltUI.clearMaterialEditor();
             if (scenesChanged) reloadEditorSession();
             else boltUI.refreshAssetBrowser();
             boltUI.log('asset: deleted ${sources.length} asset(s)');
@@ -3783,26 +3859,36 @@ class Main extends hxd.App {
     }
 
     function setupViewportScene():Void {
-        var lightSystem = Std.downcast(s3d.lightSystem, h3d.scene.fwd.LightSystem);
-        if (lightSystem != null) {
-            lightSystem.ambientLight.set(0.62, 0.65, 0.70);
-            lightSystem.perPixelLighting = true;
-        }
+        // Deferred PBR: MRT G-buffers, HDR lighting, IBL and tonemapping.
+        // The editor keeps its own renderer subclass so future techniques can
+        // hook the lighting/indirect phases without patching the toolchain.
+        var environment = createEditorEnvironment();
+        s3d.renderer = new BoltsparkRenderer(environment);
+        s3d.lightSystem = new h3d.scene.pbr.LightSystem();
 
-        var keyLight = new h3d.scene.fwd.DirLight(new h3d.Vector(-0.8, -1.0, -0.55), s3d);
-        keyLight.color = new h3d.Vector(0.55, 0.50, 0.44);
-        keyLight.enableSpecular = true;
-        var rimLight = new h3d.scene.fwd.DirLight(new h3d.Vector(0.65, -0.45, 0.8), s3d);
-        rimLight.color = new h3d.Vector(0.10, 0.14, 0.22);
-        var fillLight = new h3d.scene.fwd.DirLight(new h3d.Vector(-0.25, -0.2, -1.0), s3d);
-        fillLight.color = new h3d.Vector(0.12, 0.14, 0.17);
-        var bounceLight = new h3d.scene.fwd.DirLight(new h3d.Vector(1.0, -0.15, 0.25), s3d);
-        bounceLight.color = new h3d.Vector(0.10, 0.12, 0.16);
+        var keyLight = new h3d.scene.pbr.DirLight(
+            new h3d.Vector(-0.8, -1.0, -0.55), s3d);
+        keyLight.color = new h3d.Vector(1.0, 0.94, 0.86);
+        keyLight.power = 1.0;
+        keyLight.shadows.mode = h3d.pass.Shadows.RenderMode.Dynamic;
+        keyLight.shadows.size = 2048;
+        keyLight.shadows.bias = 0.002;
+        keyLight.shadows.power = 12;
+        var rimLight = new h3d.scene.pbr.DirLight(
+            new h3d.Vector(0.65, -0.45, 0.8), s3d);
+        rimLight.color = new h3d.Vector(0.24, 0.30, 0.46);
+        rimLight.power = 0.8;
+        var fillLight = new h3d.scene.pbr.DirLight(
+            new h3d.Vector(-0.25, -0.2, -1.0), s3d);
+        fillLight.color = new h3d.Vector(0.18, 0.22, 0.28);
+        fillLight.power = 0.7;
+        var bounceLight = new h3d.scene.pbr.DirLight(
+            new h3d.Vector(1.0, -0.15, 0.25), s3d);
+        bounceLight.color = new h3d.Vector(0.16, 0.18, 0.22);
+        bounceLight.power = 0.6;
 
-        // The editor grid is NOT part of this scene graph: it renders from
-        // its own dedicated h3d.scene.Scene pass (EditorGridRenderer) so it
-        // never appears as a scene object, is never serialized, and never
-        // participates in picking or inspection.
+        // Editor helpers are helper nodes in the scene (never in the editor
+        // session) but render in the deferred `overlay` pass, after tonemap.
 
         selectionOutline = new h3d.scene.Graphics(s3d);
         selectionOutline.name = "SelectionOutline";
@@ -3813,17 +3899,49 @@ class Main extends hxd.App {
         // X-ray outline: disable both depth write and depth test so the
         // selected object's silhouette stays visible through any geometry
         // in front of it, not just through the object's own faces.
-        selectionOutline.material.mainPass.depthWrite = false;
-        selectionOutline.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
-        selectionOutline.material.mainPass.layer = 10;
+        configureEditorOverlay(selectionOutline.material, 10);
 
         // Accent X-ray outline for the object currently under an asset drag.
         viewportDropOutline = new h3d.scene.Graphics(s3d);
         viewportDropOutline.name = "ViewportDropOutline";
         viewportDropOutline.is3D = false;
-        viewportDropOutline.material.mainPass.depthWrite = false;
-        viewportDropOutline.material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
-        viewportDropOutline.material.mainPass.layer = 11;
+        configureEditorOverlay(viewportDropOutline.material, 11);
+    }
+
+    static function configureEditorOverlay(material:h3d.mat.Material,
+            layer:Int):Void {
+        material.mainPass.setPassName("overlay");
+        material.mainPass.depthWrite = false;
+        material.mainPass.depthTest = h3d.mat.Data.Compare.Always;
+        material.mainPass.layer = layer;
+    }
+
+    /** Heaps' embedded studio IBL, with a procedural fallback if unavailable. */
+    static function createEditorEnvironment():h3d.scene.pbr.Environment {
+        try {
+            return h3d.scene.pbr.Environment.getDefault();
+        } catch (e:Dynamic) {
+            Sys.println('[viewport] env fallback: ${Std.string(e)}');
+        }
+        var width = 256;
+        var height = 128;
+        var pixels = hxd.Pixels.alloc(width, height, hxd.PixelFormat.RGBA);
+        for (y in 0...height) {
+            var t = y / (height - 1);
+            for (x in 0...width) {
+                var top = Math.max(0, 1 - t * 2);
+                var bottom = Math.max(0, (t - 0.5) * 2);
+                var r = Math.round(110 + 120 * top - 70 * bottom);
+                var g = Math.round(120 + 110 * top - 66 * bottom);
+                var b = Math.round(135 + 90 * top - 55 * bottom);
+                pixels.setPixel(x, y, (255 << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+        var source = new h3d.mat.Texture(width, height, [], hxd.PixelFormat.RGBA);
+        source.uploadPixels(pixels);
+        var environment = new h3d.scene.pbr.Environment(source, 32, 128, 8);
+        environment.compute();
+        return environment;
     }
 
     function refreshSelectionOutline():Void {

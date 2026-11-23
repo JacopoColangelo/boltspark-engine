@@ -69,6 +69,7 @@ class UiIcons {
     static var atlas:h2d.Tile;
     static var sceneThumb:h2d.Tile;
     static var folderThumb:h2d.Tile;
+    static var materialThumb:h2d.Tile;
 
     /** Large tinted Tabler `outline/photo` glyph for asset-browser scene
      *  thumbnails; the exact-size atlas tops out at 16px. */
@@ -93,6 +94,22 @@ class UiIcons {
         target.removeChildren();
         if (folderThumb == null) folderThumb = hxd.Res.icons.folder_thumb.toTile();
         var bitmap = new h2d.Bitmap(folderThumb, target);
+        bitmap.x = Math.round(x);
+        bitmap.y = Math.round(y);
+        bitmap.width = size;
+        bitmap.height = size;
+        bitmap.smooth = true;
+        bitmap.color.setColor(color);
+        bitmap.color.a = Math.max(0, Math.min(1, alpha));
+    }
+
+    /** Large tinted Tabler `outline/box` glyph for authored material tiles,
+     *  which have no baked sphere preview like the built-in engine materials. */
+    public static function drawMaterialThumb(target:h2d.Graphics, x:Float, y:Float,
+            size:Float, color:Int, alpha:Float = 1):Void {
+        target.removeChildren();
+        if (materialThumb == null) materialThumb = hxd.Res.icons.material_thumb.toTile();
+        var bitmap = new h2d.Bitmap(materialThumb, target);
         bitmap.x = Math.round(x);
         bitmap.y = Math.round(y);
         bitmap.width = size;

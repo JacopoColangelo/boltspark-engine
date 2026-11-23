@@ -29,7 +29,10 @@ class EngineAssetCatalog {
             result.push(make(sourceFor(AssetType.MeshAsset, mesh.id), mesh.name,
                 AssetType.MeshAsset));
         }
+        // Only true engine-provided materials belong here. Project-authored
+        // materials have a `source` and appear once, under Content only.
         for (material in Material.all()) {
+            if (material.source != "") continue;
             result.push(make(sourceFor(AssetType.MaterialAsset, material.id),
                 material.name, AssetType.MaterialAsset));
         }

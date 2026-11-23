@@ -23,6 +23,7 @@ param(
     [switch]$AssetWatcher,
     [switch]$FloatExplorerDrop,
     [switch]$MaterialEditor,
+    [switch]$MaterialTextureDrag,
     [switch]$ImportMeshes
 )
 
@@ -311,6 +312,10 @@ try {
     if ($MaterialEditor) {
         & (Join-Path $repoRoot 'tests\native\Test-MaterialEditor.ps1')
         Assert-LastExitCode 'Material editor probe'
+    }
+    if ($MaterialTextureDrag) {
+        & (Join-Path $repoRoot 'tests\native\Test-MaterialTextureDrag.ps1')
+        Assert-LastExitCode 'Texture-to-material-slot drag probe'
     }
     if ($ImportMeshes) {
         & (Join-Path $repoRoot 'tests\native\Test-ImportMeshes.ps1')

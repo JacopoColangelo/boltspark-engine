@@ -4,7 +4,6 @@ import boltspark.assets.ImportedMeshLibrary;
 import boltspark.editor.EditorSession;
 import boltspark.engine.Component;
 import boltspark.engine.Material;
-import boltspark.engine.MaterialCulling;
 import boltspark.engine.MaterialTexture;
 import boltspark.engine.MaterialTextureLibrary;
 import haxe.io.Path;
@@ -65,7 +64,9 @@ class ProjectSession {
     public static inline var PROJECT_EXT:String = "boltproject";
     public static inline var SCENE_EXT:String = "boltscene";
     public static inline var MATERIAL_EXT:String = "boltmaterial";
-    public static inline var MATERIAL_FOLDER:String = "Materials";
+    /** Default destination when no folder is specified: the user Content root.
+     *  Callers that know a folder (Asset Browser context menu) pass it through. */
+    public static inline var MATERIAL_FOLDER:String = "Content";
     /** Default destination for external imports: the Content root, no extra subfolder. */
     public static inline var TEXTURE_FOLDER:String = "Content";
 
@@ -439,10 +440,24 @@ class ProjectSession {
             if (!sys.FileSystem.exists(path)) continue;
             try {
                 var doc = DocumentStore.loadMaterial(path);
-                var culling:MaterialCulling = cast doc.culling;
-                loaded.push(new Material(doc.id, doc.name, doc.baseColor, doc.shadows,
-                    doc.specularAmount, doc.specularPower, culling,
-                    doc.albedoTexture, source));
+                // Reuse the live definition when one exists: scene renderers
+                // hold direct Material references, so replacing catalog
+                // entries on every save would leave objects with stale PBR
+                // values and break Material Editor live preview.
+                // Reuse by source or stable id: rename/move changes the path,
+                // and renderer views hold direct references to this instance.
+                var existing = Material.findBySource(source);
+                if (existing == null) existing = Material.find(doc.id);
+                if (existing == null) {
+                    loaded.push(doc.toMaterial(source));
+                } else {
+                    existing.name = doc.name;
+                    // Keep the source path current: drag payloads and the
+                    // Material Editor look the runtime definition up by it.
+                    existing.source = source;
+                    doc.applyTo(existing);
+                    loaded.push(existing);
+                }
             } catch (e:Dynamic) {}
         }
         Material.setProjectMaterials(loaded);
@@ -501,9 +516,20 @@ class ProjectSession {
 
     function materialFolder(folder:String):String {
         var trimmed = StringTools.trim(folder).split("\\").join("/");
-        var normalized = trimmed.length == 0 ? MATERIAL_FOLDER
-            : ProjectPath.normalizeRelative(trimmed);
-        return isUntitled() ? UNTITLED_FOLDER + "/" + normalized : normalized;
+        if (trimmed.length == 0) return MATERIAL_FOLDER;
+        var normalized = ProjectPath.normalizeRelative(trimmed);
+        // Never write user assets into Engine/. Everything else is honored as
+        // given (a bare name is interpreted relative to the Content root).
+        if (isEngineFolderPath(normalized)) return MATERIAL_FOLDER;
+        if (normalized != "Content" && !StringTools.startsWith(normalized, "Content/")) {
+            normalized = "Content/" + normalized;
+        }
+        return normalized;
+    }
+
+    static function isEngineFolderPath(folder:String):Bool {
+        var lower = folder.toLowerCase();
+        return lower == "engine" || StringTools.startsWith(lower, "engine/");
     }
 
     public function loadMaterialDocument(source:String):MaterialDocument {
@@ -610,6 +636,12 @@ class ProjectSession {
         if (isRegisteredScene(normalized)) {
             renameScene(normalized, newName);
             return sceneSource;
+        }
+        // Material renames must update the document name and stable identity
+        // bookkeeping, not just move the file. Otherwise the catalog keeps the
+        // old name while the browser shows the new filename.
+        if (isMaterialPath(normalized)) {
+            return renameMaterial(normalized, newName);
         }
         var path = new Path(normalized);
         var base = sanitizeAssetName(newName, path.ext == null ? "" : path.ext);

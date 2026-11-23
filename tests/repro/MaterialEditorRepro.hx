@@ -29,7 +29,19 @@ class MaterialEditorRepro {
 
     static function testCodec():Void {
         var document = new MaterialDocument("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "Brick", 0xAA3300, "Content/Brick.png", 0.4, 32, "front", true);
+            "Brick", 0xAA3300, "Content/Brick.png", "front", true);
+        document.metallic = 0.75;
+        document.smoothness = 0.3;
+        document.smoothnessSource = boltspark.engine.Material.SMOOTHNESS_ALBEDO_ALPHA;
+        document.metallicTexture = "Content/Metal.png";
+        document.normalTexture = "Content/Normal.png";
+        document.roughnessTexture = "Content/Roughness.png";
+        document.occlusionTexture = "Content/AO.png";
+        document.emissionColor = 0x224466;
+        document.emissionIntensity = 2.5;
+        document.tilingX = 3;
+        document.tilingY = 4;
+        document.offsetX = 0.5;
         Reflect.setField(document.extraFields, "future", "kept");
         var json = MaterialCodec.encode(document);
         var decoded = MaterialCodec.decode(json);
@@ -37,12 +49,31 @@ class MaterialEditorRepro {
             "material identity round-trips");
         assertTrue(decoded.baseColor == 0xAA3300 && decoded.albedoTexture == "Content/Brick.png",
             "color and albedo reference round-trip");
-        assertTrue(decoded.specularAmount == 0.4 && decoded.specularPower == 32,
-            "specular values round-trip");
+        assertTrue(decoded.metallic == 0.75 && decoded.smoothness == 0.3,
+            "metallic/smoothness round-trip");
+        assertTrue(decoded.smoothnessSource == boltspark.engine.Material.SMOOTHNESS_ALBEDO_ALPHA
+            && decoded.metallicTexture == "Content/Metal.png"
+            && decoded.normalTexture == "Content/Normal.png"
+            && decoded.roughnessTexture == "Content/Roughness.png"
+            && decoded.occlusionTexture == "Content/AO.png",
+            "PBR texture slots and smoothness source round-trip");
+        assertTrue(decoded.emissionColor == 0x224466 && decoded.emissionIntensity == 2.5,
+            "emission color and intensity round-trip");
+        assertTrue(decoded.tilingX == 3 && decoded.tilingY == 4 && decoded.offsetX == 0.5,
+            "tiling/offset round-trip");
         assertTrue(decoded.culling == "front" && decoded.shadows,
             "culling and shadow flag round-trip");
         assertTrue(Reflect.field(decoded.extraFields, "future") == "kept",
             "unknown material fields are preserved");
+
+        // Legacy schema-1 documents migrate to neutral PBR values.
+        var legacy = StringTools.replace(json, '"version": 2', '"version": 1');
+        legacy = StringTools.replace(legacy, '"metallic": 0.75', '"specularAmount": 0.4');
+        var migrated = MaterialCodec.decode(legacy);
+        assertTrue(migrated.metallic == 0 && migrated.smoothness == 0.5,
+            "specular materials migrate to metallic/smoothness defaults");
+        assertTrue(Reflect.field(migrated.extraFields, "future") == "kept",
+            "migration preserves unknown fields");
 
         var path = Path.join([root, "Brick.boltmaterial"]);
         DocumentStore.saveMaterial(path, document);
@@ -51,7 +82,7 @@ class MaterialEditorRepro {
         assertTrue(sys.FileSystem.exists(path + ".bak") == false,
             "first material save has no backup");
 
-        var broken = StringTools.replace(json, '"version": 1', '"version": 99');
+        var broken = StringTools.replace(json, '"version": 2', '"version": 99');
         assertThrows(function() MaterialCodec.decode(broken),
             "unsupported material schema version is rejected");
     }
@@ -90,16 +121,46 @@ class MaterialEditorRepro {
             }
             assertTrue(found == 1, "browser scans the material document");
 
+            // Materials honor the folder the caller chooses; Engine is off
+            // limits and no folder means the Content root, never a preset
+            // subfolder.
+            var custom = session.newMaterial("Custom Folder", "Content/MyFolder");
+            assertTrue(custom == "Content/MyFolder/Custom Folder.boltmaterial",
+                'material honors the chosen content folder: ${custom}');
+            assertTrue(sys.FileSystem.exists(Path.join([scratch, custom])),
+                "folder-directed material was written to the chosen folder");
+            var root = session.newMaterial("Root Folder", "");
+            assertTrue(root == "Content/Root Folder.boltmaterial",
+                'material with no folder uses the Content root: ${root}');
+            var engine = session.newMaterial("No Engine", "Engine/Materials");
+            assertTrue(StringTools.startsWith(engine, "Content/"),
+                'user material never lands under Engine: ${engine}');
+
             var renamed = session.renameMaterial(source, "Stone");
             assertTrue(session.loadMaterialDocument(renamed).name == "Stone",
                 "renamed material keeps its document");
+            assertTrue(Material.find(doc.id).name == "Stone",
+                "renamed material updates the live catalog name in place");
+
+            // Browser inline rename goes through renameAnyAsset, not the
+            // material-specific path; it must update the document too.
+            var browserRenamed = session.renameAnyAsset(renamed, "Metal");
+            assertTrue(browserRenamed.indexOf("Metal") >= 0,
+                "inline material rename changes the asset path");
+            assertTrue(session.loadMaterialDocument(browserRenamed).name == "Metal",
+                "inline rename updates the material document name");
+            assertTrue(Material.find(doc.id).name == "Metal",
+                "inline rename updates the live material name");
+            assertTrue(Material.find(doc.id).source == browserRenamed
+                && Material.findBySource(browserRenamed) != null,
+                "inline rename keeps the runtime source lookup current for drag payloads");
             assertTrue(!sys.FileSystem.exists(Path.join([scratch, source])),
                 "old material file is removed on rename");
 
-            session.deleteMaterial(renamed);
-            assertTrue(!sys.FileSystem.exists(Path.join([scratch, renamed])),
+            session.deleteMaterial(browserRenamed);
+            assertTrue(!sys.FileSystem.exists(Path.join([scratch, browserRenamed])),
                 "deleted material file is removed");
-            assertTrue(Material.findBySource(renamed) == null,
+            assertTrue(Material.findBySource(browserRenamed) == null,
                 "deleted material leaves the runtime catalog");
             success = true;
         }

@@ -19,6 +19,10 @@ $expectedSceneThumbSha256 = 'BA235FB9EDC6BEF12847DAF7F3CA1926C451170265EBE1AC722
 # atlas glyph would have to be upscaled and look blurry.
 $folderThumbPath = Join-Path $repoRoot 'src\res\icons\folder_thumb.png'
 $expectedFolderThumbSha256 = '4BC891ECED4A5B17AA991C3CC82A6D1FF72D6D775534CAE4BEAB515013AB2A3A'
+# Authored materials have no baked sphere preview; a crisp 64px Tabler box
+# keeps their asset-browser tiles consistent with scene/folder thumbnails.
+$materialThumbPath = Join-Path $repoRoot 'src\res\icons\material_thumb.png'
+$expectedMaterialThumbSha256 = '33F4469ADE7AB324B141B3AB498FEDDA806BCA91DC863A036785C308A3738974'
 
 # Columns deliberately match UiIconKind's integer values. Column zero is the
 # transparent `None` entry. Every other entry comes from the official Tabler
@@ -302,4 +306,69 @@ if ($actualFolderThumbSha256 -ne $expectedFolderThumbSha256) {
     throw "Generated folder thumbnail hash mismatch: expected $expectedFolderThumbSha256, got $actualFolderThumbSha256."
 }
 Move-Item -LiteralPath $folderTemporaryOutput -Destination $folderThumbPath -Force
-Write-Host "Generated $outputPath, $sceneThumbPath, and $folderThumbPath from Tabler Icons v$version." -ForegroundColor Green
+# Dedicated 64px material thumbnail from Tabler `outline/box`.
+$materialSourcePath = Join-Path $sourceRoot 'outline-box.png'
+if ($Refresh -or -not (Test-Path $materialSourcePath)) {
+    $materialMirrors = @(
+        "https://cdn.jsdelivr.net/npm/@tabler/icons-png@$version/icons/outline/box.png",
+        "https://unpkg.com/@tabler/icons-png@$version/icons/outline/box.png"
+    )
+    $materialDownloaded = $false
+    foreach ($uri in $materialMirrors) {
+        try {
+            Invoke-WebRequest -Uri $uri -OutFile $materialSourcePath -TimeoutSec 30
+            $materialDownloaded = $true
+            break
+        } catch {
+            Write-Host "[tabler] Mirror failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            if (Test-Path $materialSourcePath) { Remove-Item -LiteralPath $materialSourcePath -Force }
+        }
+    }
+    if (-not $materialDownloaded) {
+        throw "Could not download Tabler source outline/box."
+    }
+}
+$materialThumbSize = 64
+$materialThumb = New-Object System.Drawing.Bitmap(
+    $materialThumbSize, $materialThumbSize, $pixelFormat)
+$materialGraphics = [System.Drawing.Graphics]::FromImage($materialThumb)
+try {
+    $materialGraphics.Clear([System.Drawing.Color]::Transparent)
+    $materialGraphics.InterpolationMode =
+        [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $materialGraphics.PixelOffsetMode =
+        [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $materialSource = [System.Drawing.Image]::FromFile($materialSourcePath)
+    try {
+        if ($materialSource.Width -ne 240 -or $materialSource.Height -ne 240) {
+            throw "Unexpected Tabler source dimensions for outline-box.png: $($materialSource.Width)x$($materialSource.Height)."
+        }
+        $materialGraphics.DrawImage($materialSource,
+            (New-Object System.Drawing.Rectangle(0, 0, $materialThumbSize, $materialThumbSize)),
+            (New-Object System.Drawing.Rectangle(0, 0, $materialSource.Width, $materialSource.Height)),
+            [System.Drawing.GraphicsUnit]::Pixel)
+    }
+    finally { $materialSource.Dispose() }
+}
+finally { $materialGraphics.Dispose() }
+for ($y = 0; $y -lt $materialThumbSize; $y++) {
+    for ($x = 0; $x -lt $materialThumbSize; $x++) {
+        $pixel = $materialThumb.GetPixel($x, $y)
+        if ($pixel.A -ne 0) {
+            $materialThumb.SetPixel($x, $y,
+                [System.Drawing.Color]::FromArgb($pixel.A, 255, 255, 255))
+        }
+    }
+}
+$materialTemporaryOutput = "$materialThumbPath.tmp"
+try {
+    $materialThumb.Save($materialTemporaryOutput, [System.Drawing.Imaging.ImageFormat]::Png)
+}
+finally { $materialThumb.Dispose() }
+$actualMaterialThumbSha256 = (Get-FileHash $materialTemporaryOutput -Algorithm SHA256).Hash
+if ($actualMaterialThumbSha256 -ne $expectedMaterialThumbSha256) {
+    Remove-Item -LiteralPath $materialTemporaryOutput -Force
+    throw "Generated material thumbnail hash mismatch: expected $expectedMaterialThumbSha256, got $actualMaterialThumbSha256."
+}
+Move-Item -LiteralPath $materialTemporaryOutput -Destination $materialThumbPath -Force
+Write-Host "Generated $outputPath, $sceneThumbPath, $folderThumbPath, and $materialThumbPath from Tabler Icons v$version." -ForegroundColor Green

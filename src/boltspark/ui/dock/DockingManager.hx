@@ -214,6 +214,12 @@ class DockingManager {
             || anyFloatContains(id, key);
     }
 
+    /** Main-editor tab for an id, or null when it is closed or only floating.
+     *  Useful when opening a panel relative to an existing dock location. */
+    public function mainTab(id:String):Null<TabNode> {
+        return root == null ? null : root.findTab(id);
+    }
+
     public function focus(id:String, ?key:String):Bool {
         var tab = findTab(id, key);
         if (tab == null) return false;
@@ -744,7 +750,10 @@ class DockingManager {
 
     public function bindHostId(id:String, host:h2d.Object):Void {
         hostById.set(id, host);
-        var view = registry.peek(id);
+        // create() (not peek()) is required for panels that start closed:
+        // without a live view the visibility pass never hides the host, so a
+        // closed Material Editor would draw its chrome at the window origin.
+        var view = registry.create(id);
         if (view != null) bindHost(view, host);
     }
 
